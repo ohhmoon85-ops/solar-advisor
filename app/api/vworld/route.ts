@@ -14,21 +14,29 @@ export async function GET(req: NextRequest) {
 
   try {
     if (type === 'coord') {
-      // 주소 → 좌표 변환 (지번주소 우선)
+      // 주소 → 좌표 변환: 지번주소 먼저 시도 → 실패 시 도로명주소 재시도
       const address = searchParams.get('address') ?? ''
-      const url =
+      const base =
         `https://api.vworld.kr/req/address` +
         `?service=address&request=getcoord&version=2.0` +
         `&crs=epsg:4326&address=${encodeURIComponent(address)}` +
-        `&refine=true&simple=false&format=json&type=parcel&key=${apiKey}`
-      const res = await fetch(url, { cache: 'no-store' })
-      const data = await res.json()
-      return NextResponse.json(data)
+        `&refine=true&simple=false&format=json&key=${apiKey}`
+
+      // 1차: 지번주소(parcel)
+      const parcelRes = await fetch(base + '&type=parcel', { cache: 'no-store' })
+      const parcelData = await parcelRes.json()
+      if (parcelData?.response?.result?.point) {
+        return NextResponse.json(parcelData)
+      }
+
+      // 2차: 도로명주소(road)
+      const roadRes = await fetch(base + '&type=road', { cache: 'no-store' })
+      const roadData = await roadRes.json()
+      return NextResponse.json(roadData)
     }
 
     if (type === 'tile') {
       // VWorld WMTS 위성사진 타일 프록시 (CORS 우회)
-      // URL 형식: /req/wmts/1.0.0/{key}/Satellite/{z}/{y}/{x}.jpeg
       const z = searchParams.get('z')
       const x = searchParams.get('x')
       const y = searchParams.get('y')
