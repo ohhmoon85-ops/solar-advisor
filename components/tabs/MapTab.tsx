@@ -12,7 +12,7 @@ const SPACING_OPTIONS = [
   { label: '2단 2.3m', value: 2.3 },
 ]
 
-const INSTALL_TYPES = ['건물지붕형', '일반토지형', '영농형농지', '임야형'] as const
+const INSTALL_TYPES = ['건물지붕형', '일반토지형', '영농형농지', '임야형', '수상형'] as const
 
 const LOAD_LIMITS: Record<StructureType, number | null> = {
   '철골구조': null,
@@ -417,6 +417,13 @@ export default function MapTab() {
       moduleIndex, tiltAngle, spacingValue, slopePercent, installType, structureType,
       calcPanelsFromPolygon])
 
+  // KIER 실측 발전시간 도착 시 연간발전량(annualKwh) 갱신 (STEP 5 결과카드)
+  useEffect(() => {
+    if (capacityKwp === 0) return
+    const genHours = kierResult?.pvHours ?? GENERATION_HOURS
+    setAnnualKwh(Math.round(capacityKwp * genHours * 365))
+  }, [capacityKwp, kierResult])
+
   // ── KIER API ──
   const fetchKierData = useCallback(async (lat: number, lon: number, tilt: number) => {
     setKierLoading(true)
@@ -564,27 +571,91 @@ export default function MapTab() {
   }
 
   const handleSavePDF = async () => {
+    const srcCanvas = canvasRef.current
+    if (!srcCanvas) return
     const { jsPDF } = await import('jspdf')
-    const canvas = canvasRef.current; if (!canvas) return
-    const pdf = new jsPDF('p', 'mm', 'a4')
-    const imgData = canvas.toDataURL('image/png')
-    pdf.setFontSize(16); pdf.text('태양광 패널 배치도', 20, 18)
-    pdf.setFontSize(10)
-    const lines = [
-      `지번: ${address || '-'}${parcelLabel ? '  (' + parcelLabel + ')' : ''}`,
-      `부지면적: ${area.toFixed(2)} m²  (${apiSource === 'api' ? 'VWorld 자동' : '수동 측정'})`,
-      `설치유형: ${installType}`,
-      `모듈: ${MODULES[moduleIndex].name} (${MODULES[moduleIndex].watt}W)`,
-      `경사각: ${tiltAngle}°  경사도: ${slopePercent}%  이격거리: ${spacingValue}m`,
-      `패널수: ${panelCount}장`,
-      `설비용량: ${capacityKwp} kWp`,
-      `연간발전량: ${annualKwh.toLocaleString()} kWh`,
-      ...(kierResult ? [`KIER 실측 발전시간: ${kierResult.pvHours}h/일  GHI: ${kierResult.ghi.toFixed(0)} kWh/m²/년`] : []),
+    const { default: html2canvas } = await import('html2canvas')
+
+    // 오프스크린 DIV 생성 (한글 텍스트 html2canvas 캡처 → PDF 한글 깨짐 방지)
+    const div = document.createElement('div')
+    div.style.cssText = [
+      'position:fixed;left:-9999px;top:0;',
+      'background:white;padding:20px;',
+      'width:794px;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;',
+      'color:#1a1a1a;line-height:1.4;',
+    ].join('')
+
+    const rows: [string, string][] = [
+      ['지번', `${address || '-'}${parcelLabel ? ' (' + parcelLabel + ')' : ''}`],
+      ['출처', apiSource === 'api' ? 'VWorld 필지 자동 경계' : '수동 측정'],
+      ['부지면적', `${area.toFixed(2)} m²`],
+      ['설치유형', installType],
+      ['모듈', `${MODULES[moduleIndex].name} (${MODULES[moduleIndex].watt}W)`],
+      ['경사각', `${tiltAngle}°`],
+      ['이격거리', `${spacingValue}m`],
+      ['경사도', `${slopePercent}% (면적보정 ×${(Math.cos(Math.atan(slopePercent / 100)) * 100).toFixed(1)}%)`],
+      ['패널 수량', `${panelCount}장`],
+      ['설비 용량', `${capacityKwp} kWp`],
+      ['연간 발전량', `${annualKwh.toLocaleString()} kWh`],
+      ...(kierResult ? [['KIER 실측 발전시간', `${kierResult.pvHours}h/일  ·  GHI ${kierResult.ghi.toFixed(0)} kWh/m²/년`] as [string, string]] : []),
     ]
-    lines.forEach((l, i) => pdf.text(l, 20, 28 + i * 7))
-    const imgW = 170, imgH = (CANVAS_H / CANVAS_W) * imgW
-    pdf.addImage(imgData, 'PNG', 20, 28 + lines.length * 7 + 4, imgW, imgH)
-    pdf.save(`solar-layout-${address || 'site'}.pdf`)
+
+    const boldKeys = new Set(['패널 수량', '설비 용량', '연간 발전량'])
+    div.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;border-bottom:2px solid #3b82f6;padding-bottom:10px">
+        <span style="font-size:22px">☀</span>
+        <div>
+          <div style="font-size:18px;font-weight:bold;color:#1e293b">태양광 패널 배치도</div>
+          <div style="font-size:11px;color:#64748b">SolarAdvisor v5.2 — 자동 생성</div>
+        </div>
+      </div>
+      <table style="border-collapse:collapse;width:100%;margin-bottom:14px;font-size:12px">
+        ${rows.map(([k, v], i) => `
+          <tr style="background:${i % 2 === 0 ? '#f8fafc' : 'white'}">
+            <td style="padding:5px 10px;color:#64748b;width:140px;border:1px solid #e2e8f0">${k}</td>
+            <td style="padding:5px 10px;font-weight:${boldKeys.has(k) ? 'bold' : 'normal'};color:${boldKeys.has(k) ? '#2563eb' : '#1e293b'};border:1px solid #e2e8f0">${v}</td>
+          </tr>
+        `).join('')}
+      </table>
+      <img src="${srcCanvas.toDataURL('image/png')}" style="width:100%;border:1px solid #e2e8f0;border-radius:6px" />
+      <div style="margin-top:10px;font-size:10px;color:#94a3b8;text-align:center">
+        생성: ${new Date().toLocaleDateString('ko-KR')} — SolarAdvisor v5.2 (SMP 110원/kWh · REC 건물 105,000원/MWh · 발전시간 3.5h)
+      </div>
+    `
+    document.body.appendChild(div)
+
+    try {
+      const captured = await html2canvas(div, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        logging: false,
+      })
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const margin = 8
+      const printW = pageW - margin * 2
+      const printH = (captured.height / captured.width) * printW
+
+      let yRemain = printH
+      let srcY = 0
+      while (yRemain > 0) {
+        const sliceH = Math.min(pageH - margin * 2, yRemain)
+        const slice = document.createElement('canvas')
+        slice.width = captured.width
+        slice.height = Math.round((sliceH / printW) * captured.width)
+        const ctx = slice.getContext('2d')!
+        ctx.drawImage(captured, 0, srcY, captured.width, slice.height, 0, 0, captured.width, slice.height)
+        pdf.addImage(slice.toDataURL('image/png'), 'PNG', margin, margin, printW, sliceH)
+        yRemain -= sliceH
+        srcY += slice.height
+        if (yRemain > 0) pdf.addPage()
+      }
+      pdf.save(`solar-layout-${address || 'site'}.pdf`)
+    } finally {
+      document.body.removeChild(div)
+    }
   }
 
   const step1Done = address.trim().length > 0
