@@ -62,9 +62,22 @@ export async function GET(req: NextRequest) {
     }
 
     const res = await fetch(url, { cache: 'no-store' })
+
+    // KIER API가 XML 오류 페이지를 반환하는 경우 처리 (serviceKey 오류 등)
+    const contentType = res.headers.get('content-type') ?? ''
+    if (!contentType.includes('json')) {
+      const text = await res.text()
+      // XML 오류에서 메시지 추출 시도
+      const msgMatch = text.match(/<returnAuthMsg[^>]*>([^<]+)<\/returnAuthMsg>/)
+        ?? text.match(/<errMsg[^>]*>([^<]+)<\/errMsg>/)
+      const msg = msgMatch ? msgMatch[1] : `HTTP ${res.status} — non-JSON response`
+      return NextResponse.json({ error: `KIER API error: ${msg}` }, { status: 502 })
+    }
+
     const data = await res.json()
     return NextResponse.json(data)
-  } catch {
-    return NextResponse.json({ error: 'KIER API request failed' }, { status: 500 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: `KIER API request failed: ${msg}` }, { status: 500 })
   }
 }
