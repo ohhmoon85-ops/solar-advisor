@@ -43,4 +43,6 @@ export const MODULES = [
   { name: '단결정 PERC 550W', watt: 550, w: 1.134, h: 2.278 },
   { name: 'TOPCon GS710W', watt: 710, w: 1.303, h: 2.384 },
   { name: '양면형 Bifacial 580W', watt: 580, w: 1.134, h: 2.278 },
+  { name: '박막형 400W', watt: 400, w: 1.200, h: 2.380 },
+  { name: 'BIPV 300W', watt: 300, w: 1.000, h: 2.000 },
 ]
