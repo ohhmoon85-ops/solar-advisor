@@ -24,8 +24,12 @@ export interface LoanResult {
   monthlyPayment: number // 원
 }
 
-export function calcAnnual(kW: number, type: InstallationType): Revenue {
-  const annualKwh = kW * GENERATION_HOURS * 365
+export function calcAnnual(
+  kW: number,
+  type: InstallationType,
+  genHours: number = GENERATION_HOURS  // KIER 실측값 또는 기본값 3.5h
+): Revenue {
+  const annualKwh = kW * genHours * 365
   const smpRevenue = annualKwh * SMP
   const recPrice = type === '건물지붕형' ? REC_PRICE.건물지붕형 : REC_PRICE.일반토지형
   const weight = REC_WEIGHT[type] ?? 1.0
@@ -50,7 +54,8 @@ export function calcYearlyTable(
   totalCost: number, // 만원
   loanRatio: number, // %
   loanRate: number, // %
-  loanYears: number
+  loanYears: number,
+  genHours: number = GENERATION_HOURS  // KIER 실측값 또는 기본값 3.5h
 ): YearlyData[] {
   const equity = totalCost * (1 - loanRatio / 100) // 자기자본 (만원)
   const loanAmount = totalCost * (loanRatio / 100) // 대출금 (만원)
@@ -61,7 +66,7 @@ export function calcYearlyTable(
 
   for (let year = 1; year <= 20; year++) {
     const degradationFactor = Math.pow(1 - DEGRADATION_RATE, year - 1)
-    const kwhThisYear = kW * GENERATION_HOURS * 365 * degradationFactor
+    const kwhThisYear = kW * genHours * 365 * degradationFactor
 
     const smpRev = kwhThisYear * SMP
     const recPrice = type === '건물지붕형' ? REC_PRICE.건물지붕형 : REC_PRICE.일반토지형

@@ -6,7 +6,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import { useSolarStore } from '@/store/useStore'
-import { INSTALLATION_TYPES } from '@/lib/constants'
+import { INSTALLATION_TYPES, GENERATION_HOURS } from '@/lib/constants'
 import { calcAnnual, calcYearlyTable, calcROI, findBreakevenYear } from '@/lib/calculations'
 import type { InstallationType } from '@/lib/constants'
 
@@ -29,9 +29,14 @@ export default function RevenueTab() {
     loanRatio, setLoanRatio,
     loanRate, setLoanRate,
     loanYears, setLoanYears,
+    kierPvHours, kierGhi,
   } = useSolarStore()
 
   const [activeView, setActiveView] = useState<'table' | 'chart' | 'compare'>('chart')
+  const [useKierData, setUseKierData] = useState(true) // KIER 실측값 사용 여부
+
+  // 실제 계산에 사용할 발전 시간 (KIER 실측 or 기본 3.5h)
+  const effectiveGenHours = useKierData && kierPvHours ? kierPvHours : GENERATION_HOURS
 
   // Auto-fill from mapResult
   useEffect(() => {
@@ -40,13 +45,16 @@ export default function RevenueTab() {
     }
   }, [mapResult, setCapacityKw])
 
-  const revenue = useMemo(() => calcAnnual(capacityKw, installationType), [capacityKw, installationType])
+  const revenue = useMemo(
+    () => calcAnnual(capacityKw, installationType, effectiveGenHours),
+    [capacityKw, installationType, effectiveGenHours]
+  )
 
   const equity = useMemo(() => totalCost * (1 - loanRatio / 100), [totalCost, loanRatio])
 
   const yearlyData = useMemo(
-    () => calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears),
-    [capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears]
+    () => calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours),
+    [capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours]
   )
 
   const breakevenYear = useMemo(() => findBreakevenYear(yearlyData), [yearlyData])
@@ -55,16 +63,16 @@ export default function RevenueTab() {
 
   // Compare bar chart data
   const compareData = useMemo(() => INSTALLATION_TYPES.map(type => {
-    const r = calcAnnual(capacityKw, type)
+    const r = calcAnnual(capacityKw, type, effectiveGenHours)
     return { name: type.replace('형', '').replace('농지', ''), total: Math.round(r.total / 10000) }
-  }), [capacityKw])
+  }), [capacityKw, effectiveGenHours])
 
   // Interest scenario table
   const scenarioData = useMemo(() =>
     INTEREST_SCENARIOS.map(s => {
-      const rows = calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, s.rate, loanYears)
+      const rows = calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, s.rate, loanYears, effectiveGenHours)
       return { label: s.label, rate: s.rate, breakeven: findBreakevenYear(rows) }
-    }), [capacityKw, installationType, totalCost, loanRatio, loanYears]
+    }), [capacityKw, installationType, totalCost, loanRatio, loanYears, effectiveGenHours]
   )
 
   return (
@@ -79,6 +87,36 @@ export default function RevenueTab() {
               <div className="text-xs text-blue-600 mt-1">
                 {mapResult.panelCount}장 · {mapResult.capacityKwp} kWp
               </div>
+            </div>
+          )}
+
+          {/* KIER 실측 일사량 배지 */}
+          {kierPvHours && (
+            <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <div className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                    ☀️ KIER 실측 일사량 연동
+                  </div>
+                  <div className="text-xs text-emerald-600 mt-0.5">
+                    발전량 {kierPvHours}h/일
+                    {kierGhi ? `  ·  GHI ${Math.round(kierGhi)} kWh/m²/년` : ''}
+                    {' '}(기준 3.5h 대비 {kierPvHours >= 3.5 ? '+' : ''}{((kierPvHours - 3.5) / 3.5 * 100).toFixed(1)}%)
+                  </div>
+                </div>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useKierData}
+                    onChange={e => setUseKierData(e.target.checked)}
+                    className="accent-emerald-500 w-4 h-4"
+                  />
+                  <span className="text-xs font-medium text-emerald-700">실측값 적용</span>
+                </label>
+              </div>
+              {!useKierData && (
+                <div className="mt-1.5 text-xs text-gray-400">기본값 3.5h/일로 계산 중</div>
+              )}
             </div>
           )}
 

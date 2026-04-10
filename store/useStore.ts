@@ -36,6 +36,14 @@ interface SolarStore {
   // Tab 5 → Tab 2 연동
   selectedPanelIndex: number | null
   setSelectedPanelIndex: (index: number | null) => void
+
+  // KIER 실측 일사량 데이터
+  kierPvHours: number | null   // pvPot / 365 (h/일), null = 기본값 3.5h 사용
+  setKierPvHours: (h: number | null) => void
+  kierGhi: number | null       // 수평면 전일사량 (kWh/m²/년)
+  setKierGhi: (ghi: number | null) => void
+  locationCoords: { lat: number; lon: number } | null
+  setLocationCoords: (c: { lat: number; lon: number } | null) => void
 }
 
 export const useSolarStore = create<SolarStore>((set) => ({
@@ -60,4 +68,11 @@ export const useSolarStore = create<SolarStore>((set) => ({
 
   selectedPanelIndex: null,
   setSelectedPanelIndex: (index) => set({ selectedPanelIndex: index }),
+
+  kierPvHours: null,
+  setKierPvHours: (h) => set({ kierPvHours: h }),
+  kierGhi: null,
+  setKierGhi: (ghi) => set({ kierGhi: ghi }),
+  locationCoords: null,
+  setLocationCoords: (c) => set({ locationCoords: c }),
 }))

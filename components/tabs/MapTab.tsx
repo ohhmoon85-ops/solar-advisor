@@ -98,7 +98,7 @@ function isPointInPolygon(px: number, py: number, polygon: Point[]): boolean {
 // Component
 // ──────────────────────────────────────────────────────────────────
 export default function MapTab() {
-  const { setMapResult, setActiveTab } = useSolarStore()
+  const { setMapResult, setActiveTab, setKierPvHours, setKierGhi, setLocationCoords } = useSolarStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // ── Input state ──
@@ -125,6 +125,17 @@ export default function MapTab() {
   const [searchError, setSearchError] = useState('')
   const [parcelLabel, setParcelLabel] = useState('')
   const [apiSource, setApiSource] = useState<'none' | 'api' | 'manual'>('none')
+
+  // 마지막 검색 좌표 (tiltAngle 변경 시 KIER 재조회용)
+  const [apiCoords, setApiCoords] = useState<{ lat: number; lon: number } | null>(null)
+
+  // KIER 실측 일사량 결과
+  const [kierLoading, setKierLoading] = useState(false)
+  const [kierResult, setKierResult] = useState<{
+    ghi: number        // 수평면 전일사량 kWh/m²/년
+    pvPot: number      // 경사면 발전량 kWh/kW/년
+    pvHours: number    // pvPot / 365 = 일일 발전시간
+  } | null>(null)
 
   // ── Result state ──
   const [panelRects, setPanelRects] = useState<PanelRect[]>([])
@@ -336,6 +347,14 @@ export default function MapTab() {
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
+  // tiltAngle 변경 시 KIER PV 재조회 (위치가 있을 때만)
+  useEffect(() => {
+    if (apiSource !== 'api' || !apiCoords) return
+    fetchKierData(apiCoords.lat, apiCoords.lon, tiltAngle)
+  // fetchKierData는 안정적인 callback이므로 deps에 포함
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tiltAngle])
+
   // Recalculate panels when polygon or params change
   useEffect(() => {
     if (!isComplete || points.length < 3) return
@@ -437,15 +456,53 @@ export default function MapTab() {
       setIsComplete(true)
       setDrawMode(false)
       setApiSource('api')
+      setLocationCoords({ lat, lon })
+      setApiCoords({ lat, lon })
 
       // Trigger panel calculation immediately
       calcPanelsFromPolygon(canvasPoints, areaSqm, scale)
+
+      // KIER 일사량 데이터 조회 (백그라운드)
+      fetchKierData(lat, lon, tiltAngle)
     } catch {
       setSearchError('API 요청 중 오류가 발생했습니다.')
     } finally {
       setSearchLoading(false)
     }
   }
+
+  // ── KIER 일사량 API 호출 ──
+  const fetchKierData = useCallback(async (lat: number, lon: number, tilt: number) => {
+    setKierLoading(true)
+    try {
+      const [ghiRes, pvRes] = await Promise.all([
+        fetch(`/api/kier?service=ghi&lat=${lat}&lon=${lon}`),
+        fetch(`/api/kier?service=pv&lat=${lat}&lon=${lon}&tilt=${tilt}&azimuth=0`),
+      ])
+
+      if (!ghiRes.ok || !pvRes.ok) return
+
+      const [ghiData, pvData] = await Promise.all([ghiRes.json(), pvRes.json()])
+
+      // KIER API 응답 파싱 (data.go.kr 표준 형식)
+      const ghiItem = ghiData?.response?.body?.items?.item
+      const pvItem  = pvData?.response?.body?.items?.item
+
+      const ghi   = parseFloat(ghiItem?.ghi   ?? ghiItem?.annGhi  ?? 0)
+      const pvPot = parseFloat(pvItem?.pvPot   ?? pvItem?.annPvPot ?? 0)
+
+      if (ghi > 0 && pvPot > 0) {
+        const pvHours = Math.round((pvPot / 365) * 100) / 100
+        setKierResult({ ghi, pvPot, pvHours })
+        setKierPvHours(pvHours)
+        setKierGhi(ghi)
+      }
+    } catch {
+      // KIER API 실패 시 기본값 유지
+    } finally {
+      setKierLoading(false)
+    }
+  }, [setKierPvHours, setKierGhi])
 
   // ── Manual canvas drawing ──
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -493,6 +550,11 @@ export default function MapTab() {
     setParcelLabel('')
     setSearchError('')
     setPixelScale(0.1)
+    setKierResult(null)
+    setApiCoords(null)
+    setKierPvHours(null)
+    setKierGhi(null)
+    setLocationCoords(null)
   }
 
   const handleSendToRevenue = () => {
@@ -787,6 +849,51 @@ export default function MapTab() {
               className="mt-3 w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold transition-colors">
               수익성 시뮬레이터로 연동 →
             </button>
+          </div>
+        )}
+
+        {/* KIER 실측 일사량 카드 */}
+        {(kierLoading || kierResult) && (
+          <div className={`rounded-xl border-2 p-4 ${kierResult ? 'bg-emerald-50 border-emerald-300' : 'bg-gray-50 border-gray-200'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-sm">☀️</span>
+              <h3 className="font-semibold text-sm text-gray-800">KIER 실측 일사량</h3>
+              {kierLoading && (
+                <svg className="animate-spin h-3.5 w-3.5 text-emerald-500 ml-auto" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              )}
+            </div>
+            {kierResult && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">수평면 전일사량 (GHI)</span>
+                  <span className="font-semibold text-gray-700">{kierResult.ghi.toFixed(0)} kWh/m²/년</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">경사면 발전량 ({tiltAngle}°)</span>
+                  <span className="font-semibold text-gray-700">{kierResult.pvPot.toFixed(0)} kWh/kW/년</span>
+                </div>
+                <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5 mt-1.5">
+                  <span className="text-gray-600 font-medium">실측 발전시간</span>
+                  <span className="font-bold text-emerald-700">{kierResult.pvHours}h/일</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">기준값 대비</span>
+                  <span className={`font-semibold ${kierResult.pvHours >= 3.5 ? 'text-emerald-600' : 'text-orange-500'}`}>
+                    {kierResult.pvHours >= 3.5 ? '+' : ''}{((kierResult.pvHours - 3.5) / 3.5 * 100).toFixed(1)}%
+                    {' '}(기준 3.5h)
+                  </span>
+                </div>
+                <div className="mt-2 bg-emerald-100 rounded-lg px-2 py-1 text-xs text-emerald-700 text-center font-medium">
+                  수익성 시뮬레이터에 실측값 자동 적용됩니다
+                </div>
+              </div>
+            )}
+            {kierLoading && !kierResult && (
+              <div className="text-xs text-gray-400">한국에너지기술연구원 데이터 조회 중...</div>
+            )}
           </div>
         )}
 
