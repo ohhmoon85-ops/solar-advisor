@@ -1,65 +1,191 @@
-import Image from "next/image";
+'use client'
+
+import dynamic from 'next/dynamic'
+import { useState } from 'react'
+import { useSolarStore } from '@/store/useStore'
+
+// Dynamic imports to avoid SSR issues with canvas/leaflet
+const MapTab = dynamic(() => import('@/components/tabs/MapTab'), { ssr: false })
+const RevenueTab = dynamic(() => import('@/components/tabs/RevenueTab'), { ssr: false })
+const OrdinanceTab = dynamic(() => import('@/components/tabs/OrdinanceTab'), { ssr: false })
+const PermitTab = dynamic(() => import('@/components/tabs/PermitTab'), { ssr: false })
+const PanelTab = dynamic(() => import('@/components/tabs/PanelTab'), { ssr: false })
+const ChecklistTab = dynamic(() => import('@/components/tabs/ChecklistTab'), { ssr: false })
+
+const TABS = [
+  { id: 'map', label: '이음지도', icon: '🗺️', shortLabel: '지도' },
+  { id: 'revenue', label: '수익성 시뮬레이터', icon: '📊', shortLabel: '수익성' },
+  { id: 'ordinance', label: '조례 비교', icon: '⚖️', shortLabel: '조례' },
+  { id: 'permit', label: '인허가 서류', icon: '📋', shortLabel: '인허가' },
+  { id: 'panel', label: '패널 사양', icon: '⚡', shortLabel: '패널' },
+  { id: 'checklist', label: '실무 체크리스트', icon: '✅', shortLabel: '체크' },
+]
 
 export default function Home() {
+  const { activeTab, setActiveTab } = useSolarStore()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const currentTab = TABS.find(t => t.id === activeTab) ?? TABS[0]
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
+        <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 py-3 flex items-center gap-3">
+          {/* Logo */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="w-9 h-9 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center text-xl shadow-sm">
+              ☀️
+            </div>
+            <div className="hidden sm:block">
+              <div className="font-bold text-gray-900 text-base leading-tight">SolarAdvisor</div>
+              <div className="text-xs text-gray-400 leading-tight">v5.2 태양광 사업성 분석</div>
+            </div>
+          </div>
+
+          {/* Desktop tab navigation */}
+          <nav className="hidden lg:flex flex-1 items-center gap-1 mx-2 xl:mx-4">
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                  activeTab === tab.id
+                    ? 'bg-blue-500 text-white shadow-sm'
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                }`}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </nav>
+
+          {/* Mobile: current tab name */}
+          <div className="lg:hidden flex-1 flex items-center gap-2">
+            <span className="font-semibold text-gray-800 text-sm">{currentTab.icon} {currentTab.label}</span>
+          </div>
+
+          {/* Right side */}
+          <div className="flex items-center gap-2 ml-auto flex-shrink-0">
+            <span className="hidden md:inline-flex text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium border border-green-200">
+              SMP 110원 확정
+            </span>
+            {/* Mobile menu button */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+              aria-label="메뉴"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              <div className={`w-5 h-0.5 bg-gray-600 transition-all mb-1 ${mobileMenuOpen ? 'rotate-45 translate-y-1.5' : ''}`} />
+              <div className={`w-5 h-0.5 bg-gray-600 transition-all mb-1 ${mobileMenuOpen ? 'opacity-0' : ''}`} />
+              <div className={`w-5 h-0.5 bg-gray-600 transition-all ${mobileMenuOpen ? '-rotate-45 -translate-y-1.5' : ''}`} />
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Mobile dropdown menu */}
+        {mobileMenuOpen && (
+          <div className="lg:hidden border-t border-gray-100 bg-white shadow-lg">
+            <div className="max-w-screen-2xl mx-auto px-3 py-2 grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+              {TABS.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false) }}
+                  className={`flex flex-col items-center gap-1 px-2 py-3 rounded-xl text-xs font-medium transition-colors ${
+                    activeTab === tab.id
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <span className="text-2xl">{tab.icon}</span>
+                  <span>{tab.shortLabel}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* Tablet sub-nav */}
+      <nav className="hidden sm:flex lg:hidden bg-white border-b border-gray-200 sticky top-[61px] z-30 overflow-x-auto">
+        <div className="max-w-screen-2xl mx-auto px-3 flex gap-1 py-1.5">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-blue-500 text-white'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <span>{tab.icon}</span>
+              <span className="hidden md:inline">{tab.label}</span>
+              <span className="md:hidden">{tab.shortLabel}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {/* Main content */}
+      <main className="flex-1 max-w-screen-2xl mx-auto w-full px-3 sm:px-4 py-4 pb-20 sm:pb-6">
+        {/* Demo guide */}
+        <div className="mb-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-3 text-white">
+          <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm">
+            <span className="font-bold flex-shrink-0">📍 5분 데모:</span>
+            {['① 지도→배치도', '② 수익성 계산', '③ 조례 확인', '④ 서류목록 PDF', '⑤ 계약 전환'].map((step, i) => (
+              <span key={i} className="flex items-center gap-1">
+                <span className="bg-white/20 px-2 py-0.5 rounded-full whitespace-nowrap">{step}</span>
+                {i < 4 && <span className="opacity-60 hidden sm:inline">→</span>}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Tab content */}
+        <div>
+          {activeTab === 'map' && <MapTab />}
+          {activeTab === 'revenue' && <RevenueTab />}
+          {activeTab === 'ordinance' && <OrdinanceTab />}
+          {activeTab === 'permit' && <PermitTab />}
+          {activeTab === 'panel' && <PanelTab />}
+          {activeTab === 'checklist' && <ChecklistTab />}
         </div>
       </main>
+
+      {/* Mobile bottom tab bar */}
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-lg safe-area-inset-bottom">
+        <div className="grid grid-cols-6 h-16">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                activeTab === tab.id
+                  ? 'text-blue-600 bg-blue-50'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <span className="text-lg leading-none">{tab.icon}</span>
+              <span className="text-[9px] leading-tight font-medium">{tab.shortLabel}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {/* Footer */}
+      <footer className="hidden sm:block bg-white border-t border-gray-100 py-3">
+        <div className="max-w-screen-2xl mx-auto px-4 flex items-center justify-between text-xs text-gray-400 flex-wrap gap-2">
+          <span>SolarAdvisor v5.2 © 2026 — 태양광 사업성 분석 플랫폼</span>
+          <div className="flex items-center gap-3">
+            <span>SMP 110원/kWh</span>
+            <span>REC건물 105,000원/MWh ×1.5</span>
+            <span>REC토지 70,000원/MWh</span>
+            <span>발전시간 3.5h/일</span>
+          </div>
+        </div>
+      </footer>
     </div>
-  );
+  )
 }
