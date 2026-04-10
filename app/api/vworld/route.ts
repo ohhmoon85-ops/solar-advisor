@@ -26,6 +26,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data)
     }
 
+    if (type === 'tile') {
+      // VWorld WMTS 위성사진 타일 프록시 (CORS 우회)
+      // URL 형식: /req/wmts/1.0.0/{key}/Satellite/{z}/{y}/{x}.jpeg
+      const z = searchParams.get('z')
+      const x = searchParams.get('x')
+      const y = searchParams.get('y')
+      if (!z || !x || !y) return NextResponse.json({ error: 'z,x,y required' }, { status: 400 })
+      const tileUrl = `https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Satellite/${z}/${y}/${x}.jpeg`
+      const tileRes = await fetch(tileUrl, { cache: 'no-store' })
+      if (!tileRes.ok) return new Response(null, { status: 404 })
+      const buf = await tileRes.arrayBuffer()
+      return new Response(buf, {
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'public, max-age=86400',
+        },
+      })
+    }
+
     if (type === 'parcel') {
       // 좌표 → 필지 경계 폴리곤 (LP_PA_CBND_BUBUN: 분부번 경계)
       const lon = searchParams.get('lon') ?? ''
