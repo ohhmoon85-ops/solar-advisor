@@ -42,45 +42,51 @@ export default function PermitTab() {
 
       // html2canvas로 화면 캡처 (한글 폰트 그대로 렌더링)
       const canvas = await html2canvas(el, {
-        scale: 2,           // 고해상도
+        scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
+        windowWidth: el.scrollWidth,
+        windowHeight: el.scrollHeight,
       })
 
-      const imgData = canvas.toDataURL('image/png')
       const pdf = new jsPDF('p', 'mm', 'a4')
-
       const pageW = pdf.internal.pageSize.getWidth()   // 210mm
       const pageH = pdf.internal.pageSize.getHeight()  // 297mm
       const margin = 8
       const printW = pageW - margin * 2
       const printH = (canvas.height / canvas.width) * printW
 
-      // 여러 페이지로 분할
+      // 여러 페이지로 분할 (부동소수점 오류 방지: 0.5mm 미만 잔여분은 무시)
       let yRemain = printH
       let srcY = 0
 
-      while (yRemain > 0) {
+      while (yRemain > 0.5) {
         const sliceH = Math.min(pageH - margin * 2, yRemain)
+        const slicePixH = Math.round((sliceH / printW) * canvas.width)
+        if (slicePixH <= 0) break  // 안전장치
+
         const sliceCanvas = document.createElement('canvas')
         sliceCanvas.width = canvas.width
-        sliceCanvas.height = (sliceH / printW) * canvas.width
+        sliceCanvas.height = slicePixH
         const ctx = sliceCanvas.getContext('2d')!
         ctx.drawImage(
           canvas,
           0, srcY,
-          canvas.width, sliceCanvas.height,
+          canvas.width, slicePixH,
           0, 0,
-          canvas.width, sliceCanvas.height
+          canvas.width, slicePixH
         )
         pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', margin, margin, printW, sliceH)
         yRemain -= sliceH
-        srcY += sliceCanvas.height
-        if (yRemain > 0) pdf.addPage()
+        srcY += slicePixH
+        if (yRemain > 0.5) pdf.addPage()
       }
 
       pdf.save('인허가_서류_체크리스트.pdf')
+    } catch (err) {
+      console.error('PDF 생성 실패:', err)
+      alert('PDF 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.')
     } finally {
       setPdfLoading(false)
     }
