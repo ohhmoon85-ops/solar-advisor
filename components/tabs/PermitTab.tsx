@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { PERMIT_STAGE1, PERMIT_STAGE2 } from '@/lib/staticData'
 
 type InstallFilter = 'all' | 'building' | 'land'
@@ -8,6 +8,8 @@ type InstallFilter = 'all' | 'building' | 'land'
 export default function PermitTab() {
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [filter, setFilter] = useState<InstallFilter>('all')
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const printRef = useRef<HTMLDivElement>(null)
 
   const allItems = [...PERMIT_STAGE1, ...PERMIT_STAGE2]
 
@@ -31,29 +33,57 @@ export default function PermitTab() {
   const toggle = (id: string) => setChecked(prev => ({ ...prev, [id]: !prev[id] }))
 
   const handleSavePDF = async () => {
-    const { jsPDF } = await import('jspdf')
-    const doc = new jsPDF()
-    doc.setFontSize(18)
-    doc.text('태양광 발전사업 인허가 서류 체크리스트', 14, 20)
-    doc.setFontSize(11)
-    doc.text('단계 1: 발전사업허가 신청', 14, 35)
-    let y = 45
-    PERMIT_STAGE1.forEach(item => {
-      const mark = checked[item.id] ? '[✓]' : '[ ]'
-      const text = `${mark} ${item.text.replace('★ ', '')}`
-      doc.text(text, 14, y, { maxWidth: 180 })
-      y += 8
-    })
-    y += 5
-    doc.text('단계 2: 개발행위·PPA·사용전검사·에너지공단 등록', 14, y)
-    y += 10
-    PERMIT_STAGE2.forEach(item => {
-      const mark = checked[item.id] ? '[✓]' : '[ ]'
-      const text = `${mark} ${item.text.replace('★ ', '')}`
-      doc.text(text, 14, y, { maxWidth: 180 })
-      y += 8
-    })
-    doc.save('permit-checklist.pdf')
+    const el = printRef.current
+    if (!el) return
+    setPdfLoading(true)
+    try {
+      const { jsPDF } = await import('jspdf')
+      const { default: html2canvas } = await import('html2canvas')
+
+      // html2canvas로 화면 캡처 (한글 폰트 그대로 렌더링)
+      const canvas = await html2canvas(el, {
+        scale: 2,           // 고해상도
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+      })
+
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF('p', 'mm', 'a4')
+
+      const pageW = pdf.internal.pageSize.getWidth()   // 210mm
+      const pageH = pdf.internal.pageSize.getHeight()  // 297mm
+      const margin = 8
+      const printW = pageW - margin * 2
+      const printH = (canvas.height / canvas.width) * printW
+
+      // 여러 페이지로 분할
+      let yRemain = printH
+      let srcY = 0
+
+      while (yRemain > 0) {
+        const sliceH = Math.min(pageH - margin * 2, yRemain)
+        const sliceCanvas = document.createElement('canvas')
+        sliceCanvas.width = canvas.width
+        sliceCanvas.height = (sliceH / printW) * canvas.width
+        const ctx = sliceCanvas.getContext('2d')!
+        ctx.drawImage(
+          canvas,
+          0, srcY,
+          canvas.width, sliceCanvas.height,
+          0, 0,
+          canvas.width, sliceCanvas.height
+        )
+        pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', margin, margin, printW, sliceH)
+        yRemain -= sliceH
+        srcY += sliceCanvas.height
+        if (yRemain > 0) pdf.addPage()
+      }
+
+      pdf.save('인허가_서류_체크리스트.pdf')
+    } finally {
+      setPdfLoading(false)
+    }
   }
 
   const ItemRow = ({ item }: { item: typeof PERMIT_STAGE1[0] }) => {
@@ -89,7 +119,7 @@ export default function PermitTab() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" ref={printRef}>
       {/* Warning banner */}
       {requiredUnchecked.length > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center gap-3">
@@ -126,10 +156,20 @@ export default function PermitTab() {
                 {f.label}
               </button>
             ))}
-            <button onClick={handleSavePDF}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600 transition-colors"
+            <button
+              onClick={handleSavePDF}
+              disabled={pdfLoading}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600 transition-colors disabled:opacity-60 flex items-center gap-1.5"
             >
-              PDF 다운로드
+              {pdfLoading ? (
+                <>
+                  <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  생성 중...
+                </>
+              ) : 'PDF 다운로드'}
             </button>
           </div>
         </div>
