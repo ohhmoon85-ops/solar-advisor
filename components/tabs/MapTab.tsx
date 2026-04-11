@@ -264,16 +264,14 @@ export default function MapTab() {
           try {
             const origin = tileOriginLonLat(tx, ty, z)
             const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
-            const res = await fetch(`/api/vworld?type=tile&z=${z}&x=${tx}&y=${ty}`)
-            if (!res.ok) return null
-            const blob = await res.blob()
-            const url = URL.createObjectURL(blob)
-            blobUrlsRef.current.push(url)
+            // ArcGIS World Imagery — CORS 허용, 브라우저 직접 로드 (프록시 불필요)
+            const tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`
             return await new Promise<SatTile | null>(resolve => {
               const img = new Image()
+              img.crossOrigin = 'anonymous'
               img.onload = () => resolve({ img, cx, cy, px: tilePx })
               img.onerror = () => resolve(null)
-              img.src = url
+              img.src = tileUrl
             })
           } catch { return null }
         })())
