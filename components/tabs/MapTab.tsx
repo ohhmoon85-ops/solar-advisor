@@ -116,51 +116,85 @@ function rdpSimplify(pts: Point[], epsilon: number): Point[] {
   return [first, last]
 }
 
-// ── vworld 스크린샷에서 주황 경계선 감지 → 외곽 폴리곤 추출 ──────
-function detectOrangeBoundary(
+// ── vworld 스크린샷 주황 경계선 감지 → 복수 폴리곤 (외곽 + 제외구역) ─
+function detectAllOrangeBoundaries(
   imageData: ImageData
-): { rawPts: Point[]; cx: number; cy: number } | null {
+): { rawPts: Point[]; cx: number; cy: number; pixelCount: number }[] {
   const { data, width, height } = imageData
-  // 주황색 조건: R↑ G↓↓ B↓ (vworld 기본 경계 색상 #FF6600 계열)
-  const orange: Point[] = []
+
+  // ① 주황 픽셀 마킹
+  const isOrange = new Uint8Array(width * height)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4
       const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3]
-      if (a > 100 && r > 170 && r > g * 1.35 && b < 110 && g < 175) {
-        orange.push({ x, y })
+      if (a > 100 && r > 170 && r > g * 1.35 && b < 110 && g < 175)
+        isOrange[y * width + x] = 1
+    }
+  }
+
+  // ② 팽창(dilation) 2px — 같은 경계의 픽셀을 하나의 컴포넌트로 묶음
+  const dilated = new Uint8Array(width * height)
+  const DR = 2
+  for (let y = DR; y < height - DR; y++) {
+    for (let x = DR; x < width - DR; x++) {
+      if (!isOrange[y * width + x]) continue
+      for (let dy = -DR; dy <= DR; dy++)
+        for (let dx = -DR; dx <= DR; dx++)
+          dilated[(y + dy) * width + (x + dx)] = 1
+    }
+  }
+
+  // ③ BFS로 연결 컴포넌트 추출 (4-연결)
+  const visited = new Uint8Array(width * height)
+  const components: number[][] = []
+  for (let i = 0; i < width * height; i++) {
+    if (!dilated[i] || visited[i]) continue
+    const comp: number[] = []
+    const stack = [i]
+    visited[i] = 1
+    while (stack.length) {
+      const cur = stack.pop()!
+      comp.push(cur)
+      for (const nb of [cur - 1, cur + 1, cur - width, cur + width]) {
+        if (nb >= 0 && nb < width * height && dilated[nb] && !visited[nb]) {
+          visited[nb] = 1; stack.push(nb)
+        }
       }
     }
+    if (comp.length > 30) components.push(comp)
   }
-  if (orange.length < 50) return null
+  if (components.length === 0) return []
 
-  // 중심 계산
-  const cx = orange.reduce((s, p) => s + p.x, 0) / orange.length
-  const cy = orange.reduce((s, p) => s + p.y, 0) / orange.length
-
-  // 각도 스윕: 360방향마다 가장 먼 주황 픽셀 탐색 → 외곽 포인트
-  const STEPS = 360
-  const maxR = Math.sqrt(width * width + height * height)
-  const rawPts: Point[] = []
-  for (let i = 0; i < STEPS; i++) {
-    const angle = (i / STEPS) * 2 * Math.PI
-    const cosA = Math.cos(angle), sinA = Math.sin(angle)
-    let last: Point | null = null
-    for (let r = 2; r < maxR; r += 0.8) {
-      const px = Math.round(cx + cosA * r)
-      const py = Math.round(cy + sinA * r)
-      if (px < 0 || px >= width || py < 0 || py >= height) break
-      const idx = (py * width + px) * 4
-      const R = data[idx], G = data[idx + 1], B = data[idx + 2], A = data[idx + 3]
-      if (A > 100 && R > 170 && R > G * 1.35 && B < 110 && G < 175) last = { x: px, y: py }
+  // ④ 각 컴포넌트에서 원본 주황 픽셀만 추려 각도 스윕 → RDP 폴리곤
+  const results = components.map(comp => {
+    const orangeInComp = comp.filter(idx => isOrange[idx])
+    if (orangeInComp.length < 20) return null
+    const pts = orangeInComp.map(idx => ({ x: idx % width, y: Math.floor(idx / width) }))
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length
+    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length
+    const STEPS = 360
+    const maxR = Math.sqrt(width * width + height * height)
+    const sweep: Point[] = []
+    for (let i = 0; i < STEPS; i++) {
+      const angle = (i / STEPS) * 2 * Math.PI
+      const cosA = Math.cos(angle), sinA = Math.sin(angle)
+      let last: Point | null = null
+      for (let r = 2; r < maxR; r += 0.8) {
+        const px = Math.round(cx + cosA * r), py = Math.round(cy + sinA * r)
+        if (px < 0 || px >= width || py < 0 || py >= height) break
+        if (isOrange[py * width + px]) last = { x: px, y: py }
+      }
+      if (last) sweep.push(last)
     }
-    if (last) rawPts.push(last)
-  }
-  if (rawPts.length < 20) return null
+    if (sweep.length < 10) return null
+    const rawPts = rdpSimplify([...sweep, sweep[0]], 3.5).slice(0, -1)
+    return { rawPts, cx, cy, pixelCount: orangeInComp.length }
+  }).filter(Boolean) as { rawPts: Point[]; cx: number; cy: number; pixelCount: number }[]
 
-  // RDP 단순화 (닫힌 루프)
-  const simplified = rdpSimplify([...rawPts, rawPts[0]], 3.5).slice(0, -1)
-  return { rawPts: simplified, cx, cy }
+  // 픽셀 수 내림차순 정렬 (첫 번째 = 외곽 경계, 나머지 = 제외구역)
+  results.sort((a, b) => b.pixelCount - a.pixelCount)
+  return results
 }
 
 // ── Ray-casting point-in-polygon ───────────────────────────────────
@@ -255,6 +289,8 @@ export default function MapTab() {
   const [screenshotError, setScreenshotError] = useState('')
   const [screenshotCentroid, setScreenshotCentroid] = useState<Point | null>(null)
   const [screenshotRawPts, setScreenshotRawPts] = useState<Point[] | null>(null)
+  const [screenshotRawHoles, setScreenshotRawHoles] = useState<{ rawPts: Point[]; cx: number; cy: number }[]>([])
+  const [holePolygons, setHolePolygons] = useState<Point[][]>([])
 
   // 이론 이격 거리
   const tiltRad = (tiltAngle * Math.PI) / 180
@@ -290,7 +326,9 @@ export default function MapTab() {
       const rects: PanelRect[] = []
       for (let y = minY + 4; y + panelPxH <= maxY - 4; y += rowPitch) {
         for (let x = minX + 4; x + panelPxW <= maxX - 4; x += panelPxW + 2) {
-          if (isPointInPolygon(x + panelPxW / 2, y + panelPxH / 2, pts))
+          const cx = x + panelPxW / 2, cy = y + panelPxH / 2
+          if (isPointInPolygon(cx, cy, pts) &&
+              !holePolygons.some(hole => isPointInPolygon(cx, cy, hole)))
             rects.push({ x, y, w: panelPxW, h: panelPxH })
         }
       }
@@ -313,7 +351,7 @@ export default function MapTab() {
       setCapacityKwp(Math.round(cap * 100) / 100)
       setAnnualKwh(Math.round(ann))
     },
-    [moduleIndex, installType, tiltAngle, spacingValue, slopePercent, structureType]
+    [moduleIndex, installType, tiltAngle, spacingValue, slopePercent, structureType, holePolygons]
   )
 
   // ── 위성 타일 로드 ──
@@ -430,6 +468,28 @@ export default function MapTab() {
     ctx.lineWidth = satTiles.length > 0 ? 2.5 : 2
     ctx.stroke()
 
+    // ❷-b 제외구역 (hole) — 빨간 점선
+    holePolygons.forEach(hole => {
+      if (hole.length < 3) return
+      ctx.beginPath()
+      ctx.moveTo(hole[0].x, hole[0].y)
+      hole.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
+      ctx.closePath()
+      ctx.fillStyle = 'rgba(239,68,68,0.12)'
+      ctx.fill()
+      ctx.setLineDash([5, 3])
+      ctx.strokeStyle = '#ef4444'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+      ctx.setLineDash([])
+      // 중심 레이블
+      const hcx = hole.reduce((s, p) => s + p.x, 0) / hole.length
+      const hcy = hole.reduce((s, p) => s + p.y, 0) / hole.length
+      ctx.fillStyle = 'rgba(239,68,68,0.85)'
+      ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'
+      ctx.fillText('제외', hcx, hcy + 4)
+    })
+
     // ❸ 패널 그리드
     panelRects.forEach((rect, i) => {
       ctx.fillStyle = 'rgba(59,130,246,0.70)'
@@ -500,7 +560,7 @@ export default function MapTab() {
     }
   }, [points, isComplete, area, panelRects, spacingValue, panelCount,
       pixelScale, apiSource, satTiles, satZoom,
-      screenshotImg, screenshotCentroid, screenshotZoom])
+      screenshotImg, screenshotCentroid, screenshotZoom, holePolygons])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -757,6 +817,7 @@ export default function MapTab() {
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
     // 스크린샷 초기화
     setScreenshotImg(null); setScreenshotCentroid(null); setScreenshotRawPts(null)
+    setScreenshotRawHoles([]); setHolePolygons([])
     setScreenshotError(''); setScreenshotAnalyzing(false)
   }
 
@@ -783,6 +844,14 @@ export default function MapTab() {
       sho += canvasPoints[i].x * canvasPoints[j].y - canvasPoints[j].x * canvasPoints[i].y
     }
     const areaSqm = Math.abs(sho / 2) * canvScale * canvScale
+    // hole 폴리곤도 같은 sf/centroid 기준으로 변환
+    const mappedHoles = screenshotRawHoles.map(h =>
+      h.rawPts.map(p => ({
+        x: CANVAS_W / 2 + (p.x - screenshotCentroid.x) * sf,
+        y: CANVAS_H / 2 + (p.y - screenshotCentroid.y) * sf,
+      }))
+    )
+    setHolePolygons(mappedHoles)
     setPixelScale(canvScale)
     setPoints(canvasPoints)
     setArea(areaSqm)
@@ -790,7 +859,7 @@ export default function MapTab() {
     setDrawMode(false)
     setApiSource('manual')
     calcPanelsFromPolygon(canvasPoints, areaSqm, canvScale)
-  }, [screenshotRawPts, screenshotCentroid, screenshotZoom, calcPanelsFromPolygon])
+  }, [screenshotRawPts, screenshotCentroid, screenshotZoom, screenshotRawHoles, calcPanelsFromPolygon])
 
   // ── vworld 스크린샷 분석 ──────────────────────────────────────────
   const analyzeScreenshot = useCallback((img: HTMLImageElement) => {
@@ -804,14 +873,16 @@ export default function MapTab() {
     if (!offCtx) { setScreenshotAnalyzing(false); return }
     offCtx.drawImage(img, 0, 0)
     const imgData = offCtx.getImageData(0, 0, off.width, off.height)
-    const result = detectOrangeBoundary(imgData)
+    const results = detectAllOrangeBoundaries(imgData)
     setScreenshotAnalyzing(false)
-    if (!result) {
+    if (!results.length) {
       setScreenshotError('주황색 경계선을 감지하지 못했습니다. vworld에서 주황색 경계가 그려진 화면을 스크린샷 해주세요.')
       return
     }
-    setScreenshotCentroid({ x: result.cx, y: result.cy })
-    setScreenshotRawPts(result.rawPts) // useEffect가 자동으로 Canvas 좌표 계산
+    // 첫 번째 = 외곽 경계, 나머지 = 제외구역
+    setScreenshotCentroid({ x: results[0].cx, y: results[0].cy })
+    setScreenshotRawPts(results[0].rawPts)
+    setScreenshotRawHoles(results.slice(1).map(r => ({ rawPts: r.rawPts, cx: r.cx, cy: r.cy })))
   }, [])
 
   // ── 파일 드롭 / 선택 핸들러 ──────────────────────────────────────
