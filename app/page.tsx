@@ -14,7 +14,7 @@ const ChecklistTab = dynamic(() => import('@/components/tabs/ChecklistTab'), { s
 const UnitPriceTab = dynamic(() => import('@/components/tabs/UnitPriceTab'), { ssr: false })
 
 const TABS = [
-  { id: 'map', label: '이음지도', icon: '🗺️', shortLabel: '지도' },
+  { id: 'map', label: '지도·배치도', icon: '🗺️', shortLabel: '지도' },
   { id: 'revenue', label: '수익성 시뮬레이터', icon: '📊', shortLabel: '수익성' },
   { id: 'ordinance', label: '조례 비교', icon: '⚖️', shortLabel: '조례' },
   { id: 'permit', label: '인허가 서류', icon: '📋', shortLabel: '인허가' },
