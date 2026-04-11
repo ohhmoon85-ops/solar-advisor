@@ -104,11 +104,15 @@ export default function PermitTab() {
     }
   }
 
-  type PermitItem = typeof PERMIT_STAGE1[0] & { formUrl?: string; formNote?: string }
+  type PermitItem = typeof PERMIT_STAGE1[0] & {
+    formUrl?: string; formNote?: string; formDownload?: string
+  }
 
   const ItemRow = ({ item }: { item: PermitItem }) => {
     const isChecked = checked[item.id] ?? false
     const isRequired = item.required
+    // 내부 경로(/forms/...)면 파일 존재 여부와 무관하게 버튼 표시
+    const isInternal = item.formUrl?.startsWith('/forms/')
     return (
       <div className={`rounded-lg border transition-colors ${
         isChecked ? 'bg-green-50 border-green-200'
@@ -130,22 +134,41 @@ export default function PermitTab() {
             <span className="flex-shrink-0 text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-semibold">필수</span>
           )}
         </div>
-        {(item.formUrl || item.formNote) && (
+        {(item.formUrl || item.formNote || item.formDownload) && (
           <div className="px-3 pb-2.5 flex items-start gap-2 border-t border-gray-100 pt-2">
             {item.formNote && (
               <span className="text-xs text-gray-500 flex-1">{item.formNote}</span>
             )}
-            {item.formUrl && (
-              <a
-                href={item.formUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={e => e.stopPropagation()}
-                className="flex-shrink-0 flex items-center gap-1 text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 transition-colors"
-              >
-                <span>↗</span> 서식/신청
-              </a>
-            )}
+            <div className="flex-shrink-0 flex gap-1.5">
+              {/* 내부 저장 서식 — 직접 열기 */}
+              {item.formUrl && (
+                <a
+                  href={item.formUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
+                    isInternal
+                      ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'
+                      : 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                  }`}
+                >
+                  {isInternal ? '📄 서식 열기' : '↗ 신청'}
+                </a>
+              )}
+              {/* 외부 다운로드 링크 — 서식 저장 안내용 */}
+              {item.formDownload && (
+                <a
+                  href={item.formDownload}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  className="flex items-center gap-1 text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-1 rounded hover:bg-orange-100 transition-colors"
+                >
+                  ↓ 서식 다운로드
+                </a>
+              )}
+            </div>
           </div>
         )}
       </div>
