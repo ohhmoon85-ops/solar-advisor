@@ -97,7 +97,7 @@ export default function OrdinanceTab() {
       const json = await res.json()
       if (res.ok) {
         setKvStatus('ok')
-        setSaveMsg('KV 백엔드에 저장 완료! 모든 사용자에게 즉시 반영됩니다. (staticData.ts 영구 반영은 아래 코드 사용)')
+        setSaveMsg('저장 완료! 모든 사용자에게 즉시 반영됩니다.')
       } else if (json.code === 'KV_NOT_CONFIGURED') {
         setKvStatus('no-kv')
         // KV 미설정: localStorage 폴백
@@ -347,7 +347,7 @@ export default function OrdinanceTab() {
           <div className="flex gap-2">
             <button onClick={handleSave}
               className="px-4 py-2 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition-colors">
-              저장 (브라우저 임시 저장)
+              {kvStatus === 'no-kv' ? '저장 (브라우저 임시 저장)' : '저장'}
             </button>
             <button onClick={() => setEditing(false)}
               className="px-4 py-2 bg-white border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition-colors">
@@ -355,7 +355,9 @@ export default function OrdinanceTab() {
             </button>
           </div>
           <p className="text-xs text-gray-400 mt-2">
-            * 저장 시 이 브라우저에만 반영됩니다. 영구 반영은 저장 후 표시되는 코드를 staticData.ts에 붙여넣고 git push하세요.
+            {kvStatus === 'no-kv'
+              ? '* Vercel KV 미설정 — 이 브라우저에만 임시 저장됩니다.'
+              : '* 저장 즉시 서버에 반영되어 모든 사용자에게 적용됩니다.'}
           </p>
         </div>
       )}
