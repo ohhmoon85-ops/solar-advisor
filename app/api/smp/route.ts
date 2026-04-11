@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     const contentType = res.headers.get('content-type') ?? ''
     if (!contentType.includes('json')) {
       const text = await res.text()
-      const msgMatch = text.match(/<returnAuthMsg[^>]*>([^<]+)</returnAuthMsg>/)
+      const msgMatch = text.match(/<returnAuthMsg[^>]*>([^<]+)<\/returnAuthMsg>/)
       const msg = msgMatch ? msgMatch[1] : 'non-JSON (API 키 오류 또는 미승인)'
       return NextResponse.json({ error: msg, fallback: true }, { status: 502 })
     }
