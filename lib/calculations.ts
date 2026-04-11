@@ -62,20 +62,33 @@ export function calcLoan(principal: number, rate: number, years: number): LoanRe
 export function calcYearlyTable(
   kW: number,
   type: InstallationType,
-  totalCost: number, // 만원
-  loanRatio: number, // %
-  loanRate: number, // %
+  totalCost: number,          // 만원
+  loanRatio: number,          // 총 대출 비율 (%)
+  loanRate: number,           // 일반(시중) 대출 금리 (%)
   loanYears: number,
   genHours: number = GENERATION_HOURS,
-  prices: PriceParams = {}
+  prices: PriceParams = {},
+  policyLoanRatio: number = 0, // 정책금융 비율 (%, ≤ loanRatio)
+  policyLoanRate: number = 0   // 정책금리 (%)
 ): YearlyData[] {
   const smpPrice = prices.smp ?? SMP
   const recPriceBuilding = prices.recBuilding ?? REC_PRICE.건물지붕형
   const recPriceLand = prices.recLand ?? REC_PRICE.일반토지형
 
+  const clampedPolicyRatio = Math.min(policyLoanRatio, loanRatio)
+  const commercialRatio = loanRatio - clampedPolicyRatio
+
   const equity = totalCost * (1 - loanRatio / 100)
-  const loanAmount = totalCost * (loanRatio / 100)
-  const { annualPayment } = calcLoan(loanAmount * 10000, loanRate, loanYears)
+  const policyAmount = totalCost * (clampedPolicyRatio / 100)   // 만원
+  const commercialAmount = totalCost * (commercialRatio / 100)  // 만원
+
+  const policyPayment = policyAmount > 0
+    ? calcLoan(policyAmount * 10000, policyLoanRate, loanYears).annualPayment
+    : 0
+  const commercialPayment = commercialAmount > 0
+    ? calcLoan(commercialAmount * 10000, loanRate, loanYears).annualPayment
+    : 0
+  const annualPayment = policyPayment + commercialPayment
 
   const rows: YearlyData[] = []
   let cumulative = -equity

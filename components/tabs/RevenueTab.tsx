@@ -27,6 +27,8 @@ export default function RevenueTab() {
     installationType, setInstallationType,
     totalCost, setTotalCost,
     loanRatio, setLoanRatio,
+    policyLoanRatio, setPolicyLoanRatio,
+    policyLoanRate, setPolicyLoanRate,
     loanRate, setLoanRate,
     loanYears, setLoanYears,
     kierPvHours, kierGhi,
@@ -54,8 +56,8 @@ export default function RevenueTab() {
   const equity = useMemo(() => totalCost * (1 - loanRatio / 100), [totalCost, loanRatio])
 
   const yearlyData = useMemo(
-    () => calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours, priceOverride),
-    [capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours, priceOverride]
+    () => calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate),
+    [capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate]
   )
 
   const breakevenYear = useMemo(() => findBreakevenYear(yearlyData), [yearlyData])
@@ -68,12 +70,12 @@ export default function RevenueTab() {
     return { name: type.replace('형', '').replace('농지', ''), total: Math.round(r.total / 10000) }
   }), [capacityKw, effectiveGenHours])
 
-  // Interest scenario table
+  // Interest scenario table (일반 대출금리만 변동, 정책금리는 고정)
   const scenarioData = useMemo(() =>
     INTEREST_SCENARIOS.map(s => {
-      const rows = calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, s.rate, loanYears, effectiveGenHours, priceOverride)
+      const rows = calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, s.rate, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate)
       return { label: s.label, rate: s.rate, breakeven: findBreakevenYear(rows) }
-    }), [capacityKw, installationType, totalCost, loanRatio, loanYears, effectiveGenHours, priceOverride]
+    }), [capacityKw, installationType, totalCost, loanRatio, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate]
   )
 
   return (
@@ -157,25 +159,83 @@ export default function RevenueTab() {
 
             <div>
               <label className="text-sm font-medium text-gray-700 block mb-1">
-                대출 비율: <span className="text-blue-600 font-bold">{loanRatio}%</span>
+                총 대출 비율: <span className="text-blue-600 font-bold">{loanRatio}%</span>
               </label>
               <input type="range" min={0} max={90} step={5} value={loanRatio}
-                onChange={e => setLoanRatio(Number(e.target.value))}
+                onChange={e => {
+                  const v = Number(e.target.value)
+                  setLoanRatio(v)
+                  if (policyLoanRatio > v) setPolicyLoanRatio(v)
+                }}
                 className="w-full accent-blue-500"
               />
               <div className="text-xs text-gray-500 mt-1">
-                자기자본: {fmt(equity)}만원 · 대출금: {fmt(totalCost * loanRatio / 100)}만원
+                자기자본: {fmt(equity)}만원 · 총 대출금: {fmt(totalCost * loanRatio / 100)}만원
               </div>
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">
-                대출 금리: <span className="text-blue-600 font-bold">{loanRate}%</span>
-              </label>
-              <input type="range" min={0} max={10} step={0.5} value={loanRate}
-                onChange={e => setLoanRate(Number(e.target.value))}
-                className="w-full accent-blue-500"
-              />
+            {/* 대출금리 2분할 */}
+            <div className="rounded-lg border border-gray-200 p-3 space-y-3 bg-gray-50">
+              <div className="text-xs font-semibold text-gray-600 mb-1">대출 금리 구분</div>
+
+              {/* 정책금융 */}
+              <div className="bg-blue-50 rounded-lg p-2.5 border border-blue-100">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-blue-700">🏦 정책금융</span>
+                  <span className="text-xs text-blue-600">
+                    {fmt(totalCost * Math.min(policyLoanRatio, loanRatio) / 100)}만원
+                  </span>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1">
+                    <div className="text-xs text-gray-500 mb-0.5">
+                      비율: <span className="font-bold text-blue-600">{Math.min(policyLoanRatio, loanRatio)}%</span>
+                    </div>
+                    <input type="range" min={0} max={loanRatio} step={5} value={Math.min(policyLoanRatio, loanRatio)}
+                      onChange={e => setPolicyLoanRatio(Number(e.target.value))}
+                      className="w-full accent-blue-500"
+                    />
+                  </div>
+                  <div className="w-20 flex-shrink-0">
+                    <div className="text-xs text-gray-500 mb-0.5">금리 (%)</div>
+                    <input type="number" min={0} max={5} step={0.1} value={policyLoanRate}
+                      onChange={e => setPolicyLoanRate(Number(e.target.value))}
+                      className="w-full border border-blue-200 rounded px-2 py-1 text-xs text-center bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 일반 대출 */}
+              <div className="bg-orange-50 rounded-lg p-2.5 border border-orange-100">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-orange-700">🏛 일반(시중) 대출</span>
+                  <span className="text-xs text-orange-600">
+                    {fmt(totalCost * Math.max(loanRatio - policyLoanRatio, 0) / 100)}만원
+                  </span>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1">
+                    <div className="text-xs text-gray-500 mb-0.5">
+                      비율: <span className="font-bold text-orange-600">{Math.max(loanRatio - policyLoanRatio, 0)}%</span>
+                      <span className="text-gray-400 ml-1">(자동 = 총 대출 − 정책)</span>
+                    </div>
+                    <div className="h-4 bg-orange-200 rounded-full mt-1.5">
+                      <div
+                        className="h-4 bg-orange-400 rounded-full transition-all"
+                        style={{ width: `${loanRatio > 0 ? Math.max(loanRatio - policyLoanRatio, 0) / loanRatio * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="w-20 flex-shrink-0">
+                    <div className="text-xs text-gray-500 mb-0.5">금리 (%)</div>
+                    <input type="number" min={0} max={15} step={0.5} value={loanRate}
+                      onChange={e => setLoanRate(Number(e.target.value))}
+                      className="w-full border border-orange-200 rounded px-2 py-1 text-xs text-center bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div>

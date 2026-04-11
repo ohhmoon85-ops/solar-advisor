@@ -38,7 +38,11 @@ interface SolarStore {
   setTotalCost: (cost: number) => void
   loanRatio: number
   setLoanRatio: (ratio: number) => void
-  loanRate: number
+  policyLoanRatio: number        // 정책금융 비율 (총 사업비 대비 %)
+  setPolicyLoanRatio: (ratio: number) => void
+  policyLoanRate: number         // 정책금리 (%)
+  setPolicyLoanRate: (rate: number) => void
+  loanRate: number               // 일반(시중) 대출 금리 (%)
   setLoanRate: (rate: number) => void
   loanYears: number
   setLoanYears: (years: number) => void
@@ -91,6 +95,10 @@ export const useSolarStore = create<SolarStore>((set) => ({
   setTotalCost: (cost) => set({ totalCost: cost }),
   loanRatio: 75,
   setLoanRatio: (ratio) => set({ loanRatio: ratio }),
+  policyLoanRatio: 70,
+  setPolicyLoanRatio: (ratio) => set({ policyLoanRatio: ratio }),
+  policyLoanRate: 2.0,
+  setPolicyLoanRate: (rate) => set({ policyLoanRate: rate }),
   loanRate: 4.5,
   setLoanRate: (rate) => set({ loanRate: rate }),
   loanYears: 15,
