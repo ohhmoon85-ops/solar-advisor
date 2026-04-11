@@ -457,7 +457,7 @@ export default function MapTab() {
   }, [tiltAngle])
 
   // ── 주소 → 좌표 변환 (Kakao 우선, VWorld 폴백) ──
-  const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number } | null> => {
+  const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | null> => {
     // 1차: Kakao Local API
     try {
       const kakaoRes = await fetch(`/api/kakao?query=${encodeURIComponent(q)}`)
@@ -467,19 +467,21 @@ export default function MapTab() {
           const doc = kakaoData.documents[0]
           const lon = parseFloat(doc.x ?? doc.address?.x ?? doc.road_address?.x)
           const lat = parseFloat(doc.y ?? doc.address?.y ?? doc.road_address?.y)
-          if (!isNaN(lon) && !isNaN(lat)) return { lon, lat }
+          if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'kakao' }
         }
       }
     } catch { /* fallback to VWorld */ }
 
     // 2차: VWorld
-    const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
-    if (vwRes.status === 503) return null
-    const vwData = await vwRes.json()
-    if (vwData?.error) return null
-    const point = vwData?.response?.result?.point
-    if (!point) return null
-    return { lon: parseFloat(point.x), lat: parseFloat(point.y) }
+    try {
+      const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
+      if (!vwRes.ok) return null
+      const vwData = await vwRes.json()
+      if (vwData?.error) return null
+      const point = vwData?.response?.result?.point
+      if (!point) return null
+      return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
+    } catch { return null }
   }
 
   // ── 주소 검색 핸들러 ──
@@ -494,7 +496,7 @@ export default function MapTab() {
     try {
       const coords = await geocodeAddress(q)
       if (!coords) {
-        setSearchError('주소를 찾을 수 없습니다.\n예) 경기도 동두천시 하봉암동 3-1')
+        setSearchError('주소를 찾을 수 없습니다.\nKakao/VWorld 모두 실패 — Vercel 환경변수(KAKAO_REST_API_KEY) 확인 후 재배포하세요.\n예) 경기도 동두천시 하봉암동 3-1')
         return
       }
       const { lon, lat } = coords
