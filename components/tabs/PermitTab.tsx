@@ -104,30 +104,49 @@ export default function PermitTab() {
     }
   }
 
-  const ItemRow = ({ item }: { item: typeof PERMIT_STAGE1[0] }) => {
+  type PermitItem = typeof PERMIT_STAGE1[0] & { formUrl?: string; formNote?: string }
+
+  const ItemRow = ({ item }: { item: PermitItem }) => {
     const isChecked = checked[item.id] ?? false
     const isRequired = item.required
     return (
-      <div
-        className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
-          isChecked ? 'bg-green-50 border-green-200'
-          : isRequired ? 'bg-white border-red-200'
-          : 'bg-white border-gray-200 hover:border-gray-300'
-        }`}
-        onClick={() => toggle(item.id)}
-      >
-        <div className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-          isChecked ? 'bg-green-500 border-green-500' : isRequired ? 'border-red-400' : 'border-gray-400'
-        }`}>
-          {isChecked && <span className="text-white text-xs font-bold">✓</span>}
+      <div className={`rounded-lg border transition-colors ${
+        isChecked ? 'bg-green-50 border-green-200'
+        : isRequired ? 'bg-white border-red-200'
+        : 'bg-white border-gray-200 hover:border-gray-300'
+      }`}>
+        <div className="flex items-start gap-3 p-3 cursor-pointer" onClick={() => toggle(item.id)}>
+          <div className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+            isChecked ? 'bg-green-500 border-green-500' : isRequired ? 'border-red-400' : 'border-gray-400'
+          }`}>
+            {isChecked && <span className="text-white text-xs font-bold">✓</span>}
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className={`text-sm leading-relaxed ${isChecked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+              {item.text}
+            </span>
+          </div>
+          {isRequired && !isChecked && (
+            <span className="flex-shrink-0 text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-semibold">필수</span>
+          )}
         </div>
-        <div className="flex-1 min-w-0">
-          <span className={`text-sm leading-relaxed ${isChecked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-            {item.text}
-          </span>
-        </div>
-        {isRequired && !isChecked && (
-          <span className="flex-shrink-0 text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-semibold">필수</span>
+        {(item.formUrl || item.formNote) && (
+          <div className="px-3 pb-2.5 flex items-start gap-2 border-t border-gray-100 pt-2">
+            {item.formNote && (
+              <span className="text-xs text-gray-500 flex-1">{item.formNote}</span>
+            )}
+            {item.formUrl && (
+              <a
+                href={item.formUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className="flex-shrink-0 flex items-center gap-1 text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 transition-colors"
+              >
+                <span>↗</span> 서식/신청
+              </a>
+            )}
+          </div>
         )}
       </div>
     )
