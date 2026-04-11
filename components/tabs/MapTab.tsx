@@ -516,6 +516,18 @@ export default function MapTab() {
       errors.push('VWorld: ' + (vwData?.error ?? `HTTP ${vwRes.status}`))
     } catch (e) { errors.push('VWorld: ' + String(e)) }
 
+    // 4차: OpenStreetMap Nominatim (무료, API키 불필요)
+    try {
+      const nomRes = await fetch(`/api/nominatim?query=${encodeURIComponent(q)}`)
+      const nomData = await nomRes.json()
+      if (nomRes.ok && Array.isArray(nomData) && nomData.length > 0) {
+        const lon = parseFloat(nomData[0].lon)
+        const lat = parseFloat(nomData[0].lat)
+        if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'nominatim' }
+      }
+      errors.push('Nominatim: ' + (nomData?.error ?? (Array.isArray(nomData) && nomData.length === 0 ? '결과없음' : `HTTP ${nomRes.status}`)))
+    } catch (e) { errors.push('Nominatim: ' + String(e)) }
+
     return { error: errors.join(' / ') }
   }
 
