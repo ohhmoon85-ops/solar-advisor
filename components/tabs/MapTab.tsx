@@ -456,7 +456,33 @@ export default function MapTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tiltAngle])
 
-  // ── VWorld 주소 검색 ──
+  // ── 주소 → 좌표 변환 (Kakao 우선, VWorld 폴백) ──
+  const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number } | null> => {
+    // 1차: Kakao Local API
+    try {
+      const kakaoRes = await fetch(`/api/kakao?query=${encodeURIComponent(q)}`)
+      if (kakaoRes.ok) {
+        const kakaoData = await kakaoRes.json()
+        if (!kakaoData.fallback && kakaoData.documents?.length > 0) {
+          const doc = kakaoData.documents[0]
+          const lon = parseFloat(doc.x ?? doc.address?.x ?? doc.road_address?.x)
+          const lat = parseFloat(doc.y ?? doc.address?.y ?? doc.road_address?.y)
+          if (!isNaN(lon) && !isNaN(lat)) return { lon, lat }
+        }
+      }
+    } catch { /* fallback to VWorld */ }
+
+    // 2차: VWorld
+    const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
+    if (vwRes.status === 503) return null
+    const vwData = await vwRes.json()
+    if (vwData?.error) return null
+    const point = vwData?.response?.result?.point
+    if (!point) return null
+    return { lon: parseFloat(point.x), lat: parseFloat(point.y) }
+  }
+
+  // ── 주소 검색 핸들러 ──
   const handleAddressSearch = async () => {
     const q = address.trim()
     if (!q) return
@@ -466,70 +492,76 @@ export default function MapTab() {
     setKierResult(null)
 
     try {
-      const coordRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
-      if (coordRes.status === 503) {
-        setSearchError('VWorld API 키가 설정되지 않았습니다.\n.env.local에 VWORLD_API_KEY를 입력하세요.')
+      const coords = await geocodeAddress(q)
+      if (!coords) {
+        setSearchError('주소를 찾을 수 없습니다.\n예) 경기도 동두천시 하봉암동 3-1')
         return
       }
-      const coordData = await coordRes.json()
-      if (coordData?.error) { setSearchError('VWorld 오류: ' + coordData.error); return }
-      const vwStatus = coordData?.response?.status
-      const point = coordData?.response?.result?.point
-      if (!point) {
-        const detail = vwStatus && vwStatus !== 'OK' ? ' (상태: ' + vwStatus + ')' : ''
-        setSearchError('주소를 찾을 수 없습니다' + detail + '.\n지번/도로명 형식: 경기도 동두천시 하봉암동 3-1')
-        return
+      const { lon, lat } = coords
+
+      // 필지 경계 시도 (VWorld — 실패 시 핀만 표시)
+      let ring: number[][] | null = null
+      try {
+        const parcelRes = await fetch(`/api/vworld?type=parcel&lon=${lon}&lat=${lat}`)
+        const parcelData = await parcelRes.json()
+        const features = parcelData?.response?.result?.featureCollection?.features
+        if (features?.length) {
+          const geometry = features[0].geometry
+          let rawCoords: number[][] = []
+          if (geometry.type === 'Polygon') rawCoords = geometry.coordinates[0]
+          else if (geometry.type === 'MultiPolygon') rawCoords = geometry.coordinates[0][0]
+          if (rawCoords.length >= 3) {
+            const closed = rawCoords[0][0] === rawCoords[rawCoords.length - 1][0] &&
+              rawCoords[0][1] === rawCoords[rawCoords.length - 1][1]
+            ring = closed ? rawCoords.slice(0, -1) : rawCoords
+
+            const attrs = features[0].properties ?? {}
+            const label = [attrs.EMD_NM, attrs.RI_NM, attrs.JIBUN].filter(Boolean).join(' ')
+            setParcelLabel(label || `${lat.toFixed(5)}, ${lon.toFixed(5)}`)
+          }
+        }
+      } catch { /* 필지 경계 없이 계속 */ }
+
+      if (ring) {
+        // 필지 경계 있음 — 완전한 흐름
+        const cLon = ring.reduce((s, c) => s + c[0], 0) / ring.length
+        const cLat = ring.reduce((s, c) => s + c[1], 0) / ring.length
+        const { z, scale } = computeZoomAndScale(ring, cLon, cLat)
+        const canvasPoints = ring.map(c => geoToCanvas(c[0], c[1], cLon, cLat, scale))
+        const areaSqm = geoRingAreaSqm(ring)
+        setAutoAzimuth(calcAutoAzimuth(canvasPoints))
+        setPixelScale(scale)
+        setSatZoom(z)
+        setPoints(canvasPoints)
+        setArea(areaSqm)
+        setIsComplete(true)
+        setDrawMode(false)
+        setApiSource('api')
+        setLocationCoords({ lat, lon })
+        setApiCoords({ lat, lon })
+        calcPanelsFromPolygon(canvasPoints, areaSqm, scale)
+        loadSatelliteTiles(cLon, cLat, z, scale)
+        fetchKierData(lat, lon, tiltAngle)
+      } else {
+        // 필지 경계 없음 — 좌표 핀만 표시, 수동 드로우 안내
+        const defaultZ = 18
+        const defaultScale = tilePixelScaleM(lat, defaultZ)
+        const center: Point = { x: CANVAS_W / 2, y: CANVAS_H / 2 }
+        setParcelLabel(`${lat.toFixed(5)}, ${lon.toFixed(5)}`)
+        setPixelScale(defaultScale)
+        setSatZoom(defaultZ)
+        setPoints([center])
+        setIsComplete(false)
+        setDrawMode(false)
+        setApiSource('api')
+        setLocationCoords({ lat, lon })
+        setApiCoords({ lat, lon })
+        setSearchError('위치를 찾았지만 필지 경계를 불러올 수 없습니다.\n"직접 그리기"로 부지를 표시해 주세요.')
+        loadSatelliteTiles(lon, lat, defaultZ, defaultScale)
+        fetchKierData(lat, lon, tiltAngle)
       }
-      const lon = parseFloat(point.x)
-      const lat = parseFloat(point.y)
 
-      const parcelRes = await fetch(`/api/vworld?type=parcel&lon=${lon}&lat=${lat}`)
-      const parcelData = await parcelRes.json()
-      const features = parcelData?.response?.result?.featureCollection?.features
-      if (!features?.length) { setSearchError('필지 경계를 찾을 수 없습니다.'); return }
-
-      const geometry = features[0].geometry
-      let rawCoords: number[][] = []
-      if (geometry.type === 'Polygon') rawCoords = geometry.coordinates[0]
-      else if (geometry.type === 'MultiPolygon') rawCoords = geometry.coordinates[0][0]
-      if (rawCoords.length < 3) { setSearchError('유효하지 않은 필지 경계입니다.'); return }
-
-      const ring = rawCoords[0][0] === rawCoords[rawCoords.length - 1][0] &&
-        rawCoords[0][1] === rawCoords[rawCoords.length - 1][1]
-        ? rawCoords.slice(0, -1) : rawCoords
-
-      const cLon = ring.reduce((s, c) => s + c[0], 0) / ring.length
-      const cLat = ring.reduce((s, c) => s + c[1], 0) / ring.length
-
-      // ★ 타일 기반 스케일 (지도 축척 = CAD 축척 일치)
-      const { z, scale } = computeZoomAndScale(ring, cLon, cLat)
-      const canvasPoints = ring.map(c => geoToCanvas(c[0], c[1], cLon, cLat, scale))
-      const areaSqm = geoRingAreaSqm(ring)
-
-      // 방위각 자동 계산 (건물형)
-      const azOffset = calcAutoAzimuth(canvasPoints)
-      setAutoAzimuth(azOffset)
-
-      const attrs = features[0].properties ?? {}
-      const label = [attrs.EMD_NM, attrs.RI_NM, attrs.JIBUN].filter(Boolean).join(' ')
-      setParcelLabel(label || `${lat.toFixed(5)}, ${lon.toFixed(5)}`)
-
-      setPixelScale(scale)
-      setSatZoom(z)
-      setPoints(canvasPoints)
-      setArea(areaSqm)
-      setIsComplete(true)
-      setDrawMode(false)
-      setApiSource('api')
-      setLocationCoords({ lat, lon })
-      setApiCoords({ lat, lon })
-      calcPanelsFromPolygon(canvasPoints, areaSqm, scale)
-
-      // 위성 타일 & KIER 병렬 조회
-      loadSatelliteTiles(cLon, cLat, z, scale)
-      fetchKierData(lat, lon, tiltAngle)
-
-    } catch { setSearchError('API 요청 중 오류가 발생했습니다.')
+    } catch { setSearchError('검색 중 오류가 발생했습니다.')
     } finally { setSearchLoading(false) }
   }
 

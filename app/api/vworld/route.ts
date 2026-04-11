@@ -84,13 +84,15 @@ export async function GET(req: NextRequest) {
       const x = searchParams.get('x')
       const y = searchParams.get('y')
       if (!z || !x || !y) return NextResponse.json({ error: 'z,x,y required' }, { status: 400 })
-      const tileUrl = `https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Satellite/${z}/${y}/${x}.jpeg`
-      const tileRes = await vwFetch(tileUrl)
+      // ArcGIS World Imagery (API키 불필요, 전세계 고해상도 위성사진)
+      const tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`
+      const tileRes = await fetch(tileUrl, { cache: 'no-store' })
       if (!tileRes.ok) return new Response(null, { status: 404 })
       const buf = await tileRes.arrayBuffer()
+      const ct = tileRes.headers.get('content-type') ?? 'image/jpeg'
       return new Response(buf, {
         headers: {
-          'Content-Type': 'image/jpeg',
+          'Content-Type': ct,
           'Cache-Control': 'public, max-age=86400',
         },
       })
