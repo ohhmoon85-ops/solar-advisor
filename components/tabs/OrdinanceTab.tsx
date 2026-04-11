@@ -32,6 +32,7 @@ export default function OrdinanceTab() {
   const [overrides, setOverrides] = useState<Record<string, OrdinanceData>>({})
   const [copied, setCopied] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+  const [kvStatus, setKvStatus] = useState<'ok' | 'no-kv' | null>(null)
 
   // localStorage에서 수정된 데이터 로드
   useEffect(() => {
@@ -82,17 +83,43 @@ export default function OrdinanceTab() {
     setEditForm(prev => prev ? { ...prev, [field]: value } : prev)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editForm || !selectedRegion) return
     const today = new Date().toISOString().slice(0, 10)
     const updated: OrdinanceData = { ...editForm, lastUpdated: today }
+    // 1차: KV 백엔드 저장 시도
+    try {
+      const res = await fetch('/api/admin/ordinance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ region: selectedRegion, data: updated }),
+      })
+      const json = await res.json()
+      if (res.ok) {
+        setKvStatus('ok')
+        setSaveMsg('KV 백엔드에 저장 완료! 모든 사용자에게 즉시 반영됩니다. (staticData.ts 영구 반영은 아래 코드 사용)')
+      } else if (json.code === 'KV_NOT_CONFIGURED') {
+        setKvStatus('no-kv')
+        // KV 미설정: localStorage 폴백
+        const newOverrides = { ...overrides, [selectedRegion]: updated }
+        setOverrides(newOverrides)
+        try { localStorage.setItem(LS_KEY, JSON.stringify(newOverrides)) } catch { /* ignore */ }
+        setSaveMsg('⚠ KV 미설정 — 브라우저에만 임시 저장됨. Vercel KV 설정 후 영구 저장 가능.')
+      } else {
+        throw new Error(json.error)
+      }
+    } catch {
+      // 네트워크 오류 등: localStorage 폴백
+      const newOverrides = { ...overrides, [selectedRegion]: updated }
+      setOverrides(newOverrides)
+      try { localStorage.setItem(LS_KEY, JSON.stringify(newOverrides)) } catch { /* ignore */ }
+      setSaveMsg('오류 발생 — 브라우저에만 임시 저장됨.')
+    }
     const newOverrides = { ...overrides, [selectedRegion]: updated }
     setOverrides(newOverrides)
-    try { localStorage.setItem(LS_KEY, JSON.stringify(newOverrides)) } catch { /* ignore */ }
     setResult(updated)
     setRevised(false)
     setEditing(false)
-    setSaveMsg('저장 완료! 아래 코드를 staticData.ts에도 반영하세요.')
   }
 
   const getCodeSnippet = (region: string, data: OrdinanceData) =>
@@ -171,6 +198,16 @@ export default function OrdinanceTab() {
               {hasOverride && (
                 <span className="flex items-center gap-1 bg-purple-100 border border-purple-300 text-purple-700 text-xs px-2 py-1 rounded-full font-semibold">
                   ✏️ 수정됨
+                </span>
+              )}
+              {kvStatus === 'ok' && hasOverride && (
+                <span className="flex items-center gap-1 bg-green-100 border border-green-300 text-green-700 text-xs px-2 py-0.5 rounded-full">
+                  ☁ KV
+                </span>
+              )}
+              {kvStatus === 'no-kv' && (
+                <span className="flex items-center gap-1 bg-gray-100 border border-gray-300 text-gray-500 text-xs px-2 py-0.5 rounded-full" title="Vercel KV 미설정 — 브라우저에만 저장됨">
+                  ⚠ KV 미설정
                 </span>
               )}
               <span className="text-xs text-gray-400">기준일: {result.lastUpdated}</span>

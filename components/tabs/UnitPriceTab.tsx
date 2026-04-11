@@ -32,6 +32,8 @@ export default function UnitPriceTab() {
   const [copied, setCopied] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
   const [alertDismissed, setAlertDismissed] = useState(false)
+  const [smpFetching, setSmpFetching] = useState(false)
+  const [smpFetchMsg, setSmpFetchMsg] = useState('')
 
   // 페이지 로드 시 localStorage에서 단가 초기화
   useEffect(() => {
@@ -52,6 +54,34 @@ export default function UnitPriceTab() {
   const isDefaultRecBuilding = priceOverride.recBuilding === REC_PRICE.건물지붕형
   const isDefaultRecLand = priceOverride.recLand === REC_PRICE.일반토지형
   const isAllDefault = isDefaultSmp && isDefaultRecBuilding && isDefaultRecLand
+
+
+  const fetchLatestSmp = async () => {
+    setSmpFetching(true)
+    setSmpFetchMsg('')
+    try {
+      const res = await fetch('/api/smp')
+      const json = await res.json()
+      if (res.status === 503) {
+        setSmpFetchMsg('KPX_SMP_API_KEY 미설정. data.go.kr에서 한국전력거래소 SMP 서비스를 신청하고 환경변수를 추가하세요.')
+        return
+      }
+      if (json.fallback || res.status !== 200) {
+        setSmpFetchMsg('SMP 조회 실패: ' + (json.error ?? 'unknown'))
+        return
+      }
+      // 조회 성공: 자동으로 단가 업데이트
+      const today = new Date().toISOString().slice(0, 10)
+      const updated = { ...priceOverride, smp: json.smp, lastUpdated: today }
+      setPriceOverride(updated)
+      setSmpFetchMsg('SMP 자동 업데이트 완료! ' + json.smp + '원/kWh (' + json.period + ' 기준, 출처: ' + json.source + ')')
+      setAlertDismissed(true)
+    } catch (err) {
+      setSmpFetchMsg('네트워크 오류: ' + (err instanceof Error ? err.message : 'unknown'))
+    } finally {
+      setSmpFetching(false)
+    }
+  }
 
   const openEdit = () => {
     setForm({ ...priceOverride })
@@ -135,6 +165,12 @@ export const REC_PRICE = {
         </div>
       )}
 
+      {smpFetchMsg && (
+        <div className={smpFetchMsg.includes('완료') ? "bg-green-50 border border-green-300 rounded-xl p-3 text-sm text-green-700" : "bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700"}>
+          {smpFetchMsg}
+        </div>
+      )}
+
       {/* 현재 단가 현황 카드 */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -155,9 +191,13 @@ export const REC_PRICE = {
                 기본값 복원
               </button>
             )}
+            <button onClick={fetchLatestSmp} disabled={smpFetching}
+              className="px-3 py-1.5 text-xs bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-60">
+              {smpFetching ? '조회 중...' : 'SMP 자동 조회'}
+            </button>
             <button onClick={openEdit}
               className="px-3 py-1.5 text-xs bg-blue-500 text-white font-semibold rounded-lg hover:bg-blue-600 transition-colors">
-              단가 수정
+              수동 수정
             </button>
           </div>
         </div>
@@ -184,7 +224,7 @@ export const REC_PRICE = {
                   {!isDefaultSmp && <div className="text-xs text-purple-500">* 수정됨 (기본: {SMP}원)</div>}
                 </td>
                 <td className="px-4 py-3 text-center text-gray-600 text-xs">한전 고시</td>
-                <td className="px-4 py-3 text-center text-gray-600 text-xs">KPX 실시간 API</td>
+                <td className="px-4 py-3 text-center text-gray-600 text-xs">KPX 전력시장 정산<br/><span className="text-gray-400">(한국전력거래소)</span></td>
               </tr>
               <tr className="border-t border-gray-200">
                 <td className="px-4 py-3 font-semibold text-gray-800">REC 단가<br /><span className="text-xs font-normal text-gray-500">(건물지붕형)</span></td>
