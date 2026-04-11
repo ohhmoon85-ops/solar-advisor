@@ -649,7 +649,7 @@ export default function MapTab() {
     setPoints([]); setArea(0); setPanelRects([]); setPanelCount(0)
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
     setDrawMode(true); setApiSource('manual'); setParcelLabel('')
-    setSearchError(''); setPixelScale(0.1); setSatTiles([]); setSatZoom(0)
+    setSearchError(''); setPixelScale(0.1); // satTiles 유지 — 위성사진 배경 보존
     setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
   }
 
