@@ -60,6 +60,10 @@ export async function GET(req: NextRequest) {
 
       // 모두 실패: 마지막 road 응답 반환 (클라이언트가 status 확인)
       const fallbackRes = await fetch(base + '&type=road', { cache: 'no-store' })
+      const fallbackCt = fallbackRes.headers.get('content-type') ?? ''
+      if (!fallbackCt.includes('json')) {
+        return NextResponse.json({ response: { status: 'NOT_FOUND', error: 'VWorld non-JSON response' } })
+      }
       const fallbackData = await fallbackRes.json()
       return NextResponse.json(fallbackData)
     }
@@ -93,6 +97,10 @@ export async function GET(req: NextRequest) {
         `&crs=epsg:4326&page=1&size=1` +
         `&geomFilter=POINT(${lon}%20${lat})`
       const res = await fetch(url, { cache: 'no-store' })
+      const ct = res.headers.get('content-type') ?? ''
+      if (!ct.includes('json')) {
+        return NextResponse.json({ response: { status: 'ERROR', result: null } })
+      }
       const data = await res.json()
       return NextResponse.json(data)
     }
