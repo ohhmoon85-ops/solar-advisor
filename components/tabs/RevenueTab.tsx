@@ -30,6 +30,7 @@ export default function RevenueTab() {
     loanRate, setLoanRate,
     loanYears, setLoanYears,
     kierPvHours, kierGhi,
+    priceOverride,
   } = useSolarStore()
 
   const [activeView, setActiveView] = useState<'table' | 'chart' | 'compare'>('chart')
@@ -46,15 +47,15 @@ export default function RevenueTab() {
   }, [mapResult, setCapacityKw])
 
   const revenue = useMemo(
-    () => calcAnnual(capacityKw, installationType, effectiveGenHours),
-    [capacityKw, installationType, effectiveGenHours]
+    () => calcAnnual(capacityKw, installationType, effectiveGenHours, priceOverride),
+    [capacityKw, installationType, effectiveGenHours, priceOverride]
   )
 
   const equity = useMemo(() => totalCost * (1 - loanRatio / 100), [totalCost, loanRatio])
 
   const yearlyData = useMemo(
-    () => calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours),
-    [capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours]
+    () => calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours, priceOverride),
+    [capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours, priceOverride]
   )
 
   const breakevenYear = useMemo(() => findBreakevenYear(yearlyData), [yearlyData])
@@ -63,16 +64,16 @@ export default function RevenueTab() {
 
   // Compare bar chart data
   const compareData = useMemo(() => INSTALLATION_TYPES.map(type => {
-    const r = calcAnnual(capacityKw, type, effectiveGenHours)
+    const r = calcAnnual(capacityKw, type, effectiveGenHours, priceOverride)
     return { name: type.replace('형', '').replace('농지', ''), total: Math.round(r.total / 10000) }
   }), [capacityKw, effectiveGenHours])
 
   // Interest scenario table
   const scenarioData = useMemo(() =>
     INTEREST_SCENARIOS.map(s => {
-      const rows = calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, s.rate, loanYears, effectiveGenHours)
+      const rows = calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, s.rate, loanYears, effectiveGenHours, priceOverride)
       return { label: s.label, rate: s.rate, breakeven: findBreakevenYear(rows) }
-    }), [capacityKw, installationType, totalCost, loanRatio, loanYears, effectiveGenHours]
+    }), [capacityKw, installationType, totalCost, loanRatio, loanYears, effectiveGenHours, priceOverride]
   )
 
   return (
@@ -232,7 +233,7 @@ export default function RevenueTab() {
               <div>
                 <div className="text-xs text-gray-500 mb-1">SMP 수익</div>
                 <div className="text-lg font-bold text-blue-600">{fmt(revenue.smpRevenue / 10000)} 만원</div>
-                <div className="text-xs text-gray-400">110원/kWh</div>
+                <div className="text-xs text-gray-400">{priceOverride.smp}원/kWh</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 mb-1">REC 수익</div>

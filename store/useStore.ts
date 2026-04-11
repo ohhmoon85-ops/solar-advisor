@@ -1,5 +1,8 @@
 import { create } from 'zustand'
+import { SMP, REC_PRICE } from '@/lib/constants'
 import type { InstallationType } from '@/lib/constants'
+
+const PRICE_LS_KEY = 'solar_price_overrides'
 
 interface MapResult {
   panelCount: number
@@ -9,6 +12,13 @@ interface MapResult {
   address: string
   tiltAngle: number
   moduleIndex: number
+}
+
+export interface PriceOverride {
+  smp: number
+  recBuilding: number
+  recLand: number
+  lastUpdated: string
 }
 
 interface SolarStore {
@@ -38,12 +48,32 @@ interface SolarStore {
   setSelectedPanelIndex: (index: number | null) => void
 
   // KIER 실측 일사량 데이터
-  kierPvHours: number | null   // pvPot / 365 (h/일), null = 기본값 3.5h 사용
+  kierPvHours: number | null
   setKierPvHours: (h: number | null) => void
-  kierGhi: number | null       // 수평면 전일사량 (kWh/m²/년)
+  kierGhi: number | null
   setKierGhi: (ghi: number | null) => void
   locationCoords: { lat: number; lon: number } | null
   setLocationCoords: (c: { lat: number; lon: number } | null) => void
+
+  // 단가 관리 (SMP / REC)
+  priceOverride: PriceOverride
+  setPriceOverride: (p: PriceOverride) => void
+}
+
+const DEFAULT_PRICE: PriceOverride = {
+  smp: SMP,
+  recBuilding: REC_PRICE.건물지붕형,
+  recLand: REC_PRICE.일반토지형,
+  lastUpdated: '2026-01-15',
+}
+
+function loadPriceOverride(): PriceOverride {
+  if (typeof window === 'undefined') return DEFAULT_PRICE
+  try {
+    const raw = localStorage.getItem(PRICE_LS_KEY)
+    if (raw) return { ...DEFAULT_PRICE, ...JSON.parse(raw) }
+  } catch { /* ignore */ }
+  return DEFAULT_PRICE
 }
 
 export const useSolarStore = create<SolarStore>((set) => ({
@@ -75,4 +105,10 @@ export const useSolarStore = create<SolarStore>((set) => ({
   setKierGhi: (ghi) => set({ kierGhi: ghi }),
   locationCoords: null,
   setLocationCoords: (c) => set({ locationCoords: c }),
+
+  priceOverride: DEFAULT_PRICE,
+  setPriceOverride: (p) => {
+    try { localStorage.setItem(PRICE_LS_KEY, JSON.stringify(p)) } catch { /* ignore */ }
+    set({ priceOverride: p })
+  },
 }))

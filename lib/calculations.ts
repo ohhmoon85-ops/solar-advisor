@@ -24,14 +24,25 @@ export interface LoanResult {
   monthlyPayment: number // 원
 }
 
+export interface PriceParams {
+  smp?: number        // 원/kWh (기본: SMP 상수)
+  recBuilding?: number // 원/MWh (기본: REC_PRICE.건물지붕형)
+  recLand?: number    // 원/MWh (기본: REC_PRICE.일반토지형)
+}
+
 export function calcAnnual(
   kW: number,
   type: InstallationType,
-  genHours: number = GENERATION_HOURS  // KIER 실측값 또는 기본값 3.5h
+  genHours: number = GENERATION_HOURS,
+  prices: PriceParams = {}
 ): Revenue {
+  const smpPrice = prices.smp ?? SMP
+  const recPriceBuilding = prices.recBuilding ?? REC_PRICE.건물지붕형
+  const recPriceLand = prices.recLand ?? REC_PRICE.일반토지형
+
   const annualKwh = kW * genHours * 365
-  const smpRevenue = annualKwh * SMP
-  const recPrice = type === '건물지붕형' ? REC_PRICE.건물지붕형 : REC_PRICE.일반토지형
+  const smpRevenue = annualKwh * smpPrice
+  const recPrice = type === '건물지붕형' ? recPriceBuilding : recPriceLand
   const weight = REC_WEIGHT[type] ?? 1.0
   const recRevenue = (annualKwh / 1000) * recPrice * weight
   return { annualKwh, smpRevenue, recRevenue, total: smpRevenue + recRevenue }
@@ -55,25 +66,30 @@ export function calcYearlyTable(
   loanRatio: number, // %
   loanRate: number, // %
   loanYears: number,
-  genHours: number = GENERATION_HOURS  // KIER 실측값 또는 기본값 3.5h
+  genHours: number = GENERATION_HOURS,
+  prices: PriceParams = {}
 ): YearlyData[] {
-  const equity = totalCost * (1 - loanRatio / 100) // 자기자본 (만원)
-  const loanAmount = totalCost * (loanRatio / 100) // 대출금 (만원)
-  const { annualPayment } = calcLoan(loanAmount * 10000, loanRate, loanYears) // 원 단위
+  const smpPrice = prices.smp ?? SMP
+  const recPriceBuilding = prices.recBuilding ?? REC_PRICE.건물지붕형
+  const recPriceLand = prices.recLand ?? REC_PRICE.일반토지형
+
+  const equity = totalCost * (1 - loanRatio / 100)
+  const loanAmount = totalCost * (loanRatio / 100)
+  const { annualPayment } = calcLoan(loanAmount * 10000, loanRate, loanYears)
 
   const rows: YearlyData[] = []
-  let cumulative = -equity // 자기자본 투입으로 시작
+  let cumulative = -equity
 
   for (let year = 1; year <= 20; year++) {
     const degradationFactor = Math.pow(1 - DEGRADATION_RATE, year - 1)
     const kwhThisYear = kW * genHours * 365 * degradationFactor
 
-    const smpRev = kwhThisYear * SMP
-    const recPrice = type === '건물지붕형' ? REC_PRICE.건물지붕형 : REC_PRICE.일반토지형
+    const smpRev = kwhThisYear * smpPrice
+    const recPrice = type === '건물지붕형' ? recPriceBuilding : recPriceLand
     const weight = REC_WEIGHT[type] ?? 1.0
     const recRev = (kwhThisYear / 1000) * recPrice * weight
-    const totalRevWon = smpRev + recRev // 원
-    const totalRevMan = totalRevWon / 10000 // 만원
+    const totalRevWon = smpRev + recRev
+    const totalRevMan = totalRevWon / 10000
 
     const loanPaymentMan = year <= loanYears ? annualPayment / 10000 : 0
     const opCostMan = totalRevMan * OP_COST_RATE

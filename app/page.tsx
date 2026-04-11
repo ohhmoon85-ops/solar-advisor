@@ -11,6 +11,7 @@ const OrdinanceTab = dynamic(() => import('@/components/tabs/OrdinanceTab'), { s
 const PermitTab = dynamic(() => import('@/components/tabs/PermitTab'), { ssr: false })
 const PanelTab = dynamic(() => import('@/components/tabs/PanelTab'), { ssr: false })
 const ChecklistTab = dynamic(() => import('@/components/tabs/ChecklistTab'), { ssr: false })
+const UnitPriceTab = dynamic(() => import('@/components/tabs/UnitPriceTab'), { ssr: false })
 
 const TABS = [
   { id: 'map', label: '이음지도', icon: '🗺️', shortLabel: '지도' },
@@ -19,10 +20,11 @@ const TABS = [
   { id: 'permit', label: '인허가 서류', icon: '📋', shortLabel: '인허가' },
   { id: 'panel', label: '패널 사양', icon: '⚡', shortLabel: '패널' },
   { id: 'checklist', label: '실무 체크리스트', icon: '✅', shortLabel: '체크' },
+  { id: 'unitprice', label: '단가 관리', icon: '💰', shortLabel: '단가' },
 ]
 
 export default function Home() {
-  const { activeTab, setActiveTab } = useSolarStore()
+  const { activeTab, setActiveTab, priceOverride } = useSolarStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const currentTab = TABS.find(t => t.id === activeTab) ?? TABS[0]
@@ -69,7 +71,7 @@ export default function Home() {
           {/* Right side */}
           <div className="flex items-center gap-2 ml-auto flex-shrink-0">
             <span className="hidden md:inline-flex text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium border border-green-200">
-              SMP 110원 확정
+              SMP {priceOverride.smp}원 확정
             </span>
             {/* Mobile menu button */}
             <button
@@ -87,7 +89,7 @@ export default function Home() {
         {/* Mobile dropdown menu */}
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-gray-100 bg-white shadow-lg">
-            <div className="max-w-screen-2xl mx-auto px-3 py-2 grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+            <div className="max-w-screen-2xl mx-auto px-3 py-2 grid grid-cols-4 sm:grid-cols-7 gap-1.5">
               {TABS.map(tab => (
                 <button
                   key={tab.id}
@@ -151,12 +153,13 @@ export default function Home() {
           {activeTab === 'permit' && <PermitTab />}
           {activeTab === 'panel' && <PanelTab />}
           {activeTab === 'checklist' && <ChecklistTab />}
+          {activeTab === 'unitprice' && <UnitPriceTab />}
         </div>
       </main>
 
       {/* Mobile bottom tab bar */}
       <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-lg safe-area-inset-bottom">
-        <div className="grid grid-cols-6 h-16">
+        <div className="grid grid-cols-7 h-16">
           {TABS.map(tab => (
             <button
               key={tab.id}
@@ -179,9 +182,9 @@ export default function Home() {
         <div className="max-w-screen-2xl mx-auto px-4 flex items-center justify-between text-xs text-gray-400 flex-wrap gap-2">
           <span>SolarAdvisor v5.2 © 2026 — 태양광 사업성 분석 플랫폼</span>
           <div className="flex items-center gap-3">
-            <span>SMP 110원/kWh</span>
-            <span>REC건물 105,000원/MWh ×1.5</span>
-            <span>REC토지 70,000원/MWh</span>
+            <span>SMP {priceOverride.smp}원/kWh</span>
+            <span>REC건물 {priceOverride.recBuilding.toLocaleString()}원/MWh ×1.5</span>
+            <span>REC토지 {priceOverride.recLand.toLocaleString()}원/MWh</span>
             <span>발전시간 3.5h/일</span>
           </div>
         </div>
