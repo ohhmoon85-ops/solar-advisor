@@ -12,10 +12,21 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // VWorld API는 등록된 도메인의 Referer/Origin 헤더가 필요
+  const reqHost = req.headers.get('host') ?? ''
+  const proto = reqHost.includes('localhost') ? 'http' : 'https'
+  const siteOrigin = `${proto}://${reqHost}`
+  const vwHeaders = {
+    'Referer': siteOrigin + '/',
+    'Origin': siteOrigin,
+    'User-Agent': 'Mozilla/5.0 (compatible; SolarAdvisor/1.0)',
+  }
+
+  const vwFetch = (url: string) =>
+    fetch(url, { cache: 'no-store', headers: vwHeaders })
+
   try {
     if (type === 'coord') {
-      // 주소 → 좌표 변환
-      // 순서: 1) parcel  2) road  3) parcel without province prefix
       const address = searchParams.get('address') ?? ''
       const base =
         `https://api.vworld.kr/req/address` +
@@ -24,7 +35,7 @@ export async function GET(req: NextRequest) {
         `&refine=true&simple=false&format=json&key=${apiKey}`
 
       // 1차: 지번주소(parcel)
-      const parcelRes = await fetch(base + '&type=parcel', { cache: 'no-store' })
+      const parcelRes = await vwFetch(base + '&type=parcel')
       if (parcelRes.ok) {
         const parcelData = await parcelRes.json()
         if (parcelData?.response?.result?.point) {
@@ -33,7 +44,7 @@ export async function GET(req: NextRequest) {
       }
 
       // 2차: 도로명주소(road)
-      const roadRes = await fetch(base + '&type=road', { cache: 'no-store' })
+      const roadRes = await vwFetch(base + '&type=road')
       if (roadRes.ok) {
         const roadData = await roadRes.json()
         if (roadData?.response?.result?.point) {
@@ -41,7 +52,7 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // 3차: 첫 번째 단어(도/광역시) 제거 후 재시도 (예: '경기도 수원시...' → '수원시...')
+      // 3차: 시/군/구부터 시작 (도/광역시 제거)
       const shortAddress = address.includes(' ') ? address.slice(address.indexOf(' ') + 1) : address
       if (shortAddress !== address) {
         const base3 =
@@ -49,7 +60,7 @@ export async function GET(req: NextRequest) {
           `?service=address&request=getcoord&version=2.0` +
           `&crs=epsg:4326&address=${encodeURIComponent(shortAddress)}` +
           `&refine=true&simple=false&format=json&key=${apiKey}`
-        const res3 = await fetch(base3 + '&type=parcel', { cache: 'no-store' })
+        const res3 = await vwFetch(base3 + '&type=parcel')
         if (res3.ok) {
           const data3 = await res3.json()
           if (data3?.response?.result?.point) {
@@ -58,8 +69,8 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // 모두 실패: 마지막 road 응답 반환 (클라이언트가 status 확인)
-      const fallbackRes = await fetch(base + '&type=road', { cache: 'no-store' })
+      // 모두 실패: 마지막 road 응답 반환
+      const fallbackRes = await vwFetch(base + '&type=road')
       const fallbackCt = fallbackRes.headers.get('content-type') ?? ''
       if (!fallbackCt.includes('json')) {
         return NextResponse.json({ response: { status: 'NOT_FOUND', error: 'VWorld non-JSON response' } })
@@ -69,13 +80,12 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === 'tile') {
-      // VWorld WMTS 위성사진 타일 프록시 (CORS 우회)
       const z = searchParams.get('z')
       const x = searchParams.get('x')
       const y = searchParams.get('y')
       if (!z || !x || !y) return NextResponse.json({ error: 'z,x,y required' }, { status: 400 })
       const tileUrl = `https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Satellite/${z}/${y}/${x}.jpeg`
-      const tileRes = await fetch(tileUrl, { cache: 'no-store' })
+      const tileRes = await vwFetch(tileUrl)
       if (!tileRes.ok) return new Response(null, { status: 404 })
       const buf = await tileRes.arrayBuffer()
       return new Response(buf, {
@@ -87,7 +97,6 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === 'parcel') {
-      // 좌표 → 필지 경계 폴리곤 (LP_PA_CBND_BUBUN: 분부번 경계)
       const lon = searchParams.get('lon') ?? ''
       const lat = searchParams.get('lat') ?? ''
       const url =
@@ -96,7 +105,7 @@ export async function GET(req: NextRequest) {
         `&key=${apiKey}&format=json&geometry=true&attribute=true` +
         `&crs=epsg:4326&page=1&size=1` +
         `&geomFilter=POINT(${lon}%20${lat})`
-      const res = await fetch(url, { cache: 'no-store' })
+      const res = await vwFetch(url)
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('json')) {
         return NextResponse.json({ response: { status: 'ERROR', result: null } })
