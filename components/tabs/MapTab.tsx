@@ -456,9 +456,10 @@ export default function MapTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tiltAngle])
 
-  // ── 주소 → 좌표 변환 (Kakao 우선, VWorld 폴백) ──
+  // ── 주소 → 좌표 변환 (Kakao → Naver → VWorld 순) ──
   const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | { error: string } | null> => {
-    let kakaoError = ''
+    const errors: string[] = []
+
     // 1차: Kakao Local API
     try {
       const kakaoRes = await fetch(`/api/kakao?query=${encodeURIComponent(q)}`)
@@ -468,21 +469,35 @@ export default function MapTab() {
         const lon = parseFloat(doc.x ?? doc.address?.x ?? doc.road_address?.x)
         const lat = parseFloat(doc.y ?? doc.address?.y ?? doc.road_address?.y)
         if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'kakao' }
-        kakaoError = '좌표 없음'
-      } else {
-        kakaoError = kakaoData?.error ?? `HTTP ${kakaoRes.status}`
       }
-    } catch (e) { kakaoError = String(e) }
+      errors.push('Kakao: ' + (kakaoData?.error ?? `HTTP ${kakaoRes.status}`))
+    } catch (e) { errors.push('Kakao: ' + String(e)) }
 
-    // 2차: VWorld
+    // 2차: Naver Geocoding API
+    try {
+      const naverRes = await fetch(`/api/naver?query=${encodeURIComponent(q)}`)
+      const naverData = await naverRes.json()
+      if (naverRes.ok && !naverData.fallback && naverData.addresses?.length > 0) {
+        const addr = naverData.addresses[0]
+        const lon = parseFloat(addr.x)
+        const lat = parseFloat(addr.y)
+        if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'naver' }
+      }
+      errors.push('Naver: ' + (naverData?.error ?? `HTTP ${naverRes.status}`))
+    } catch (e) { errors.push('Naver: ' + String(e)) }
+
+    // 3차: VWorld
     try {
       const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
       const vwData = await vwRes.json()
-      if (!vwRes.ok || vwData?.error) return { error: `Kakao: ${kakaoError} / VWorld: ${vwData?.error ?? 'HTTP ' + vwRes.status}` }
-      const point = vwData?.response?.result?.point
-      if (!point) return { error: `Kakao: ${kakaoError} / VWorld: 주소 없음` }
-      return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
-    } catch (e) { return { error: `Kakao: ${kakaoError} / VWorld: ${String(e)}` } }
+      if (vwRes.ok && !vwData?.error) {
+        const point = vwData?.response?.result?.point
+        if (point) return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
+      }
+      errors.push('VWorld: ' + (vwData?.error ?? `HTTP ${vwRes.status}`))
+    } catch (e) { errors.push('VWorld: ' + String(e)) }
+
+    return { error: errors.join(' / ') }
   }
 
   // ── 주소 검색 핸들러 ──
