@@ -477,7 +477,23 @@ export default function MapTab() {
   const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | { error: string } | null> => {
     const errors: string[] = []
 
-    // 1차: Kakao Local API
+    // 1차: VWorld 검색 API (기존 키 재사용, 지번/도로명 모두 지원)
+    try {
+      const vwSRes = await fetch(`/api/vworld?type=search&query=${encodeURIComponent(q)}`)
+      const vwSData = await vwSRes.json()
+      if (vwSRes.ok && vwSData?.response?.status === 'OK') {
+        const item = vwSData?.response?.result?.items?.[0]
+        const point = item?.point
+        if (point) {
+          const lon = parseFloat(point.x)
+          const lat = parseFloat(point.y)
+          if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'vworld-search' }
+        }
+      }
+      errors.push('VWorld검색: ' + (vwSData?.response?.status ?? `HTTP ${vwSRes.status}`))
+    } catch (e) { errors.push('VWorld검색: ' + String(e)) }
+
+    // 2차: Kakao Local API
     try {
       const kakaoRes = await fetch(`/api/kakao?query=${encodeURIComponent(q)}`)
       const kakaoData = await kakaoRes.json()
@@ -490,7 +506,7 @@ export default function MapTab() {
       errors.push('Kakao: ' + (kakaoData?.error ?? `HTTP ${kakaoRes.status}`))
     } catch (e) { errors.push('Kakao: ' + String(e)) }
 
-    // 2차: Naver Geocoding API
+    // 3차: Naver Geocoding API
     try {
       const naverRes = await fetch(`/api/naver?query=${encodeURIComponent(q)}`)
       const naverData = await naverRes.json()
@@ -503,7 +519,7 @@ export default function MapTab() {
       errors.push('Naver: ' + (naverData?.error ?? `HTTP ${naverRes.status}`))
     } catch (e) { errors.push('Naver: ' + String(e)) }
 
-    // 3차: VWorld
+    // 4차: VWorld 주소→좌표 (구형)
     try {
       const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
       const vwData = await vwRes.json()
@@ -514,7 +530,7 @@ export default function MapTab() {
       errors.push('VWorld: ' + (vwData?.error ?? `HTTP ${vwRes.status}`))
     } catch (e) { errors.push('VWorld: ' + String(e)) }
 
-    // 4차: OpenStreetMap Nominatim (무료, API키 불필요)
+    // 5차: OpenStreetMap Nominatim (무료, API키 불필요)
     try {
       const nomRes = await fetch(`/api/nominatim?query=${encodeURIComponent(q)}`)
       const nomData = await nomRes.json()

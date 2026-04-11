@@ -152,6 +152,38 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ slope: slopePct, elevations: { center: hC, N: hN, S: hS, E: hE, W: hW } })
     }
 
+    if (type === 'search') {
+      // VWorld 검색 API — 주소/지번 → 좌표 (기존 VWorld 키 재사용)
+      const query = searchParams.get('query') ?? ''
+      if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 })
+      const url =
+        `https://api.vworld.kr/req/search` +
+        `?service=search&request=search&version=2.0` +
+        `&crs=epsg:4326&size=1&page=1&format=json` +
+        `&key=${apiKey}&query=${encodeURIComponent(query)}&type=address&category=PARCEL`
+      const res = await vwFetch(url)
+      const ct = res.headers.get('content-type') ?? ''
+      if (!ct.includes('json')) {
+        return NextResponse.json({ response: { status: 'NOT_FOUND' } })
+      }
+      const data = await res.json()
+      // 지번 실패 시 도로명 재시도
+      if (data?.response?.status !== 'OK') {
+        const url2 =
+          `https://api.vworld.kr/req/search` +
+          `?service=search&request=search&version=2.0` +
+          `&crs=epsg:4326&size=1&page=1&format=json` +
+          `&key=${apiKey}&query=${encodeURIComponent(query)}&type=address&category=ROAD`
+        const res2 = await vwFetch(url2)
+        const ct2 = res2.headers.get('content-type') ?? ''
+        if (ct2.includes('json')) {
+          const data2 = await res2.json()
+          return NextResponse.json(data2)
+        }
+      }
+      return NextResponse.json(data)
+    }
+
     return NextResponse.json({ error: 'invalid type' }, { status: 400 })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown error'
