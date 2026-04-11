@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
       cache: 'no-store',
     })
     if (!res.ok) {
-      return NextResponse.json({ error: `Kakao API HTTP ${res.status}`, fallback: true }, { status: 502 })
+      const errText = await res.text().catch(() => '')
+      return NextResponse.json({ error: `Kakao API HTTP ${res.status}: ${errText.slice(0, 200)}`, fallback: true }, { status: 502 })
     }
     const data = await res.json()
     return NextResponse.json(data)

@@ -457,31 +457,32 @@ export default function MapTab() {
   }, [tiltAngle])
 
   // ── 주소 → 좌표 변환 (Kakao 우선, VWorld 폴백) ──
-  const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | null> => {
+  const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | { error: string } | null> => {
+    let kakaoError = ''
     // 1차: Kakao Local API
     try {
       const kakaoRes = await fetch(`/api/kakao?query=${encodeURIComponent(q)}`)
-      if (kakaoRes.ok) {
-        const kakaoData = await kakaoRes.json()
-        if (!kakaoData.fallback && kakaoData.documents?.length > 0) {
-          const doc = kakaoData.documents[0]
-          const lon = parseFloat(doc.x ?? doc.address?.x ?? doc.road_address?.x)
-          const lat = parseFloat(doc.y ?? doc.address?.y ?? doc.road_address?.y)
-          if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'kakao' }
-        }
+      const kakaoData = await kakaoRes.json()
+      if (kakaoRes.ok && !kakaoData.fallback && kakaoData.documents?.length > 0) {
+        const doc = kakaoData.documents[0]
+        const lon = parseFloat(doc.x ?? doc.address?.x ?? doc.road_address?.x)
+        const lat = parseFloat(doc.y ?? doc.address?.y ?? doc.road_address?.y)
+        if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'kakao' }
+        kakaoError = '좌표 없음'
+      } else {
+        kakaoError = kakaoData?.error ?? `HTTP ${kakaoRes.status}`
       }
-    } catch { /* fallback to VWorld */ }
+    } catch (e) { kakaoError = String(e) }
 
     // 2차: VWorld
     try {
       const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
-      if (!vwRes.ok) return null
       const vwData = await vwRes.json()
-      if (vwData?.error) return null
+      if (!vwRes.ok || vwData?.error) return { error: `Kakao: ${kakaoError} / VWorld: ${vwData?.error ?? 'HTTP ' + vwRes.status}` }
       const point = vwData?.response?.result?.point
-      if (!point) return null
+      if (!point) return { error: `Kakao: ${kakaoError} / VWorld: 주소 없음` }
       return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
-    } catch { return null }
+    } catch (e) { return { error: `Kakao: ${kakaoError} / VWorld: ${String(e)}` } }
   }
 
   // ── 주소 검색 핸들러 ──
@@ -495,8 +496,9 @@ export default function MapTab() {
 
     try {
       const coords = await geocodeAddress(q)
-      if (!coords) {
-        setSearchError('주소를 찾을 수 없습니다.\nKakao/VWorld 모두 실패 — Vercel 환경변수(KAKAO_REST_API_KEY) 확인 후 재배포하세요.\n예) 경기도 동두천시 하봉암동 3-1')
+      if (!coords || 'error' in coords) {
+        const detail = coords && 'error' in coords ? '\n' + coords.error : ''
+        setSearchError('주소를 찾을 수 없습니다.' + detail)
         return
       }
       const { lon, lat } = coords
