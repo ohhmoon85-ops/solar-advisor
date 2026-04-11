@@ -95,6 +95,74 @@ function computeZoomAndScale(ring: number[][], cLon: number, cLat: number): { z:
   return { z, scale }
 }
 
+// ── Ramer-Douglas-Peucker 폴리곤 단순화 ───────────────────────────
+function rdpSimplify(pts: Point[], epsilon: number): Point[] {
+  if (pts.length <= 2) return pts
+  const first = pts[0], last = pts[pts.length - 1]
+  const dx = last.x - first.x, dy = last.y - first.y
+  const len = Math.sqrt(dx * dx + dy * dy)
+  let maxDist = 0, maxIdx = 0
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = len > 0
+      ? Math.abs(dy * pts[i].x - dx * pts[i].y + last.x * first.y - last.y * first.x) / len
+      : Math.sqrt((pts[i].x - first.x) ** 2 + (pts[i].y - first.y) ** 2)
+    if (d > maxDist) { maxDist = d; maxIdx = i }
+  }
+  if (maxDist > epsilon) {
+    const left = rdpSimplify(pts.slice(0, maxIdx + 1), epsilon)
+    const right = rdpSimplify(pts.slice(maxIdx), epsilon)
+    return [...left.slice(0, -1), ...right]
+  }
+  return [first, last]
+}
+
+// ── vworld 스크린샷에서 주황 경계선 감지 → 외곽 폴리곤 추출 ──────
+function detectOrangeBoundary(
+  imageData: ImageData
+): { rawPts: Point[]; cx: number; cy: number } | null {
+  const { data, width, height } = imageData
+  // 주황색 조건: R↑ G↓↓ B↓ (vworld 기본 경계 색상 #FF6600 계열)
+  const orange: Point[] = []
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4
+      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3]
+      if (a > 100 && r > 170 && r > g * 1.35 && b < 110 && g < 175) {
+        orange.push({ x, y })
+      }
+    }
+  }
+  if (orange.length < 50) return null
+
+  // 중심 계산
+  const cx = orange.reduce((s, p) => s + p.x, 0) / orange.length
+  const cy = orange.reduce((s, p) => s + p.y, 0) / orange.length
+
+  // 각도 스윕: 360방향마다 가장 먼 주황 픽셀 탐색 → 외곽 포인트
+  const STEPS = 360
+  const maxR = Math.sqrt(width * width + height * height)
+  const rawPts: Point[] = []
+  for (let i = 0; i < STEPS; i++) {
+    const angle = (i / STEPS) * 2 * Math.PI
+    const cosA = Math.cos(angle), sinA = Math.sin(angle)
+    let last: Point | null = null
+    for (let r = 2; r < maxR; r += 0.8) {
+      const px = Math.round(cx + cosA * r)
+      const py = Math.round(cy + sinA * r)
+      if (px < 0 || px >= width || py < 0 || py >= height) break
+      const idx = (py * width + px) * 4
+      const R = data[idx], G = data[idx + 1], B = data[idx + 2], A = data[idx + 3]
+      if (A > 100 && R > 170 && R > G * 1.35 && B < 110 && G < 175) last = { x: px, y: py }
+    }
+    if (last) rawPts.push(last)
+  }
+  if (rawPts.length < 20) return null
+
+  // RDP 단순화 (닫힌 루프)
+  const simplified = rdpSimplify([...rawPts, rawPts[0]], 3.5).slice(0, -1)
+  return { rawPts: simplified, cx, cy }
+}
+
 // ── Ray-casting point-in-polygon ───────────────────────────────────
 function isPointInPolygon(px: number, py: number, poly: Point[]): boolean {
   let inside = false
@@ -179,6 +247,15 @@ export default function MapTab() {
   const [capacityKwp, setCapacityKwp] = useState(0)
   const [annualKwh, setAnnualKwh] = useState(0)
   const [structureWarning, setStructureWarning] = useState(false)
+
+  // ── vworld 스크린샷 드롭 ──
+  const [screenshotImg, setScreenshotImg] = useState<HTMLImageElement | null>(null)
+  const [screenshotZoom, setScreenshotZoom] = useState(18)
+  const [screenshotAnalyzing, setScreenshotAnalyzing] = useState(false)
+  const [screenshotError, setScreenshotError] = useState('')
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [screenshotCentroid, setScreenshotCentroid] = useState<Point | null>(null)
+  const [screenshotRawPts, setScreenshotRawPts] = useState<Point[] | null>(null)
 
   // 이론 이격 거리
   const tiltRad = (tiltAngle * Math.PI) / 180
@@ -290,11 +367,28 @@ export default function MapTab() {
     if (!ctx) return
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
 
-    // ❶ 위성사진 배경
+    // ❶ 배경: 위성사진 / vworld 스크린샷 / 기본 그리드
     if (satTiles.length > 0) {
       satTiles.forEach(t => ctx.drawImage(t.img, t.cx, t.cy, t.px, t.px))
-      // 경량 그리드 오버레이
       ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+      ctx.lineWidth = 0.5
+      for (let x = 0; x < CANVAS_W; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke()
+      }
+      for (let y = 0; y < CANVAS_H; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_H, y); ctx.stroke()
+      }
+    } else if (screenshotImg && screenshotCentroid) {
+      // vworld 스크린샷 배경 — 이미지 중심(경계 centroid)을 Canvas 중앙에 정렬
+      const lat37Rad = 37 * Math.PI / 180
+      const imgMPerPx = 40075016.686 * Math.cos(lat37Rad) / (256 * Math.pow(2, screenshotZoom))
+      const sf = imgMPerPx / pixelScale  // 이미지px → Canvas px 비율
+      const dw = screenshotImg.naturalWidth * sf
+      const dh = screenshotImg.naturalHeight * sf
+      const dx = CANVAS_W / 2 - screenshotCentroid.x * sf
+      const dy = CANVAS_H / 2 - screenshotCentroid.y * sf
+      ctx.drawImage(screenshotImg, dx, dy, dw, dh)
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)'
       ctx.lineWidth = 0.5
       for (let x = 0; x < CANVAS_W; x += 40) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke()
@@ -405,7 +499,8 @@ export default function MapTab() {
       ctx.fillText('🛰 VWorld 필지 자동 경계', CANVAS_W - 78, 21)
     }
   }, [points, isComplete, area, panelRects, spacingValue, panelCount,
-      pixelScale, apiSource, satTiles, satZoom])
+      pixelScale, apiSource, satTiles, satZoom,
+      screenshotImg, screenshotCentroid, screenshotZoom])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -660,7 +755,80 @@ export default function MapTab() {
     setPixelScale(0.1); setSatTiles([]); setSatZoom(0)
     setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
+    // 스크린샷 초기화
+    setScreenshotImg(null); setScreenshotCentroid(null); setScreenshotRawPts(null)
+    setScreenshotError(''); setScreenshotAnalyzing(false)
   }
+
+  // ── 스크린샷 rawPts/zoom 변경 시 Canvas 좌표 재계산 ──────────────
+  useEffect(() => {
+    if (!screenshotRawPts || !screenshotCentroid) return
+    const lat37Rad = 37 * Math.PI / 180
+    const imgMPerPx = 40075016.686 * Math.cos(lat37Rad) / (256 * Math.pow(2, screenshotZoom))
+    const minX = Math.min(...screenshotRawPts.map(p => p.x))
+    const maxX = Math.max(...screenshotRawPts.map(p => p.x))
+    const minY = Math.min(...screenshotRawPts.map(p => p.y))
+    const maxY = Math.max(...screenshotRawPts.map(p => p.y))
+    const extentPx = Math.max(maxX - minX, maxY - minY, 10)
+    const canvScale = (extentPx * imgMPerPx) / (Math.min(CANVAS_W, CANVAS_H) * 0.62)
+    const sf = imgMPerPx / canvScale
+    const canvasPoints: Point[] = screenshotRawPts.map(p => ({
+      x: CANVAS_W / 2 + (p.x - screenshotCentroid.x) * sf,
+      y: CANVAS_H / 2 + (p.y - screenshotCentroid.y) * sf,
+    }))
+    // 넓이 (쇼레이스 공식)
+    let sho = 0
+    for (let i = 0; i < canvasPoints.length; i++) {
+      const j = (i + 1) % canvasPoints.length
+      sho += canvasPoints[i].x * canvasPoints[j].y - canvasPoints[j].x * canvasPoints[i].y
+    }
+    const areaSqm = Math.abs(sho / 2) * canvScale * canvScale
+    setPixelScale(canvScale)
+    setPoints(canvasPoints)
+    setArea(areaSqm)
+    setIsComplete(true)
+    setDrawMode(false)
+    setApiSource('manual')
+    calcPanelsFromPolygon(canvasPoints, areaSqm, canvScale)
+  }, [screenshotRawPts, screenshotCentroid, screenshotZoom, calcPanelsFromPolygon])
+
+  // ── vworld 스크린샷 분석 ──────────────────────────────────────────
+  const analyzeScreenshot = useCallback((img: HTMLImageElement) => {
+    setScreenshotAnalyzing(true)
+    setScreenshotError('')
+    // 오프스크린 Canvas로 픽셀 데이터 추출
+    const off = document.createElement('canvas')
+    off.width = img.naturalWidth
+    off.height = img.naturalHeight
+    const offCtx = off.getContext('2d')
+    if (!offCtx) { setScreenshotAnalyzing(false); return }
+    offCtx.drawImage(img, 0, 0)
+    const imgData = offCtx.getImageData(0, 0, off.width, off.height)
+    const result = detectOrangeBoundary(imgData)
+    setScreenshotAnalyzing(false)
+    if (!result) {
+      setScreenshotError('주황색 경계선을 감지하지 못했습니다. vworld에서 주황색 경계가 그려진 화면을 스크린샷 해주세요.')
+      return
+    }
+    setScreenshotCentroid({ x: result.cx, y: result.cy })
+    setScreenshotRawPts(result.rawPts) // useEffect가 자동으로 Canvas 좌표 계산
+  }, [])
+
+  // ── 파일 드롭 / 선택 핸들러 ──────────────────────────────────────
+  const handleDropFile = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) return
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      setScreenshotImg(img)
+      analyzeScreenshot(img)
+    }
+    img.onerror = () => {
+      setScreenshotError('이미지를 불러올 수 없습니다.')
+      URL.revokeObjectURL(url)
+    }
+    img.src = url
+  }, [analyzeScreenshot])
 
   const handleSendToRevenue = () => {
     setMapResult({ panelCount, capacityKwp, annualKwh, area, address, tiltAngle, moduleIndex })
@@ -961,14 +1129,86 @@ export default function MapTab() {
             <div className={stepCircle(step4Done, '4', drawMode)}>{step4Done ? '✓' : '4'}</div>
             <h3 className="font-semibold text-gray-800 text-sm">수동 부지 그리기</h3>
           </div>
-          <p className="text-xs text-gray-400 mb-2">API 키 없을 때 캔버스에 직접 그릴 수 있습니다</p>
+          <p className="text-xs text-gray-400 mb-2">API 키 없을 때 — vworld 스크린샷 드롭 또는 캔버스에 직접 그리기</p>
+
+          {/* vworld 스크린샷 드롭존 */}
+          <div
+            onDragOver={e => { e.preventDefault(); setIsDragOver(true) }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={e => {
+              e.preventDefault(); setIsDragOver(false)
+              const file = e.dataTransfer.files[0]
+              if (file) handleDropFile(file)
+            }}
+            className={`relative mb-2 border-2 border-dashed rounded-lg p-3 text-center transition-colors cursor-pointer ${
+              isDragOver
+                ? 'border-orange-400 bg-orange-50'
+                : screenshotImg
+                ? 'border-green-400 bg-green-50'
+                : 'border-gray-300 bg-gray-50 hover:border-orange-300 hover:bg-orange-50'
+            }`}
+            onClick={() => {
+              const inp = document.createElement('input')
+              inp.type = 'file'; inp.accept = 'image/*'
+              inp.onchange = () => { if (inp.files?.[0]) handleDropFile(inp.files[0]) }
+              inp.click()
+            }}
+          >
+            {screenshotAnalyzing ? (
+              <div className="flex items-center justify-center gap-2 text-xs text-orange-600">
+                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                경계선 분석 중...
+              </div>
+            ) : screenshotImg && !screenshotError ? (
+              <div className="text-xs text-green-700 font-semibold">
+                ✓ 스크린샷 경계 인식 완료
+                <div className="text-green-600 font-normal mt-0.5">다른 이미지로 교체하려면 클릭 또는 드롭</div>
+              </div>
+            ) : (
+              <div className="text-xs text-gray-500">
+                <div className="text-lg mb-1">🗺</div>
+                <div className="font-medium text-gray-600">vworld 스크린샷 드롭</div>
+                <div className="text-gray-400 mt-0.5">또는 클릭하여 파일 선택</div>
+              </div>
+            )}
+          </div>
+
+          {/* 오류 메시지 */}
+          {screenshotError && (
+            <div className="mb-2 bg-red-50 border border-red-200 rounded-lg p-2 text-xs text-red-600">
+              {screenshotError}
+            </div>
+          )}
+
+          {/* vworld 줌레벨 선택 */}
+          {screenshotImg && (
+            <div className="mb-2 flex items-center gap-2">
+              <label className="text-xs text-gray-500 whitespace-nowrap">vworld 줌레벨</label>
+              <select
+                value={screenshotZoom}
+                onChange={e => setScreenshotZoom(Number(e.target.value))}
+                className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+              >
+                <option value={16}>16단계 (~2.4m/px)</option>
+                <option value={17}>17단계 (~1.2m/px)</option>
+                <option value={18}>18단계 (~0.6m/px) — 기본</option>
+                <option value={19}>19단계 (~0.3m/px)</option>
+                <option value={20}>20단계 (~0.15m/px)</option>
+              </select>
+            </div>
+          )}
+
+          {/* 직접 그리기 버튼 */}
           <div className="flex gap-2">
             <button onClick={handleStartDraw}
               className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors ${
                 drawMode ? 'bg-red-50 border-red-400 text-red-600' : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'}`}>
               {drawMode ? '✕ 취소' : '✏ 직접 그리기'}
             </button>
-            {(points.length > 0 || isComplete) && (
+            {(points.length > 0 || isComplete || screenshotImg) && (
               <button onClick={handleReset}
                 className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50">
                 초기화

@@ -41,7 +41,7 @@ export default function Home() {
             </div>
             <div className="hidden sm:block">
               <div className="font-bold text-gray-900 text-base leading-tight">SolarAdvisor</div>
-              <div className="text-xs text-gray-400 leading-tight">v5.2 태양광 사업성 분석</div>
+              <div className="text-xs text-gray-400 leading-tight">(예)육군대령 조영두</div>
             </div>
           </div>
 
