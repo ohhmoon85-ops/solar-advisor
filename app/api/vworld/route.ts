@@ -14,7 +14,8 @@ export async function GET(req: NextRequest) {
 
   try {
     if (type === 'coord') {
-      // 주소 → 좌표 변환: 지번주소 먼저 시도 → 실패 시 도로명주소 재시도
+      // 주소 → 좌표 변환
+      // 순서: 1) parcel  2) road  3) parcel without province prefix
       const address = searchParams.get('address') ?? ''
       const base =
         `https://api.vworld.kr/req/address` +
@@ -24,15 +25,43 @@ export async function GET(req: NextRequest) {
 
       // 1차: 지번주소(parcel)
       const parcelRes = await fetch(base + '&type=parcel', { cache: 'no-store' })
-      const parcelData = await parcelRes.json()
-      if (parcelData?.response?.result?.point) {
-        return NextResponse.json(parcelData)
+      if (parcelRes.ok) {
+        const parcelData = await parcelRes.json()
+        if (parcelData?.response?.result?.point) {
+          return NextResponse.json(parcelData)
+        }
       }
 
       // 2차: 도로명주소(road)
       const roadRes = await fetch(base + '&type=road', { cache: 'no-store' })
-      const roadData = await roadRes.json()
-      return NextResponse.json(roadData)
+      if (roadRes.ok) {
+        const roadData = await roadRes.json()
+        if (roadData?.response?.result?.point) {
+          return NextResponse.json(roadData)
+        }
+      }
+
+      // 3차: 첫 번째 단어(도/광역시) 제거 후 재시도 (예: '경기도 수원시...' → '수원시...')
+      const shortAddress = address.includes(' ') ? address.slice(address.indexOf(' ') + 1) : address
+      if (shortAddress !== address) {
+        const base3 =
+          `https://api.vworld.kr/req/address` +
+          `?service=address&request=getcoord&version=2.0` +
+          `&crs=epsg:4326&address=${encodeURIComponent(shortAddress)}` +
+          `&refine=true&simple=false&format=json&key=${apiKey}`
+        const res3 = await fetch(base3 + '&type=parcel', { cache: 'no-store' })
+        if (res3.ok) {
+          const data3 = await res3.json()
+          if (data3?.response?.result?.point) {
+            return NextResponse.json(data3)
+          }
+        }
+      }
+
+      // 모두 실패: 마지막 road 응답 반환 (클라이언트가 status 확인)
+      const fallbackRes = await fetch(base + '&type=road', { cache: 'no-store' })
+      const fallbackData = await fallbackRes.json()
+      return NextResponse.json(fallbackData)
     }
 
     if (type === 'tile') {
@@ -69,7 +98,8 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({ error: 'invalid type' }, { status: 400 })
-  } catch {
-    return NextResponse.json({ error: 'VWorld API request failed' }, { status: 500 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown error'
+    return NextResponse.json({ error: 'VWorld API request failed: ' + msg }, { status: 500 })
   }
 }

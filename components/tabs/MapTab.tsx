@@ -467,13 +467,20 @@ export default function MapTab() {
 
     try {
       const coordRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
-      const coordData = await coordRes.json()
       if (coordRes.status === 503) {
         setSearchError('VWorld API 키가 설정되지 않았습니다.\n.env.local에 VWORLD_API_KEY를 입력하세요.')
         return
       }
+      const coordData = await coordRes.json()
+      if (coordData?.error) { setSearchError('VWorld 오류: ' + coordData.error); return }
+      const vwStatus = coordData?.response?.status
       const point = coordData?.response?.result?.point
-      if (!point) { setSearchError('주소를 찾을 수 없습니다.'); return }
+      if (!point) {
+        const detail = vwStatus && vwStatus !== 'OK' ? ' (상태: ' + vwStatus + ')' : ''
+        setSearchError('주소를 찾을 수 없습니다' + detail + '.
+지번/도로명 형식: 경기도 동두천시 하봉암동 3-1')
+        return
+      }
       const lon = parseFloat(point.x)
       const lat = parseFloat(point.y)
 
