@@ -253,7 +253,6 @@ export default function MapTab() {
   const [screenshotZoom, setScreenshotZoom] = useState(18)
   const [screenshotAnalyzing, setScreenshotAnalyzing] = useState(false)
   const [screenshotError, setScreenshotError] = useState('')
-  const [isDragOver, setIsDragOver] = useState(false)
   const [screenshotCentroid, setScreenshotCentroid] = useState<Point | null>(null)
   const [screenshotRawPts, setScreenshotRawPts] = useState<Point[] | null>(null)
 
@@ -271,6 +270,7 @@ export default function MapTab() {
   useEffect(() => {
     return () => { blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u)) }
   }, [])
+
 
   // ── 패널 배치 (Point-in-Polygon 그리드) ──
   const calcPanelsFromPolygon = useCallback(
@@ -830,6 +830,20 @@ export default function MapTab() {
     img.src = url
   }, [analyzeScreenshot])
 
+  // Ctrl+V 클립보드 이미지 붙여넣기 감지
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const imgItem = items.find(it => it.type.startsWith('image/'))
+      if (!imgItem) return
+      e.preventDefault()
+      const file = imgItem.getAsFile()
+      if (file) handleDropFile(file)
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [handleDropFile])
+
   const handleSendToRevenue = () => {
     setMapResult({ panelCount, capacityKwp, annualKwh, area, address, tiltAngle, moduleIndex })
     setActiveTab('revenue')
@@ -1129,31 +1143,16 @@ export default function MapTab() {
             <div className={stepCircle(step4Done, '4', drawMode)}>{step4Done ? '✓' : '4'}</div>
             <h3 className="font-semibold text-gray-800 text-sm">수동 부지 그리기</h3>
           </div>
-          <p className="text-xs text-gray-400 mb-2">API 키 없을 때 — vworld 스크린샷 드롭 또는 캔버스에 직접 그리기</p>
+          <p className="text-xs text-gray-400 mb-2">API 키 없을 때 — vworld 스크린샷 붙여넣기 또는 캔버스에 직접 그리기</p>
 
-          {/* vworld 스크린샷 드롭존 */}
-          <div
-            onDragOver={e => { e.preventDefault(); setIsDragOver(true) }}
-            onDragLeave={() => setIsDragOver(false)}
-            onDrop={e => {
-              e.preventDefault(); setIsDragOver(false)
-              const file = e.dataTransfer.files[0]
-              if (file) handleDropFile(file)
-            }}
-            className={`relative mb-2 border-2 border-dashed rounded-lg p-3 text-center transition-colors cursor-pointer ${
-              isDragOver
-                ? 'border-orange-400 bg-orange-50'
-                : screenshotImg
-                ? 'border-green-400 bg-green-50'
-                : 'border-gray-300 bg-gray-50 hover:border-orange-300 hover:bg-orange-50'
-            }`}
-            onClick={() => {
-              const inp = document.createElement('input')
-              inp.type = 'file'; inp.accept = 'image/*'
-              inp.onchange = () => { if (inp.files?.[0]) handleDropFile(inp.files[0]) }
-              inp.click()
-            }}
-          >
+          {/* vworld 스크린샷 붙여넣기 안내 */}
+          <div className={`mb-2 border-2 rounded-lg p-3 text-center transition-colors ${
+            screenshotAnalyzing
+              ? 'border-orange-300 bg-orange-50'
+              : screenshotImg && !screenshotError
+              ? 'border-green-400 bg-green-50'
+              : 'border-gray-200 bg-gray-50'
+          }`}>
             {screenshotAnalyzing ? (
               <div className="flex items-center justify-center gap-2 text-xs text-orange-600">
                 <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
@@ -1165,13 +1164,13 @@ export default function MapTab() {
             ) : screenshotImg && !screenshotError ? (
               <div className="text-xs text-green-700 font-semibold">
                 ✓ 스크린샷 경계 인식 완료
-                <div className="text-green-600 font-normal mt-0.5">다른 이미지로 교체하려면 클릭 또는 드롭</div>
+                <div className="text-green-600 font-normal mt-0.5">다시 붙여넣으면 교체됩니다 (Ctrl+V)</div>
               </div>
             ) : (
               <div className="text-xs text-gray-500">
-                <div className="text-lg mb-1">🗺</div>
-                <div className="font-medium text-gray-600">vworld 스크린샷 드롭</div>
-                <div className="text-gray-400 mt-0.5">또는 클릭하여 파일 선택</div>
+                <div className="text-base mb-1">🗺</div>
+                <div className="font-medium text-gray-700">vworld 스크린샷 후 <kbd className="bg-gray-200 text-gray-700 px-1 py-0.5 rounded text-xs">Ctrl+V</kbd></div>
+                <div className="text-gray-400 mt-0.5">화면 어디서나 붙여넣기 가능</div>
               </div>
             )}
           </div>
