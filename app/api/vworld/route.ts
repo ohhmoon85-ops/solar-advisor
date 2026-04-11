@@ -116,6 +116,42 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data)
     }
 
+    if (type === 'elevation') {
+      // 중심 + 상하좌우 20m 지점 5개 고도 조회 → 경사도 계산
+      const lon = parseFloat(searchParams.get('lon') ?? '0')
+      const lat = parseFloat(searchParams.get('lat') ?? '0')
+      const dLat = 20 / 111319.9
+      const dLon = 20 / (111319.9 * Math.cos(lat * Math.PI / 180))
+      const pts = [
+        [lon, lat],
+        [lon, lat + dLat],
+        [lon, lat - dLat],
+        [lon + dLon, lat],
+        [lon - dLon, lat],
+      ]
+      const getElev = async (lo: number, la: number): Promise<number | null> => {
+        const url = `https://api.vworld.kr/req/dem?service=dem&request=getElevation&version=2.0&crs=epsg:4326&key=${apiKey}&format=json&point=${lo},${la}`
+        try {
+          const r = await vwFetch(url)
+          if (!r.ok) return null
+          const ct = r.headers.get('content-type') ?? ''
+          if (!ct.includes('json')) return null
+          const d = await r.json()
+          const h = d?.response?.result?.height ?? d?.response?.result?.elevation
+          return h != null ? parseFloat(h) : null
+        } catch { return null }
+      }
+      const elevs = await Promise.all(pts.map(([lo, la]) => getElev(lo, la)))
+      const [hC, hN, hS, hE, hW] = elevs
+      if (hC == null || hN == null || hS == null || hE == null || hW == null) {
+        return NextResponse.json({ error: 'elevation data unavailable', fallback: true }, { status: 503 })
+      }
+      const slopeNS = Math.abs(hN - hS) / 40   // m/m
+      const slopeEW = Math.abs(hE - hW) / 40   // m/m
+      const slopePct = Math.round(Math.sqrt(slopeNS ** 2 + slopeEW ** 2) * 100)
+      return NextResponse.json({ slope: slopePct, elevations: { center: hC, N: hN, S: hS, E: hE, W: hW } })
+    }
+
     return NextResponse.json({ error: 'invalid type' }, { status: 400 })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown error'

@@ -92,14 +92,78 @@ export const PANEL_DATA: PanelData[] = [
   },
 ]
 
+export interface PolicyLoanRate {
+  id: string
+  institution: string   // 기관명
+  program: string       // 사업명
+  rate: number          // 금리 (%)
+  limitKW: number       // 설비 한도 (kW, 0=제한없음)
+  limitRatio: number    // 융자 비율 (%, 사업비 대비)
+  limitAmountMan: number // 융자 한도 (만원, 0=제한없음)
+  year: number          // 기준연도
+  target: string        // 대상
+  note: string          // 비고
+}
+
+export const DEFAULT_POLICY_LOANS: PolicyLoanRate[] = [
+  {
+    id: 'loan-1',
+    institution: '한국에너지공단',
+    program: '신재생에너지 융자지원',
+    rate: 2.0,
+    limitKW: 0,
+    limitRatio: 70,
+    limitAmountMan: 0,
+    year: 2025,
+    target: '법인·개인사업자·일반인',
+    note: '분기별 금리 변동. 에너지공단 신재생에너지센터 신청',
+  },
+  {
+    id: 'loan-2',
+    institution: '농림수산업자신용보증기금',
+    program: '농업인 태양광 정책자금',
+    rate: 1.5,
+    limitKW: 100,
+    limitRatio: 80,
+    limitAmountMan: 30000,
+    year: 2025,
+    target: '농업인 (농지형)',
+    note: '농협은행 창구 신청. 농지형 설치 시 우대금리 적용',
+  },
+  {
+    id: 'loan-3',
+    institution: '중소기업진흥공단',
+    program: '신성장기반자금',
+    rate: 2.8,
+    limitKW: 0,
+    limitRatio: 70,
+    limitAmountMan: 100000,
+    year: 2025,
+    target: '중소기업·소상공인',
+    note: '중진공 온렌딩 방식. 거래은행 통해 신청',
+  },
+  {
+    id: 'loan-4',
+    institution: '지방자치단체',
+    program: '지역별 태양광 보급 지원',
+    rate: 1.0,
+    limitKW: 30,
+    limitRatio: 50,
+    limitAmountMan: 5000,
+    year: 2025,
+    target: '해당 지역 주민',
+    note: '지자체별 상이. 주민센터·시군구청 문의 필요',
+  },
+]
+
 export const PERMIT_STAGE1 = [
   { id: 'p1-1', text: '발전사업허가 신청서 (양식)', required: false, buildingOnly: false, landOnly: false,
-    formUrl: 'https://www.motie.go.kr/motie/ms/ms/ms8/bs4/list.do', formNote: '산업통상자원부 → 전기사업 허가신청서 서식' },
+    formUrl: 'https://www.motie.go.kr', formNote: '산업통상자원부 홈페이지 → 상단 민원 → 서식자료 → "발전사업허가" 검색' },
   { id: 'p1-2', text: '★ 사업계획서 (양식, 사업주 막도장) — 막도장 필수', required: true, buildingOnly: false, landOnly: false,
-    formUrl: 'https://www.motie.go.kr/motie/ms/ms/ms8/bs4/list.do', formNote: '산업통상자원부 서식 → 태양광 사업계획서' },
+    formUrl: 'https://www.motie.go.kr', formNote: '산업통상자원부 홈페이지 → 상단 민원 → 서식자료 → "태양광 사업계획서" 검색' },
   { id: 'p1-3', text: '현장사진 — 전봇대명판 / 전체 드론사진', required: false, buildingOnly: false, landOnly: false },
   { id: 'p1-4', text: '★ 투자확약서', required: true, buildingOnly: false, landOnly: false,
-    formUrl: 'https://www.motie.go.kr/motie/ms/ms/ms8/bs4/list.do', formNote: '산업통상자원부 서식 → 투자확약서 양식' },
+    formUrl: 'https://www.motie.go.kr', formNote: '산업통상자원부 홈페이지 → 상단 민원 → 서식자료 → "투자확약서" 검색' },
   { id: 'p1-5', text: '★ 잔액증명확인서 — 사업비 15% 이상 (100kW→최소 1,500만원) — 거래은행 발급', required: true, buildingOnly: false, landOnly: false,
     formNote: '거래 은행 방문 또는 인터넷뱅킹 → 잔액증명서 발급' },
   { id: 'p1-6', text: '배치도/측면도 · 단선결선도', required: false, buildingOnly: false, landOnly: false,
@@ -115,7 +179,7 @@ export const PERMIT_STAGE1 = [
   { id: 'p1-9', text: '사업주 주민등록등본 · 가족관계증명서 · 인감증명서', required: false, buildingOnly: false, landOnly: false,
     formUrl: 'https://www.gov.kr/portal/main', formNote: '정부24(주민등록등본) / 전자가족관계등록시스템(가족관계증명서) / 주민센터 방문(인감증명서)' },
   { id: 'p1-10', text: '범죄경력 신원조회 동의서 · 토지사용승낙서 (토지주 다를 때)', required: false, buildingOnly: false, landOnly: true,
-    formUrl: 'https://www.motie.go.kr/motie/ms/ms/ms8/bs4/list.do', formNote: '산업통상자원부 서식 → 토지사용승낙서 양식' },
+    formUrl: 'https://www.motie.go.kr', formNote: '산업통상자원부 서식 → 토지사용승낙서 양식' },
   { id: 'p1-11', text: '모듈 · 인버터 · 접속함 자료', required: false, buildingOnly: false, landOnly: false,
     formNote: '제조사 제품사양서 · KS인증서 첨부' },
 ]
@@ -126,15 +190,15 @@ export const PERMIT_STAGE2 = [
   { id: 'p2-2', text: '[개발행위] 구조물검토서 · 배치도/측면도 · 토지 관련 서류 (13종)', required: false, buildingOnly: false, landOnly: false,
     formNote: '구조기술사 작성 / 설계사무소 도면' },
   { id: 'p2-3', text: '[공사신고] 신청서 · 시방서 · 전기도면 · 감리배치확인서 · 구조검토서', required: false, buildingOnly: false, landOnly: false,
-    formUrl: 'https://www.motie.go.kr/motie/ms/ms/ms8/bs4/list.do', formNote: '산업통상자원부 → 공사계획 신고서 서식' },
+    formUrl: 'https://www.motie.go.kr', formNote: '산업통상자원부 → 공사계획 신고서 서식' },
   { id: 'p2-4', text: '★ [PPA] PPA 신청서 (2024.06.10 신양식) + 개발행위허가증', required: true, buildingOnly: false, landOnly: false,
-    formUrl: 'https://home.kepco.co.kr/kepco/KE/F/htmlView/KESFPPP001.do', formNote: '한국전력 → 소규모태양광 전력구매계약(PPA) 신청 (반드시 2024.06.10 이후 신양식)' },
+    formUrl: 'https://home.kepco.co.kr', formNote: '한국전력 → 소규모태양광 전력구매계약(PPA) 신청 (반드시 2024.06.10 이후 신양식)' },
   { id: 'p2-5', text: '★ [PPA] 사용전검사 종료 후 정계약', required: true, buildingOnly: false, landOnly: false,
-    formUrl: 'https://home.kepco.co.kr/kepco/KE/F/htmlView/KESFPPP001.do', formNote: '한국전력 PPA 정계약 — 사용전검사 완료 후 진행' },
+    formUrl: 'https://home.kepco.co.kr', formNote: '한국전력 PPA 정계약 — 사용전검사 완료 후 진행' },
   { id: 'p2-6', text: '★ [사용전검사] 안전관리자선임필증 · 수검자표 · 한전 송전요청서 (1주일 전)', required: true, buildingOnly: false, landOnly: false,
     formUrl: 'https://www.kesco.or.kr', formNote: '한국전기안전공사 → 사용전검사 신청 / 한전 송전요청서는 한전 담당지사 제출' },
   { id: 'p2-7', text: '★ [에너지공단] 현장사진 7종 + 전체 22종 서류 — 현장 방문 3~4주', required: true, buildingOnly: false, landOnly: false,
     formUrl: 'https://rec.energy.or.kr', formNote: '신재생에너지 공급인증서(REC) 설비확인 신청 — 에너지공단 신재생에너지센터' },
   { id: 'p2-8', text: '★ 사업개시 신고 — 60일 이내 (미신고 벌금 60만원) — 에너지과', required: true, buildingOnly: false, landOnly: false,
-    formUrl: 'https://www.motie.go.kr/motie/ms/ms/ms8/bs4/list.do', formNote: '산업통상자원부 → 사업개시 신고서 서식 / 시·군·구청 에너지과 제출' },
+    formUrl: 'https://www.motie.go.kr', formNote: '산업통상자원부 → 사업개시 신고서 서식 / 시·군·구청 에너지과 제출' },
 ]

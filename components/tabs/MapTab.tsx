@@ -142,6 +142,8 @@ export default function MapTab() {
   const [tiltAngle, setTiltAngle] = useState(33)
   const [spacingValue, setSpacingValue] = useState(1.2)
   const [slopePercent, setSlopePercent] = useState(0)
+  const [slopeAuto, setSlopeAuto] = useState(false)  // 자동측정 여부
+  const [slopeFetching, setSlopeFetching] = useState(false)
   const [structureType, setStructureType] = useState<StructureType>('철골구조')
   const [bipvEnabled, setBipvEnabled] = useState(false)
 
@@ -456,6 +458,23 @@ export default function MapTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tiltAngle])
 
+  // ── VWorld DEM 경사도 자동 측정 ──
+  const fetchSlope = useCallback(async (lon: number, lat: number) => {
+    setSlopeFetching(true)
+    try {
+      const res = await fetch(`/api/vworld?type=elevation&lon=${lon}&lat=${lat}`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (data?.fallback || data?.error) return
+      if (typeof data.slope === 'number') {
+        setSlopePercent(Math.min(data.slope, 50))
+        setSlopeAuto(true)
+      }
+    } catch { /* 무시 — 수동 조작 유지 */ } finally {
+      setSlopeFetching(false)
+    }
+  }, [])
+
   // ── 주소 → 좌표 변환 (Kakao → Naver → VWorld 순) ──
   const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | { error: string } | null> => {
     const errors: string[] = []
@@ -561,6 +580,7 @@ export default function MapTab() {
         calcPanelsFromPolygon(canvasPoints, areaSqm, scale)
         loadSatelliteTiles(cLon, cLat, z, scale)
         fetchKierData(lat, lon, tiltAngle)
+        fetchSlope(lon, lat)
       } else {
         // 필지 경계 없음 — 좌표 핀만 표시, 수동 드로우 안내
         const defaultZ = 18
@@ -578,6 +598,7 @@ export default function MapTab() {
         setSearchError('위치를 찾았지만 필지 경계를 불러올 수 없습니다.\n"직접 그리기"로 부지를 표시해 주세요.')
         loadSatelliteTiles(lon, lat, defaultZ, defaultScale)
         fetchKierData(lat, lon, tiltAngle)
+        fetchSlope(lon, lat)
       }
 
     } catch { setSearchError('검색 중 오류가 발생했습니다.')
@@ -891,12 +912,16 @@ export default function MapTab() {
               </div>
             </div>
             <div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <label className="text-xs text-gray-500 font-medium">경사도 (지형)</label>
-                <span className="text-sm font-bold text-orange-600">{slopePercent}%</span>
+                <div className="flex items-center gap-1.5">
+                  {slopeFetching && <span className="text-xs text-blue-400">측정 중…</span>}
+                  {slopeAuto && !slopeFetching && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded">자동측정</span>}
+                  <span className="text-sm font-bold text-orange-600">{slopePercent}%</span>
+                </div>
               </div>
               <input type="range" min={0} max={50} value={slopePercent}
-                onChange={e => setSlopePercent(Number(e.target.value))} className="mt-1 w-full"/>
+                onChange={e => { setSlopePercent(Number(e.target.value)); setSlopeAuto(false) }} className="mt-1 w-full"/>
               {slopePercent > 0
                 ? <div className="mt-1 text-xs text-orange-600">면적 보정: ×{(Math.cos(Math.atan(slopePercent / 100)) * 100).toFixed(1)}%</div>
                 : <div className="mt-1 text-xs text-gray-400">평지 (보정 없음)</div>}

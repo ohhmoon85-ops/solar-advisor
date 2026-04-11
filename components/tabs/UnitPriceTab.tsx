@@ -3,6 +3,10 @@
 import { useState, useEffect } from 'react'
 import { useSolarStore } from '@/store/useStore'
 import { SMP, REC_PRICE } from '@/lib/constants'
+import { DEFAULT_POLICY_LOANS } from '@/lib/staticData'
+import type { PolicyLoanRate } from '@/lib/staticData'
+
+const LS_LOAN_KEY = 'solar_policy_loans'
 
 // 분기 공시 일정 계산
 function getNextQuarterAnnouncement(): string {
@@ -34,6 +38,30 @@ export default function UnitPriceTab() {
   const [alertDismissed, setAlertDismissed] = useState(false)
   const [smpFetching, setSmpFetching] = useState(false)
   const [smpFetchMsg, setSmpFetchMsg] = useState('')
+  const [loans, setLoans] = useState<PolicyLoanRate[]>(DEFAULT_POLICY_LOANS)
+  const [loanEditing, setLoanEditing] = useState<string | null>(null)
+  const [loanForm, setLoanForm] = useState<PolicyLoanRate | null>(null)
+
+  // 정책금리 localStorage 로드
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_LOAN_KEY)
+      if (raw) setLoans(JSON.parse(raw))
+    } catch { /* ignore */ }
+  }, [])
+
+  const saveLoanItem = (item: PolicyLoanRate) => {
+    const next = loans.map(l => l.id === item.id ? item : l)
+    setLoans(next)
+    try { localStorage.setItem(LS_LOAN_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+    setLoanEditing(null)
+    setLoanForm(null)
+  }
+
+  const resetLoans = () => {
+    setLoans(DEFAULT_POLICY_LOANS)
+    try { localStorage.removeItem(LS_LOAN_KEY) } catch { /* ignore */ }
+  }
 
   // 페이지 로드 시 localStorage에서 단가 초기화
   useEffect(() => {
@@ -412,6 +440,75 @@ export const REC_PRICE = {
               <li>• 계약 전 현물시장 평균 3개월치 확인 권장</li>
             </ul>
           </div>
+        </div>
+      </div>
+
+      {/* ── 정책금리 섹션 ── */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+              <span>🏦</span> 태양광 정책금융 금리 현황
+            </h4>
+            <p className="text-xs text-gray-500 mt-0.5">매년 변경되는 정책금리를 수정할 수 있습니다. 한도 초과분은 일반 은행 대출 금리를 적용하세요.</p>
+          </div>
+          <button onClick={resetLoans} className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 px-2 py-1 rounded">
+            기본값 복원
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-gray-50 text-gray-600">
+                <th className="text-left p-2 border border-gray-200">기관</th>
+                <th className="text-left p-2 border border-gray-200">사업명</th>
+                <th className="text-center p-2 border border-gray-200">금리</th>
+                <th className="text-center p-2 border border-gray-200">융자비율</th>
+                <th className="text-center p-2 border border-gray-200">한도(만원)</th>
+                <th className="text-left p-2 border border-gray-200">대상</th>
+                <th className="text-center p-2 border border-gray-200">기준연도</th>
+                <th className="text-center p-2 border border-gray-200">수정</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loans.map(loan => (
+                loanEditing === loan.id && loanForm ? (
+                  <tr key={loan.id} className="bg-blue-50">
+                    <td className="p-1 border border-gray-200"><input className="w-full border rounded px-1 py-0.5 text-xs" value={loanForm.institution} onChange={e => setLoanForm({...loanForm, institution: e.target.value})} /></td>
+                    <td className="p-1 border border-gray-200"><input className="w-full border rounded px-1 py-0.5 text-xs" value={loanForm.program} onChange={e => setLoanForm({...loanForm, program: e.target.value})} /></td>
+                    <td className="p-1 border border-gray-200"><input type="number" step="0.1" className="w-16 border rounded px-1 py-0.5 text-xs text-center" value={loanForm.rate} onChange={e => setLoanForm({...loanForm, rate: parseFloat(e.target.value)})} /></td>
+                    <td className="p-1 border border-gray-200"><input type="number" className="w-16 border rounded px-1 py-0.5 text-xs text-center" value={loanForm.limitRatio} onChange={e => setLoanForm({...loanForm, limitRatio: parseInt(e.target.value)})} /></td>
+                    <td className="p-1 border border-gray-200"><input type="number" className="w-20 border rounded px-1 py-0.5 text-xs text-center" value={loanForm.limitAmountMan} onChange={e => setLoanForm({...loanForm, limitAmountMan: parseInt(e.target.value)})} /></td>
+                    <td className="p-1 border border-gray-200"><input className="w-full border rounded px-1 py-0.5 text-xs" value={loanForm.target} onChange={e => setLoanForm({...loanForm, target: e.target.value})} /></td>
+                    <td className="p-1 border border-gray-200"><input type="number" className="w-16 border rounded px-1 py-0.5 text-xs text-center" value={loanForm.year} onChange={e => setLoanForm({...loanForm, year: parseInt(e.target.value)})} /></td>
+                    <td className="p-1 border border-gray-200 text-center">
+                      <button onClick={() => saveLoanItem(loanForm)} className="text-xs bg-blue-500 text-white px-2 py-0.5 rounded mr-1">저장</button>
+                      <button onClick={() => { setLoanEditing(null); setLoanForm(null) }} className="text-xs bg-gray-200 px-2 py-0.5 rounded">취소</button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={loan.id} className="hover:bg-gray-50">
+                    <td className="p-2 border border-gray-200 font-medium text-gray-800">{loan.institution}</td>
+                    <td className="p-2 border border-gray-200 text-gray-700">{loan.program}</td>
+                    <td className="p-2 border border-gray-200 text-center font-bold text-blue-600">{loan.rate}%</td>
+                    <td className="p-2 border border-gray-200 text-center text-gray-600">최대 {loan.limitRatio}%</td>
+                    <td className="p-2 border border-gray-200 text-center text-gray-600">{loan.limitAmountMan === 0 ? '제한없음' : fmt(loan.limitAmountMan)}</td>
+                    <td className="p-2 border border-gray-200 text-gray-600">{loan.target}</td>
+                    <td className="p-2 border border-gray-200 text-center text-gray-500">{loan.year}년</td>
+                    <td className="p-2 border border-gray-200 text-center">
+                      <button onClick={() => { setLoanEditing(loan.id); setLoanForm({...loan}) }} className="text-xs text-blue-500 hover:underline">수정</button>
+                    </td>
+                  </tr>
+                )
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+          <span className="font-semibold">💡 한도 초과분 안내:</span> 정책금융 한도를 초과하는 금액은 시중은행 일반대출(연 3.5~6%)을 별도 적용해야 합니다.
+          수익성 탭에서 대출금리를 직접 입력할 수 있습니다.
         </div>
       </div>
     </div>
