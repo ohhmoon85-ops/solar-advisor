@@ -477,8 +477,7 @@ export default function MapTab() {
       const point = coordData?.response?.result?.point
       if (!point) {
         const detail = vwStatus && vwStatus !== 'OK' ? ' (상태: ' + vwStatus + ')' : ''
-        setSearchError('주소를 찾을 수 없습니다' + detail + '.
-지번/도로명 형식: 경기도 동두천시 하봉암동 3-1')
+        setSearchError('주소를 찾을 수 없습니다' + detail + '.\n지번/도로명 형식: 경기도 동두천시 하봉암동 3-1')
         return
       }
       const lon = parseFloat(point.x)
