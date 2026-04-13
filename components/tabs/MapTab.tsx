@@ -379,9 +379,14 @@ export default function MapTab() {
       for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
         for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
           const cx = x + panelPxW / 2, cy = y + panelPxH / 2
-          // 패널 중심이 경계선에서 marginPx 이상 안쪽에 있어야 함
-          if (isPointInPolygon(cx, cy, pts) &&
-              minDistToPolygonEdge(cx, cy, pts) >= marginPx &&
+          // 패널 4 꼭짓점 모두 지번 경계선에서 marginPx 이상 안쪽에 있어야 함 (경계 침범 방지)
+          const corners = [
+            { x, y }, { x: x + panelPxW, y },
+            { x, y: y + panelPxH }, { x: x + panelPxW, y: y + panelPxH },
+          ]
+          if (corners.every(c =>
+                isPointInPolygon(c.x, c.y, pts) &&
+                minDistToPolygonEdge(c.x, c.y, pts) >= marginPx) &&
               !holePolygons.some(hole => isPointInPolygon(cx, cy, hole)))
             rects.push({ x, y, w: panelPxW, h: panelPxH })
         }
@@ -582,6 +587,35 @@ export default function MapTab() {
       ctx.stroke()
     }
 
+    // ❷-c 마진 경계선 시각화 (설치 가능 영역 내경계 점선 표시)
+    if (isComplete && points.length >= 3) {
+      const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
+      const marginPx = marginM / pixelScale
+      // 각 꼭짓점을 중심 방향으로 marginPx만큼 이동한 내접 다각형 근사
+      const cx0 = points.reduce((s, p) => s + p.x, 0) / points.length
+      const cy0 = points.reduce((s, p) => s + p.y, 0) / points.length
+      const innerPts = points.map(p => {
+        const dx = cx0 - p.x, dy = cy0 - p.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (dist < 0.001) return p
+        return { x: p.x + (dx / dist) * marginPx, y: p.y + (dy / dist) * marginPx }
+      })
+      ctx.beginPath()
+      ctx.moveTo(innerPts[0].x, innerPts[0].y)
+      innerPts.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
+      ctx.closePath()
+      ctx.setLineDash([4, 4])
+      ctx.strokeStyle = 'rgba(251,146,60,0.85)'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+      ctx.setLineDash([])
+      // 마진 라벨
+      const lx = innerPts[0].x + 4, ly = innerPts[0].y - 4
+      ctx.font = '9px sans-serif'; ctx.textAlign = 'left'
+      ctx.fillStyle = 'rgba(251,146,60,0.95)'
+      ctx.fillText(`경계마진 ${marginM}m`, lx, ly)
+    }
+
     // ❷-b 제외구역 (hole) — 빨간 점선
     holePolygons.forEach(hole => {
       if (hole.length < 3) return
@@ -693,19 +727,47 @@ export default function MapTab() {
       ctx.fillText(label, cx, cy + 4)
     }
 
-    // ❼ 축척 표시 (지도 축척 = CAD 축척 일치 확인용)
+    // ❼ 축척 텍스트 (왼쪽 하단)
     const scaleLabel = satZoom > 0
       ? `축척 Z${satZoom}: 1px = ${pixelScale.toFixed(3)}m  (지도=CAD 일치)`
       : `축척: 1px = ${pixelScale.toFixed(3)}m`
-    ctx.fillStyle = satTiles.length > 0 ? 'rgba(255,255,255,0.9)' : '#94a3b8'
     ctx.font = '11px sans-serif'; ctx.textAlign = 'left'
     if (satTiles.length > 0) {
       const sw = ctx.measureText(scaleLabel).width
       ctx.fillStyle = 'rgba(0,0,0,0.45)'
       ctx.fillRect(4, CANVAS_H - 20, sw + 8, 16)
       ctx.fillStyle = 'rgba(255,255,255,0.95)'
+    } else {
+      ctx.fillStyle = '#94a3b8'
     }
     ctx.fillText(scaleLabel, 8, CANVAS_H - 8)
+
+    // ❼-b 시각적 축척바 (오른쪽 하단) — 지도·CAD 축척 일치 검증용
+    {
+      const candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+      const targetBarPx = 80
+      const barM = candidates.find(m => m / pixelScale >= targetBarPx) ?? 500
+      const rawBarPx = barM / pixelScale
+      const dispPx = Math.min(rawBarPx, CANVAS_W * 0.28)
+      const barX = CANVAS_W - dispPx - 16
+      const barY = CANVAS_H - 10
+      const onMap = satTiles.length > 0 || (screenshotImg !== null)
+      const barFg = onMap ? 'rgba(255,255,255,0.97)' : '#334155'
+      const barBg = onMap ? 'rgba(0,0,0,0.50)' : 'rgba(241,245,249,0.92)'
+      ctx.fillStyle = barBg
+      ctx.fillRect(barX - 5, barY - 16, dispPx + 10, 20)
+      ctx.strokeStyle = barFg; ctx.lineWidth = 2.5
+      // 가로 메인 선
+      ctx.beginPath(); ctx.moveTo(barX, barY); ctx.lineTo(barX + dispPx, barY); ctx.stroke()
+      // 양 끝 눈금
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(barX, barY - 5); ctx.lineTo(barX, barY + 3); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(barX + dispPx, barY - 5); ctx.lineTo(barX + dispPx, barY + 3); ctx.stroke()
+      // 라벨
+      ctx.fillStyle = barFg
+      ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'
+      ctx.fillText(`${barM}m`, barX + dispPx / 2, barY - 5)
+    }
 
     // ❽ VWorld 배지
     if (apiSource === 'api') {
@@ -721,7 +783,7 @@ export default function MapTab() {
   }, [points, isComplete, area, panelRects, spacingValue, panelCount,
       pixelScale, apiSource, satTiles, satZoom,
       screenshotImg, screenshotCentroid, screenshotZoom, holePolygons,
-      parcels, mapMode, drawMode, mousePos])
+      parcels, mapMode, drawMode, mousePos, installType])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -998,8 +1060,14 @@ export default function MapTab() {
         const rects: PanelRect[] = []
         for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
           for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
-            const cx = x + panelPxW / 2, cy = y + panelPxH / 2
-            if (isPointInPolygon(cx, cy, pts) && minDistToPolygonEdge(cx, cy, pts) >= marginPx)
+            // 패널 4 꼭짓점 모두 지번 경계선에서 marginPx 이상 안쪽에 있어야 함
+            const corners = [
+              { x, y }, { x: x + panelPxW, y },
+              { x, y: y + panelPxH }, { x: x + panelPxW, y: y + panelPxH },
+            ]
+            if (corners.every(c =>
+                  isPointInPolygon(c.x, c.y, pts) &&
+                  minDistToPolygonEdge(c.x, c.y, pts) >= marginPx))
               rects.push({ x, y, w: panelPxW, h: panelPxH })
           }
         }
@@ -1627,6 +1695,25 @@ export default function MapTab() {
                 클릭으로 꼭짓점 추가 · <strong>더블클릭</strong>으로 완료
                 {points.length > 0 && <span className="ml-1 text-blue-500">({points.length}점)</span>}
               </div>
+              {satTiles.length === 0 && (
+                <div className="bg-yellow-50 border border-yellow-300 rounded p-1.5 space-y-1">
+                  <div className="text-yellow-700 font-semibold">⚠ 위성사진 없음 — 수동 축척 설정 필수</div>
+                  <div className="text-yellow-600">지번 검색 후 그리기를 권장합니다 (자동 축척)</div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <label className="text-gray-600 whitespace-nowrap">1px =</label>
+                    <input
+                      type="number"
+                      step={0.01}
+                      min={0.001}
+                      value={pixelScale}
+                      onChange={e => setPixelScale(Math.max(0.001, Number(e.target.value)))}
+                      className="w-20 border border-gray-300 rounded px-1.5 py-0.5 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                    <span className="text-gray-600">m/px</span>
+                  </div>
+                  <div className="text-gray-400">캔버스 800px 기준 총 {(pixelScale * 800).toFixed(0)}m 폭</div>
+                </div>
+              )}
               {points.length > 0 && (
                 <button
                   onClick={handleUndoPoint}
