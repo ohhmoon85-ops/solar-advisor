@@ -98,6 +98,44 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    // VWorld WMTS 지적도 타일 (LP 레이어 — 연속지적도)
+    if (type === 'cadtile') {
+      const z = searchParams.get('z')
+      const x = searchParams.get('x')
+      const y = searchParams.get('y')
+      if (!z || !x || !y) return NextResponse.json({ error: 'z,x,y required' }, { status: 400 })
+      const tileUrl = `https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/LP/${z}/${y}/${x}.png`
+      const tileRes = await vwFetch(tileUrl)
+      if (!tileRes.ok) return new Response(null, { status: 404 })
+      const buf = await tileRes.arrayBuffer()
+      const ct = tileRes.headers.get('content-type') ?? 'image/png'
+      return new Response(buf, {
+        headers: {
+          'Content-Type': ct,
+          'Cache-Control': 'public, max-age=3600',
+        },
+      })
+    }
+
+    // VWorld WMTS 기본지도 타일 (Base 레이어 — 도로·건물)
+    if (type === 'basetile') {
+      const z = searchParams.get('z')
+      const x = searchParams.get('x')
+      const y = searchParams.get('y')
+      if (!z || !x || !y) return NextResponse.json({ error: 'z,x,y required' }, { status: 400 })
+      const tileUrl = `https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Base/${z}/${y}/${x}.png`
+      const tileRes = await vwFetch(tileUrl)
+      if (!tileRes.ok) return new Response(null, { status: 404 })
+      const buf = await tileRes.arrayBuffer()
+      const ct = tileRes.headers.get('content-type') ?? 'image/png'
+      return new Response(buf, {
+        headers: {
+          'Content-Type': ct,
+          'Cache-Control': 'public, max-age=3600',
+        },
+      })
+    }
+
     if (type === 'parcel') {
       const lon = searchParams.get('lon') ?? ''
       const lat = searchParams.get('lat') ?? ''

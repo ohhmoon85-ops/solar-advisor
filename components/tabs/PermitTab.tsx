@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { PERMIT_STAGE1, PERMIT_STAGE2 } from '@/lib/staticData'
+import { PERMIT_STAGE1, PERMIT_STAGE2, type PermitItem } from '@/lib/staticData'
 
 type InstallFilter = 'all' | 'building' | 'land'
 
@@ -104,10 +104,6 @@ export default function PermitTab() {
     }
   }
 
-  type PermitItem = typeof PERMIT_STAGE1[0] & {
-    formUrl?: string; formNote?: string; formDownload?: string
-  }
-
   const ItemRow = ({ item }: { item: PermitItem }) => {
     const isChecked = checked[item.id] ?? false
     const isRequired = item.required
@@ -134,12 +130,12 @@ export default function PermitTab() {
             <span className="flex-shrink-0 text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-semibold">필수</span>
           )}
         </div>
-        {(item.formUrl || item.formNote || item.formDownload) && (
+        {(item.formUrl || item.formNote || item.formDownload || item.formExample) && (
           <div className="px-3 pb-2.5 flex items-start gap-2 border-t border-gray-100 pt-2">
             {item.formNote && (
               <span className="text-xs text-gray-500 flex-1">{item.formNote}</span>
             )}
-            <div className="flex-shrink-0 flex gap-1.5">
+            <div className="flex-shrink-0 flex flex-wrap gap-1.5">
               {/* 내부 저장 서식 — 직접 열기 */}
               {item.formUrl && (
                 <a
@@ -156,7 +152,19 @@ export default function PermitTab() {
                   {isInternal ? '📄 서식 열기' : '↗ 신청'}
                 </a>
               )}
-              {/* 외부 다운로드 링크 — 서식 저장 안내용 */}
+              {/* 작성 예시 (영양군청 등 실제 작성 사례) */}
+              {item.formExample && (
+                <a
+                  href={item.formExample}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  className="flex items-center gap-1 text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded hover:bg-purple-100 transition-colors"
+                >
+                  📋 작성 예시
+                </a>
+              )}
+              {/* 외부 다운로드 링크 */}
               {item.formDownload && (
                 <a
                   href={item.formDownload}

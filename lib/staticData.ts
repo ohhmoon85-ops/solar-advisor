@@ -156,26 +156,35 @@ export const DEFAULT_POLICY_LOANS: PolicyLoanRate[] = [
   },
 ]
 
-// ── 서식 파일 경로 안내 ─────────────────────────────────────────────
-// 파일을 solar-advisor/public/forms/ 에 저장하면 formUrl이 자동 연결됩니다.
-// 파일명 규칙: /forms/[id]_[서식명].pdf  (HWP도 가능)
-// ──────────────────────────────────────────────────────────────────
+// ── 인허가 서류 아이템 타입 ────────────────────────────────────────
+export interface PermitItem {
+  id: string
+  text: string
+  required: boolean
+  buildingOnly: boolean
+  landOnly: boolean
+  formUrl?: string       // 내부 서식 파일(/forms/...) 또는 외부 신청 링크
+  formExample?: string   // 실제 작성 예시 파일 (영양군청 버전 등)
+  formNote?: string      // 안내 메모
+  formDownload?: string  // 외부 서식 다운로드 링크
+}
 
-export const PERMIT_STAGE1 = [
+export const PERMIT_STAGE1: PermitItem[] = [
   { id: 'p1-1', text: '발전사업허가 신청서 (양식)', required: false, buildingOnly: false, landOnly: false,
-    formUrl: '/forms/p1-1_발전사업허가신청서.pdf',
-    formNote: '산업통상자원부 → 민원 → 서식자료 → "발전사업허가신청서" 검색 후 저장',
-    formDownload: 'https://www.motie.go.kr/www/bbs/view.do?bbs_cd_n=81' },
+    formUrl: '/forms/전기사업 허가신청서.hwp',
+    formExample: '/forms/전기사업허가신청서(영양군청).hwp',
+    formNote: '빈 서식 열기 · 영양군청 작성 예시 참고 가능' },
   { id: 'p1-2', text: '★ 사업계획서 (양식, 사업주 막도장) — 막도장 필수', required: true, buildingOnly: false, landOnly: false,
-    formUrl: '/forms/p1-2_태양광사업계획서.pdf',
-    formNote: '산업통상자원부 → 민원 → 서식자료 → "태양광 사업계획서" 검색 후 저장',
+    formNote: '산업통상자원부 → 민원 → 서식자료 → "태양광 사업계획서" 검색',
     formDownload: 'https://www.motie.go.kr/www/bbs/view.do?bbs_cd_n=81' },
   { id: 'p1-3', text: '현장사진 — 전봇대명판 / 전체 드론사진', required: false, buildingOnly: false, landOnly: false,
     formNote: '직접 촬영 — 전봇대 명판·전체 부지·드론 사진 포함' },
   { id: 'p1-4', text: '★ 투자확약서', required: true, buildingOnly: false, landOnly: false,
-    formUrl: '/forms/p1-4_투자확약서.pdf',
-    formNote: '산업통상자원부 → 민원 → 서식자료 → "투자확약서" 검색 후 저장',
+    formNote: '산업통상자원부 → 민원 → 서식자료 → "투자확약서" 검색',
     formDownload: 'https://www.motie.go.kr/www/bbs/view.do?bbs_cd_n=81' },
+  { id: 'p1-4b', text: '여신 취급 의향서 (금융기관 융자 이용 시)', required: false, buildingOnly: false, landOnly: false,
+    formUrl: '/forms/여신 취급 의향서(강진중).hwp',
+    formNote: '사업비 융자 신청 시 금융기관에서 발행 — 서식 참고용 (강진중 작성 사례)' },
   { id: 'p1-5', text: '★ 잔액증명확인서 — 사업비 15% 이상 (100kW→최소 1,500만원) — 거래은행 발급', required: true, buildingOnly: false, landOnly: false,
     formNote: '거래 은행 방문 또는 인터넷뱅킹 → 잔액증명서 발급 (별도 서식 없음)' },
   { id: 'p1-6', text: '배치도/측면도 · 단선결선도', required: false, buildingOnly: false, landOnly: false,
@@ -196,24 +205,26 @@ export const PERMIT_STAGE1 = [
     formUrl: 'https://www.gov.kr/portal/service/serviceInfo/PTR000050055',
     formNote: '정부24(주민등록등본·가족관계증명) / 인감증명서는 주민센터 방문 발급' },
   { id: 'p1-10', text: '토지사용승낙서 (토지주 다를 때)', required: false, buildingOnly: false, landOnly: true,
-    formUrl: '/forms/p1-10_토지사용승낙서.pdf',
-    formNote: '자유 서식 — 토지주 인감도장 날인 필수. 아래 서식 참고 후 수정 사용' },
+    formUrl: '/forms/토지사용승락서.rtf',
+    formNote: '자유 서식 — 토지주 인감도장 날인 필수. 서식 참고 후 수정 사용' },
   { id: 'p1-11', text: '모듈 · 인버터 · 접속함 자료', required: false, buildingOnly: false, landOnly: false,
     formNote: '제조사 제품사양서 · KS인증서 첨부 (별도 서식 없음)' },
 ]
 
-export const PERMIT_STAGE2 = [
+export const PERMIT_STAGE2: PermitItem[] = [
   { id: 'p2-1', text: '★ [개발행위] 사업계획서 — 면적/증량/체적 계산서 포함', required: true, buildingOnly: false, landOnly: false,
     formNote: '시·군·구청 개발행위허가 담당에서 서식 직접 수령 (지자체별 양식 상이)' },
   { id: 'p2-2', text: '[개발행위] 구조물검토서 · 배치도/측면도 · 토지 관련 서류 (13종)', required: false, buildingOnly: false, landOnly: false,
     formNote: '구조기술사 작성 / 설계사무소 도면 — 전문가 의뢰' },
   { id: 'p2-3', text: '[공사신고] 신청서 · 시방서 · 전기도면 · 감리배치확인서 · 구조검토서', required: false, buildingOnly: false, landOnly: false,
-    formUrl: '/forms/p2-3_공사계획신고서.pdf',
-    formNote: '산업통상자원부 → 민원 → 서식자료 → "공사계획 신고서" 검색 후 저장',
-    formDownload: 'https://www.motie.go.kr/www/bbs/view.do?bbs_cd_n=81' },
+    formUrl: '/forms/공사계획(신고서¸ 변경신고서).hwp',
+    formNote: '공사계획 신고서 및 변경신고서 포함 서식' },
+  { id: 'p2-3b', text: '[한전] 전기사용신청서 — 계통 연결 신청', required: false, buildingOnly: false, landOnly: false,
+    formUrl: '/forms/전기사용신청서.hwp',
+    formNote: '한국전력 지사 제출 — 고압 계통 연결 신청 (공사신고 이후)' },
   { id: 'p2-4', text: '★ [PPA] PPA 신청서 (2024.06.10 신양식) + 개발행위허가증', required: true, buildingOnly: false, landOnly: false,
-    formUrl: '/forms/p2-4_PPA신청서.pdf',
-    formNote: '한국전력 지역 지사 방문 또는 아래 링크에서 신양식 수령 (2024.06.10 이후 버전)',
+    formUrl: '/forms/사업용전력구입계약서(PPA)신청서.hwp',
+    formNote: '한국전력 지역 지사 방문 · 반드시 2024.06.10 이후 신양식 사용',
     formDownload: 'https://home.kepco.co.kr/kepco/CM/F/htmlView/CMFBHP00101.do' },
   { id: 'p2-5', text: '★ [PPA] 사용전검사 종료 후 정계약', required: true, buildingOnly: false, landOnly: false,
     formUrl: 'https://home.kepco.co.kr/kepco/CM/F/htmlView/CMFBHP00101.do',
@@ -225,7 +236,6 @@ export const PERMIT_STAGE2 = [
     formUrl: 'https://rps.energy.or.kr',
     formNote: '한국에너지공단 RPS 시스템(rps.energy.or.kr) → 설비확인 신청 (온라인 접수)' },
   { id: 'p2-8', text: '★ 사업개시 신고 — 60일 이내 (미신고 벌금 60만원) — 에너지과', required: true, buildingOnly: false, landOnly: false,
-    formUrl: '/forms/p2-8_사업개시신고서.pdf',
-    formNote: '산업통상자원부 → 민원 → 서식자료 → "사업개시 신고서" 검색 후 저장',
-    formDownload: 'https://www.motie.go.kr/www/bbs/view.do?bbs_cd_n=81' },
+    formUrl: '/forms/사업개시신고서_태양광.hwp',
+    formNote: '사용전검사 완료 후 60일 이내 시·군·구청 에너지과 제출 필수' },
 ]

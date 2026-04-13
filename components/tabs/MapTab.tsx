@@ -24,9 +24,32 @@ const LOAD_LIMITS: Record<StructureType, number | null> = {
 const CANVAS_W = 800
 const CANVAS_H = 500
 
+// 지번별 색상 (최대 5개 필지)
+const PARCEL_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'] as const
+
+// 설치 유형별 경계 마진 (미터)
+const BOUNDARY_MARGIN: Record<string, number> = {
+  '건물지붕형': 0.5,
+  '일반토지형': 2.0,
+  '영농형농지': 2.0,
+  '임야형': 2.0,
+  '수상형': 2.0,
+}
+
 interface Point { x: number; y: number }
 interface PanelRect { x: number; y: number; w: number; h: number }
 interface SatTile { img: HTMLImageElement; cx: number; cy: number; px: number }
+
+// 복수 필지 데이터
+interface ParcelInfo {
+  ring: number[][]
+  canvasPoints: Point[]
+  areaSqm: number
+  label: string
+  lon: number
+  lat: number
+  color: string
+}
 
 // ── 지리좌표 헬퍼 (순수함수) ─────────────────────────────────────
 function mpdLon(lat: number) { return 111319.9 * Math.cos((lat * Math.PI) / 180) }
@@ -197,6 +220,25 @@ function detectAllOrangeBoundaries(
   return results
 }
 
+// ── 점 ↔ 선분 최단거리 ────────────────────────────────────────────
+function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.sqrt((px - ax) ** 2 + (py - ay) ** 2)
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
+  return Math.sqrt((px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2)
+}
+
+/** 점에서 폴리곤 경계까지 최단 거리 (픽셀) */
+function minDistToPolygonEdge(px: number, py: number, poly: Point[]): number {
+  let minD = Infinity
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length
+    minD = Math.min(minD, distToSegment(px, py, poly[i].x, poly[i].y, poly[j].x, poly[j].y))
+  }
+  return minD
+}
+
 // ── Ray-casting point-in-polygon ───────────────────────────────────
 function isPointInPolygon(px: number, py: number, poly: Point[]): boolean {
   let inside = false
@@ -238,7 +280,7 @@ export default function MapTab() {
   const blobUrlsRef = useRef<string[]>([]) // cleanup용
 
   // ── 입력 ──
-  const [address, setAddress] = useState('')
+  const [addresses, setAddresses] = useState<string[]>(['', '', '', '', ''])
   const [installType, setInstallType] = useState<string>('건물지붕형')
   const [moduleIndex, setModuleIndex] = useState(0)
   const [tiltAngle, setTiltAngle] = useState(33)
@@ -255,11 +297,16 @@ export default function MapTab() {
   const [isComplete, setIsComplete] = useState(false)
   const [area, setArea] = useState(0)
   const [pixelScale, setPixelScale] = useState(0.1) // m/px
+  const [mousePos, setMousePos] = useState<Point | null>(null)   // 미리보기 선용
 
-  // ── 위성 오버레이 ──
+  // ── 위성/지적도 오버레이 ──
   const [satTiles, setSatTiles] = useState<SatTile[]>([])
   const [satLoading, setSatLoading] = useState(false)
   const [satZoom, setSatZoom] = useState(0)
+  const [mapMode, setMapMode] = useState<'satellite' | 'cadastral'>('satellite')
+
+  // ── 복수 필지 ──
+  const [parcels, setParcels] = useState<ParcelInfo[]>([])
 
   // ── API 상태 ──
   const [searchLoading, setSearchLoading] = useState(false)
@@ -308,7 +355,7 @@ export default function MapTab() {
   }, [])
 
 
-  // ── 패널 배치 (Point-in-Polygon 그리드) ──
+  // ── 패널 배치 (Point-in-Polygon 그리드, 경계 마진 적용) ──
   const calcPanelsFromPolygon = useCallback(
     (pts: Point[], areaSqm: number, scale: number) => {
       if (pts.length < 3) return
@@ -319,31 +366,56 @@ export default function MapTab() {
       const panelPxW = module.w / scale
       const panelPxH = (module.h * Math.cos(ltr)) / scale
       const rowPitch = panelPxH + spacingValue / scale
+
+      // 설치 유형별 경계 마진 (미터 → 픽셀)
+      const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
+      const marginPx = marginM / scale
+
       const minX = Math.min(...pts.map(p => p.x))
       const maxX = Math.max(...pts.map(p => p.x))
       const minY = Math.min(...pts.map(p => p.y))
       const maxY = Math.max(...pts.map(p => p.y))
       const rects: PanelRect[] = []
-      for (let y = minY + 4; y + panelPxH <= maxY - 4; y += rowPitch) {
-        for (let x = minX + 4; x + panelPxW <= maxX - 4; x += panelPxW + 2) {
+      for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
+        for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
           const cx = x + panelPxW / 2, cy = y + panelPxH / 2
+          // 패널 중심이 경계선에서 marginPx 이상 안쪽에 있어야 함
           if (isPointInPolygon(cx, cy, pts) &&
+              minDistToPolygonEdge(cx, cy, pts) >= marginPx &&
               !holePolygons.some(hole => isPointInPolygon(cx, cy, hole)))
             rects.push({ x, y, w: panelPxW, h: panelPxH })
         }
       }
       let finalRects = rects
       let warn = false
+
+      // ── 면적 기반 패널 수 계산 ──
+      // 경계 마진을 고려한 유효 면적 보정 (둘레 × 마진)
+      const perimeterPx = pts.reduce((sum, p, i) => {
+        const j = (i + 1) % pts.length
+        return sum + Math.sqrt((pts[j].x - p.x) ** 2 + (pts[j].y - p.y) ** 2)
+      }, 0)
+      const perimeterM = perimeterPx * scale
+      const effectiveAreaSqm = Math.max(0, areaSqm - perimeterM * marginM)
+      const footprintPerPanel = module.w * (module.h * Math.cos(ltr) + spacingValue)
+      const coverageRatio = isBuilding ? 0.70 : 0.85
+      let count: number
+      if (areaSqm > 10) {
+        count = Math.floor(effectiveAreaSqm * slopeFactor * coverageRatio / footprintPerPanel)
+      } else {
+        count = finalRects.length
+      }
+
       if (isBuilding) {
         const limit = LOAD_LIMITS[structureType]
         if (limit !== null) {
           const maxP = Math.floor((areaSqm * slopeFactor * limit) / 25)
-          if (rects.length > maxP) finalRects = rects.slice(0, maxP)
+          if (count > maxP) count = maxP
+          if (finalRects.length > maxP) finalRects = rects.slice(0, maxP)
           warn = structureType === '샌드위치 패널'
         }
       }
       setStructureWarning(warn)
-      const count = finalRects.length
       const cap = (count * module.watt) / 1000
       const ann = cap * GENERATION_HOURS * 365
       setPanelRects(finalRects)
@@ -354,22 +426,19 @@ export default function MapTab() {
     [moduleIndex, installType, tiltAngle, spacingValue, slopePercent, structureType, holePolygons]
   )
 
-  // ── 위성 타일 로드 ──
-  const loadSatelliteTiles = useCallback(async (
-    cLon: number, cLat: number, z: number, scale: number
+  // ── 타일 로드 공통 함수 ──
+  const loadTiles = useCallback(async (
+    cLon: number, cLat: number, z: number, scale: number, mode: 'satellite' | 'cadastral'
   ) => {
     setSatLoading(true)
     setSatTiles([])
-    // 기존 Blob URL 해제
     blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u))
     blobUrlsRef.current = []
 
     const { tx: ctX, ty: ctY } = lonLatToTile(cLon, cLat, z)
-    // 타일 1개의 크기 (m) → Canvas 픽셀
     const tileMeter = tilePixelScaleM(cLat, z) * 256
     const tilePx = tileMeter / scale
 
-    // 중심 주변 5×5 타일 범위
     const R = 2
     const jobs: Promise<SatTile | null>[] = []
     for (let dy = -R; dy <= R; dy++) {
@@ -379,8 +448,14 @@ export default function MapTab() {
           try {
             const origin = tileOriginLonLat(tx, ty, z)
             const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
-            // ArcGIS World Imagery — CORS 허용, 브라우저 직접 로드 (프록시 불필요)
-            const tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`
+            let tileUrl: string
+            if (mode === 'cadastral') {
+              // VWorld LP (연속지적도) — 서버 프록시 경유 (API키 필요)
+              tileUrl = `/api/vworld?type=cadtile&z=${z}&x=${tx}&y=${ty}`
+            } else {
+              // ArcGIS World Imagery — CORS 허용, 직접 로드
+              tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`
+            }
             return await new Promise<SatTile | null>(resolve => {
               const img = new Image()
               img.crossOrigin = 'anonymous'
@@ -396,6 +471,13 @@ export default function MapTab() {
     setSatTiles(results)
     setSatLoading(false)
   }, [])
+
+  // ── 위성 타일 로드 (하위 호환) ──
+  const loadSatelliteTiles = useCallback(async (
+    cLon: number, cLat: number, z: number, scale: number
+  ) => {
+    return loadTiles(cLon, cLat, z, scale, 'satellite')
+  }, [loadTiles])
 
   // ── Canvas 렌더링 ──
   const drawCanvas = useCallback(() => {
@@ -445,28 +527,60 @@ export default function MapTab() {
       }
     }
 
-    if (points.length === 0) {
+    const hasParcelData = parcels.length > 0
+    const hasManualPoints = points.length > 0 && !hasParcelData
+
+    if (!hasParcelData && points.length === 0) {
       ctx.fillStyle = satTiles.length > 0 ? 'rgba(255,255,255,0.85)' : '#94a3b8'
       ctx.font = '14px sans-serif'; ctx.textAlign = 'center'
-      ctx.fillText('주소를 검색하거나 직접 부지 경계를 그려주세요', CANVAS_W / 2, CANVAS_H / 2 - 12)
+      ctx.fillText('지번을 검색하거나 직접 부지 경계를 그려주세요', CANVAS_W / 2, CANVAS_H / 2 - 12)
       ctx.fillText('(더블클릭으로 완료)', CANVAS_W / 2, CANVAS_H / 2 + 12)
       ctx.fillStyle = '#94a3b8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'
       ctx.fillText(`축척: 1px = ${pixelScale.toFixed(3)}m`, 8, CANVAS_H - 8)
       return
     }
 
-    // ❷ 필지 경계 폴리곤
-    ctx.beginPath()
-    ctx.moveTo(points[0].x, points[0].y)
-    points.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
-    if (isComplete) ctx.closePath()
-    ctx.fillStyle = satTiles.length > 0
-      ? 'rgba(59,130,246,0.15)'
-      : (apiSource === 'api' ? 'rgba(16,185,129,0.08)' : 'rgba(59,130,246,0.08)')
-    ctx.fill()
-    ctx.strokeStyle = apiSource === 'api' ? '#10b981' : '#3b82f6'
-    ctx.lineWidth = satTiles.length > 0 ? 2.5 : 2
-    ctx.stroke()
+    // ❷ 복수 필지 경계 — API에서 가져온 경우
+    if (hasParcelData) {
+      parcels.forEach((parcel, pi) => {
+        const pts = parcel.canvasPoints
+        if (pts.length < 2) return
+        ctx.beginPath()
+        ctx.moveTo(pts[0].x, pts[0].y)
+        pts.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
+        ctx.closePath()
+        // 각 필지별 색상으로 채우기
+        const hexColor = parcel.color
+        ctx.fillStyle = hexColor + '22' // 투명도 ~13%
+        ctx.fill()
+        ctx.strokeStyle = hexColor
+        ctx.lineWidth = 2.5
+        ctx.stroke()
+        // 필지 번호 레이블
+        const lcx = pts.reduce((s, p) => s + p.x, 0) / pts.length
+        const lcy = pts.reduce((s, p) => s + p.y, 0) / pts.length
+        ctx.fillStyle = hexColor
+        ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'
+        ctx.fillText(`필지${pi + 1}`, lcx, lcy - 14)
+        ctx.font = '9px sans-serif'
+        ctx.fillText(parcel.label || '', lcx, lcy - 2)
+      })
+    }
+
+    // ❷-단독 필지 경계 폴리곤 (수동 드로잉)
+    if (hasManualPoints) {
+      ctx.beginPath()
+      ctx.moveTo(points[0].x, points[0].y)
+      points.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
+      if (isComplete) ctx.closePath()
+      ctx.fillStyle = satTiles.length > 0
+        ? 'rgba(59,130,246,0.15)'
+        : (apiSource === 'api' ? 'rgba(16,185,129,0.08)' : 'rgba(59,130,246,0.08)')
+      ctx.fill()
+      ctx.strokeStyle = apiSource === 'api' ? '#10b981' : '#3b82f6'
+      ctx.lineWidth = satTiles.length > 0 ? 2.5 : 2
+      ctx.stroke()
+    }
 
     // ❷-b 제외구역 (hole) — 빨간 점선
     holePolygons.forEach(hole => {
@@ -522,6 +636,48 @@ export default function MapTab() {
       ctx.fill()
     })
 
+    // ❺-b 수동 드로잉 미리보기 선 (마우스 추적)
+    if (drawMode && points.length > 0 && mousePos && !isComplete) {
+      const last = points[points.length - 1]
+      // 현재 그릴 선 (점선)
+      ctx.setLineDash([6, 4])
+      ctx.strokeStyle = '#f59e0b'
+      ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(mousePos.x, mousePos.y); ctx.stroke()
+      // 첫 점까지의 닫는 선 (반투명)
+      if (points.length >= 2) {
+        ctx.setLineDash([3, 5])
+        ctx.strokeStyle = 'rgba(245,158,11,0.4)'
+        ctx.lineWidth = 1
+        ctx.beginPath(); ctx.moveTo(mousePos.x, mousePos.y); ctx.lineTo(points[0].x, points[0].y); ctx.stroke()
+      }
+      ctx.setLineDash([])
+
+      // 마우스 위치에 실시간 면적 표시
+      if (points.length >= 2) {
+        const previewPts = [...points, mousePos]
+        let sho = 0
+        for (let i = 0; i < previewPts.length; i++) {
+          const j = (i + 1) % previewPts.length
+          sho += previewPts[i].x * previewPts[j].y - previewPts[j].x * previewPts[i].y
+        }
+        const previewArea = Math.abs(sho / 2) * pixelScale * pixelScale
+        const areaLabel = previewArea >= 10000
+          ? `${(previewArea / 10000).toFixed(2)}ha`
+          : `${previewArea.toFixed(0)}m²`
+        ctx.font = 'bold 11px sans-serif'
+        const tw = ctx.measureText(areaLabel).width
+        const bx = mousePos.x + 10, by = mousePos.y - 8
+        ctx.fillStyle = 'rgba(245,158,11,0.9)'
+        ctx.fillRect(bx - 4, by - 13, tw + 8, 18)
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'
+        ctx.fillText(areaLabel, bx, by)
+      }
+      // 현재 마우스 위치 점
+      ctx.beginPath(); ctx.arc(mousePos.x, mousePos.y, 3, 0, Math.PI * 2)
+      ctx.fillStyle = '#f59e0b'; ctx.fill()
+    }
+
     // ❻ 중심 레이블
     if (isComplete && area > 0) {
       const cx = points.reduce((s, p) => s + p.x, 0) / points.length
@@ -553,14 +709,19 @@ export default function MapTab() {
 
     // ❽ VWorld 배지
     if (apiSource === 'api') {
-      ctx.fillStyle = satTiles.length > 0 ? 'rgba(16,185,129,0.85)' : 'rgba(16,185,129,0.9)'
-      ctx.fillRect(CANVAS_W - 148, 8, 140, 20)
+      const badgeLabel = parcels.length > 1
+        ? `VWorld ${parcels.length}개 필지 경계`
+        : 'VWorld 필지 자동 경계'
+      ctx.fillStyle = 'rgba(16,185,129,0.85)'
+      const bw = ctx.measureText(badgeLabel).width + 20
+      ctx.fillRect(CANVAS_W - bw - 4, 8, bw + 4, 20)
       ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'
-      ctx.fillText('🛰 VWorld 필지 자동 경계', CANVAS_W - 78, 21)
+      ctx.fillText(badgeLabel, CANVAS_W - (bw + 4) / 2, 21)
     }
   }, [points, isComplete, area, panelRects, spacingValue, panelCount,
       pixelScale, apiSource, satTiles, satZoom,
-      screenshotImg, screenshotCentroid, screenshotZoom, holePolygons])
+      screenshotImg, screenshotCentroid, screenshotZoom, holePolygons,
+      parcels, mapMode, drawMode, mousePos])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -610,6 +771,19 @@ export default function MapTab() {
     fetchKierData(apiCoords.lat, apiCoords.lon, tiltAngle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tiltAngle])
+
+  // mapMode 변경 시 타일 재로드
+  useEffect(() => {
+    if (satZoom === 0 || !apiCoords) return
+    const allCoords = parcels.length > 0
+      ? parcels.flatMap(p => p.ring)
+      : null
+    if (!allCoords) return
+    const cLon = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length
+    const cLat = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length
+    loadTiles(cLon, cLat, satZoom, pixelScale, mapMode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapMode])
 
   // ── VWorld DEM 경사도 자동 측정 ──
   const fetchSlope = useCallback(async (lon: number, lat: number) => {
@@ -700,90 +874,164 @@ export default function MapTab() {
     return { error: errors.join(' / ') }
   }
 
-  // ── 주소 검색 핸들러 ──
+  // ── 단일 지번 필지 경계 조회 ──
+  const fetchParcelRing = async (lon: number, lat: number): Promise<{
+    ring: number[][], label: string
+  } | null> => {
+    try {
+      const parcelRes = await fetch(`/api/vworld?type=parcel&lon=${lon}&lat=${lat}`)
+      const parcelData = await parcelRes.json()
+      const features = parcelData?.response?.result?.featureCollection?.features
+      if (!features?.length) return null
+      const geometry = features[0].geometry
+      let rawCoords: number[][] = []
+      if (geometry.type === 'Polygon') rawCoords = geometry.coordinates[0]
+      else if (geometry.type === 'MultiPolygon') rawCoords = geometry.coordinates[0][0]
+      if (rawCoords.length < 3) return null
+      const closed = rawCoords[0][0] === rawCoords[rawCoords.length - 1][0] &&
+        rawCoords[0][1] === rawCoords[rawCoords.length - 1][1]
+      const ring = closed ? rawCoords.slice(0, -1) : rawCoords
+      const attrs = features[0].properties ?? {}
+      const label = [attrs.EMD_NM, attrs.RI_NM, attrs.JIBUN].filter(Boolean).join(' ')
+      return { ring, label: label || `${lat.toFixed(4)}, ${lon.toFixed(4)}` }
+    } catch { return null }
+  }
+
+  // ── 다중 지번 검색 핸들러 ──
   const handleAddressSearch = async () => {
-    const q = address.trim()
-    if (!q) return
+    const queries = addresses.map(a => a.trim()).filter(Boolean)
+    if (queries.length === 0) return
     setSearchLoading(true)
     setSearchError('')
     setParcelLabel('')
     setKierResult(null)
+    setParcels([])
+    setPoints([]); setArea(0); setPanelRects([]); setPanelCount(0)
+    setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
 
     try {
-      const coords = await geocodeAddress(q)
-      if (!coords || 'error' in coords) {
-        const detail = coords && 'error' in coords ? '\n' + coords.error : ''
-        setSearchError('주소를 찾을 수 없습니다.' + detail)
+      // 모든 지번 병렬 조회
+      const coordResults = await Promise.all(queries.map(q => geocodeAddress(q)))
+      const parcelResults: ParcelInfo[] = []
+
+      for (let i = 0; i < coordResults.length; i++) {
+        const coords = coordResults[i]
+        if (!coords || 'error' in coords) continue
+        const { lon, lat } = coords
+        const parcelData = await fetchParcelRing(lon, lat)
+        if (!parcelData) continue
+        parcelResults.push({
+          ring: parcelData.ring,
+          canvasPoints: [], // 나중에 공통 좌표계로 변환
+          areaSqm: geoRingAreaSqm(parcelData.ring),
+          label: parcelData.label,
+          lon, lat,
+          color: PARCEL_COLORS[i % PARCEL_COLORS.length],
+        })
+      }
+
+      if (parcelResults.length === 0) {
+        // 경계 없음 — 첫 번째 좌표로 위성 로드 후 수동 드로우 안내
+        const coords = coordResults.find(c => c && !('error' in c)) as { lon: number; lat: number } | undefined
+        if (coords) {
+          const defaultZ = 18
+          const defaultScale = tilePixelScaleM(coords.lat, defaultZ)
+          setPixelScale(defaultScale); setSatZoom(defaultZ)
+          setApiSource('api')
+          setLocationCoords(coords)
+          setApiCoords(coords)
+          loadTiles(coords.lon, coords.lat, defaultZ, defaultScale, mapMode)
+          fetchKierData(coords.lat, coords.lon, tiltAngle)
+          fetchSlope(coords.lon, coords.lat)
+        }
+        setSearchError('필지 경계를 불러올 수 없습니다.\n"직접 그리기"로 부지를 표시해 주세요.')
         return
       }
-      const { lon, lat } = coords
 
-      // 필지 경계 시도 (VWorld — 실패 시 핀만 표시)
-      let ring: number[][] | null = null
-      try {
-        const parcelRes = await fetch(`/api/vworld?type=parcel&lon=${lon}&lat=${lat}`)
-        const parcelData = await parcelRes.json()
-        const features = parcelData?.response?.result?.featureCollection?.features
-        if (features?.length) {
-          const geometry = features[0].geometry
-          let rawCoords: number[][] = []
-          if (geometry.type === 'Polygon') rawCoords = geometry.coordinates[0]
-          else if (geometry.type === 'MultiPolygon') rawCoords = geometry.coordinates[0][0]
-          if (rawCoords.length >= 3) {
-            const closed = rawCoords[0][0] === rawCoords[rawCoords.length - 1][0] &&
-              rawCoords[0][1] === rawCoords[rawCoords.length - 1][1]
-            ring = closed ? rawCoords.slice(0, -1) : rawCoords
+      // ── 공통 지도 좌표계 계산 (전체 필지가 화면에 들어오도록) ──
+      const allCoords = parcelResults.flatMap(p => p.ring)
+      const cLon = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length
+      const cLat = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length
+      const { z, scale } = computeZoomAndScale(allCoords, cLon, cLat)
 
-            const attrs = features[0].properties ?? {}
-            const label = [attrs.EMD_NM, attrs.RI_NM, attrs.JIBUN].filter(Boolean).join(' ')
-            setParcelLabel(label || `${lat.toFixed(5)}, ${lon.toFixed(5)}`)
+      // 각 필지를 공통 좌표계로 변환
+      const converted = parcelResults.map(p => ({
+        ...p,
+        canvasPoints: p.ring.map(c => geoToCanvas(c[0], c[1], cLon, cLat, scale)),
+      }))
+      setParcels(converted)
+
+      // 전체 합산 면적 및 패널 계산
+      const totalArea = converted.reduce((s, p) => s + p.areaSqm, 0)
+      setArea(totalArea)
+      setPixelScale(scale)
+      setSatZoom(z)
+      setIsComplete(true)
+      setDrawMode(false)
+      setApiSource('api')
+
+      // 첫 번째 필지 기준으로 KIER·경사도·방위각
+      const first = converted[0]
+      setAutoAzimuth(calcAutoAzimuth(first.canvasPoints))
+      setLocationCoords({ lat: first.lat, lon: first.lon })
+      setApiCoords({ lat: first.lat, lon: first.lon })
+      setParcelLabel(converted.map(p => p.label).join(' · '))
+
+      // 각 필지별 패널 계산 후 합산
+      let totalPanelRects: PanelRect[] = []
+      let totalCount = 0
+      for (const parcel of converted) {
+        const module = MODULES[moduleIndex]
+        const isBuilding = installType === '건물지붕형'
+        const slopeFactor = Math.cos(Math.atan(slopePercent / 100))
+        const ltr = (tiltAngle * Math.PI) / 180
+        const panelPxW = module.w / scale
+        const panelPxH = (module.h * Math.cos(ltr)) / scale
+        const rowPitch = panelPxH + spacingValue / scale
+        const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
+        const marginPx = marginM / scale
+        const pts = parcel.canvasPoints
+        const minX = Math.min(...pts.map(p => p.x))
+        const maxX = Math.max(...pts.map(p => p.x))
+        const minY = Math.min(...pts.map(p => p.y))
+        const maxY = Math.max(...pts.map(p => p.y))
+        const rects: PanelRect[] = []
+        for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
+          for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
+            const cx = x + panelPxW / 2, cy = y + panelPxH / 2
+            if (isPointInPolygon(cx, cy, pts) && minDistToPolygonEdge(cx, cy, pts) >= marginPx)
+              rects.push({ x, y, w: panelPxW, h: panelPxH })
           }
         }
-      } catch { /* 필지 경계 없이 계속 */ }
-
-      if (ring) {
-        // 필지 경계 있음 — 완전한 흐름
-        const cLon = ring.reduce((s, c) => s + c[0], 0) / ring.length
-        const cLat = ring.reduce((s, c) => s + c[1], 0) / ring.length
-        const { z, scale } = computeZoomAndScale(ring, cLon, cLat)
-        const canvasPoints = ring.map(c => geoToCanvas(c[0], c[1], cLon, cLat, scale))
-        const areaSqm = geoRingAreaSqm(ring)
-        setAutoAzimuth(calcAutoAzimuth(canvasPoints))
-        setPixelScale(scale)
-        setSatZoom(z)
-        setPoints(canvasPoints)
-        setArea(areaSqm)
-        setIsComplete(true)
-        setDrawMode(false)
-        setApiSource('api')
-        setLocationCoords({ lat, lon })
-        setApiCoords({ lat, lon })
-        calcPanelsFromPolygon(canvasPoints, areaSqm, scale)
-        loadSatelliteTiles(cLon, cLat, z, scale)
-        fetchKierData(lat, lon, tiltAngle)
-        fetchSlope(lon, lat)
-      } else {
-        // 필지 경계 없음 — 좌표 핀만 표시, 수동 드로우 안내
-        const defaultZ = 18
-        const defaultScale = tilePixelScaleM(lat, defaultZ)
-        const center: Point = { x: CANVAS_W / 2, y: CANVAS_H / 2 }
-        setParcelLabel(`${lat.toFixed(5)}, ${lon.toFixed(5)}`)
-        setPixelScale(defaultScale)
-        setSatZoom(defaultZ)
-        setPoints([center])
-        setIsComplete(false)
-        setDrawMode(false)
-        setApiSource('api')
-        setLocationCoords({ lat, lon })
-        setApiCoords({ lat, lon })
-        setSearchError('위치를 찾았지만 필지 경계를 불러올 수 없습니다.\n"직접 그리기"로 부지를 표시해 주세요.')
-        loadSatelliteTiles(lon, lat, defaultZ, defaultScale)
-        fetchKierData(lat, lon, tiltAngle)
-        fetchSlope(lon, lat)
+        totalPanelRects = [...totalPanelRects, ...rects]
+        // 면적 기반 카운트
+        const perimeterPx = pts.reduce((sum, p, i) => {
+          const j = (i + 1) % pts.length
+          return sum + Math.sqrt((pts[j].x - p.x) ** 2 + (pts[j].y - p.y) ** 2)
+        }, 0)
+        const effectiveArea = Math.max(0, parcel.areaSqm - perimeterPx * scale * marginM)
+        const footprintPerPanel = module.w * (module.h * Math.cos(ltr) + spacingValue)
+        const coverageRatio = isBuilding ? 0.70 : 0.85
+        const cnt = parcel.areaSqm > 10
+          ? Math.floor(effectiveArea * slopeFactor * coverageRatio / footprintPerPanel)
+          : rects.length
+        totalCount += cnt
       }
+      setPanelRects(totalPanelRects)
+      setPanelCount(totalCount)
+      const cap = (totalCount * MODULES[moduleIndex].watt) / 1000
+      setCapacityKwp(Math.round(cap * 100) / 100)
+      setAnnualKwh(Math.round(cap * GENERATION_HOURS * 365))
 
-    } catch { setSearchError('검색 중 오류가 발생했습니다.')
-    } finally { setSearchLoading(false) }
+      loadTiles(cLon, cLat, z, scale, mapMode)
+      fetchKierData(first.lat, first.lon, tiltAngle)
+      fetchSlope(first.lon, first.lat)
+
+    } catch (e) {
+      setSearchError('검색 중 오류가 발생했습니다: ' + String(e))
+    } finally {
+      setSearchLoading(false)
+    }
   }
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -796,15 +1044,46 @@ export default function MapTab() {
     setApiSource('manual')
   }
 
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!drawMode || isComplete) return
+    const canvas = canvasRef.current!
+    const rect = canvas.getBoundingClientRect()
+    setMousePos({
+      x: (e.clientX - rect.left) * (CANVAS_W / rect.width),
+      y: (e.clientY - rect.top) * (CANVAS_H / rect.height),
+    })
+  }
+
+  const handleCanvasMouseLeave = () => setMousePos(null)
+
   const handleCanvasDblClick = () => {
-    if (points.length >= 3) { setIsComplete(true); setDrawMode(false) }
+    if (points.length >= 3) {
+      let sho = 0
+      for (let i = 0; i < points.length; i++) {
+        const j = (i + 1) % points.length
+        sho += points[i].x * points[j].y - points[j].x * points[i].y
+      }
+      const manualArea = Math.abs(sho / 2) * pixelScale * pixelScale
+      setArea(manualArea)
+      setIsComplete(true)
+      setDrawMode(false)
+      setMousePos(null)
+    }
+  }
+
+  // 마지막 꼭짓점 실행취소
+  const handleUndoPoint = () => {
+    if (!drawMode || points.length === 0) return
+    setPoints(prev => prev.slice(0, -1))
   }
 
   const handleStartDraw = () => {
     setPoints([]); setArea(0); setPanelRects([]); setPanelCount(0)
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
     setDrawMode(true); setApiSource('manual'); setParcelLabel('')
-    setSearchError(''); setPixelScale(0.1); // satTiles 유지 — 위성사진 배경 보존
+    setSearchError('')
+    // 위성 타일이 로드된 경우 pixelScale 유지 (배경 위에서 정확한 면적 계산 보장)
+    if (satTiles.length === 0) setPixelScale(0.1)
     setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
   }
 
@@ -815,6 +1094,8 @@ export default function MapTab() {
     setPixelScale(0.1); setSatTiles([]); setSatZoom(0)
     setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
+    // 복수 필지 초기화
+    setParcels([])
     // 스크린샷 초기화
     setScreenshotImg(null); setScreenshotCentroid(null); setScreenshotRawPts(null)
     setScreenshotRawHoles([]); setHolePolygons([])
@@ -916,14 +1197,15 @@ export default function MapTab() {
   }, [handleDropFile])
 
   const handleSendToRevenue = () => {
-    setMapResult({ panelCount, capacityKwp, annualKwh, area, address, tiltAngle, moduleIndex })
+    const addressLabel = addresses.filter(Boolean).join(', ')
+    setMapResult({ panelCount, capacityKwp, annualKwh, area, address: addressLabel, tiltAngle, moduleIndex })
     setActiveTab('revenue')
   }
 
   const handleSavePNG = () => {
     const canvas = canvasRef.current; if (!canvas) return
     const link = document.createElement('a')
-    link.download = `solar-layout-${address || 'site'}.png`
+    link.download = `solar-layout-${addresses.filter(Boolean)[0] || 'site'}.png`
     link.href = canvas.toDataURL(); link.click()
   }
 
@@ -942,8 +1224,9 @@ export default function MapTab() {
       'color:#1a1a1a;line-height:1.4;',
     ].join('')
 
+    const addressLabel = addresses.filter(Boolean).join(', ')
     const rows: [string, string][] = [
-      ['지번', `${address || '-'}${parcelLabel ? ' (' + parcelLabel + ')' : ''}`],
+      ['지번', `${addressLabel || '-'}${parcelLabel ? ' (' + parcelLabel + ')' : ''}`],
       ['출처', apiSource === 'api' ? 'VWorld 필지 자동 경계' : '수동 측정'],
       ['부지면적', `${area.toFixed(2)} m²`],
       ['설치유형', installType],
@@ -1009,13 +1292,13 @@ export default function MapTab() {
         srcY += slice.height
         if (yRemain > 0) pdf.addPage()
       }
-      pdf.save(`solar-layout-${address || 'site'}.pdf`)
+      pdf.save(`solar-layout-${addresses.filter(Boolean)[0] || 'site'}.pdf`)
     } finally {
       document.body.removeChild(div)
     }
   }
 
-  const step1Done = address.trim().length > 0
+  const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
   const step4Done = isComplete && area > 0
   const step5Done = panelCount > 0
@@ -1037,44 +1320,97 @@ export default function MapTab() {
         <div className={stepCard(step1Done)}>
           <div className="flex items-center gap-2 mb-3">
             <div className={stepCircle(step1Done, '1')}>{step1Done ? '✓' : '1'}</div>
-            <h3 className="font-semibold text-gray-800 text-sm">지번 / 주소 입력</h3>
+            <h3 className="font-semibold text-gray-800 text-sm">지번 입력 (최대 5개)</h3>
           </div>
-          <div className="flex gap-1.5">
-            <input type="text" value={address}
-              onChange={e => { setAddress(e.target.value); setSearchError('') }}
-              onKeyDown={e => e.key === 'Enter' && handleAddressSearch()}
-              placeholder="경기도 화성시 우정읍 000-0"
-              className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button onClick={handleAddressSearch} disabled={searchLoading || !address.trim()}
-              className="flex-shrink-0 px-3 py-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors">
-              {searchLoading
-                ? <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                : '검색'}
+
+          {/* 지적도 / 위성사진 토글 */}
+          <div className="flex gap-1 mb-3 bg-gray-100 rounded-lg p-0.5">
+            <button
+              onClick={() => setMapMode('cadastral')}
+              className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                mapMode === 'cadastral'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              🗺 지적도
+            </button>
+            <button
+              onClick={() => setMapMode('satellite')}
+              className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                mapMode === 'satellite'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              🛰 위성사진
             </button>
           </div>
-          {searchLoading && (
-            <div className="mt-2 text-xs text-blue-600 flex items-center gap-1.5">
-              <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-              VWorld 필지 경계 + 위성사진 조회 중...
-            </div>
-          )}
+
+          {/* 5개 지번 입력 필드 */}
+          <div className="space-y-1.5">
+            {addresses.map((addr, i) => (
+              <div key={i} className="flex gap-1.5 items-center">
+                <span
+                  className="flex-shrink-0 w-5 h-5 rounded-full text-white text-xs flex items-center justify-center font-bold"
+                  style={{ backgroundColor: PARCEL_COLORS[i] }}
+                >
+                  {i + 1}
+                </span>
+                <input
+                  type="text"
+                  value={addr}
+                  onChange={e => {
+                    const next = [...addresses]
+                    next[i] = e.target.value
+                    setAddresses(next)
+                    setSearchError('')
+                  }}
+                  onKeyDown={e => e.key === 'Enter' && handleAddressSearch()}
+                  placeholder={i === 0 ? '지번 또는 도로명 주소' : `지번 ${i + 1} (선택)`}
+                  className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={handleAddressSearch}
+            disabled={searchLoading || !addresses.some(a => a.trim())}
+            className="mt-2.5 w-full py-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+          >
+            {searchLoading
+              ? <>
+                  <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  조회 중…
+                </>
+              : `🔍 ${addresses.filter(a => a.trim()).length}개 지번 검색`
+            }
+          </button>
+
           {searchError && (
             <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-2 text-xs text-red-600 whitespace-pre-line">{searchError}</div>
           )}
-          {parcelLabel && !searchError && (
-            <div className="mt-2 bg-green-50 border border-green-200 rounded-lg p-2 text-xs text-green-700 flex items-center gap-1.5">
-              <span>🛰</span><span>{parcelLabel} — {area.toFixed(0)}m²</span>
+          {parcelLabel && !searchError && parcels.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {parcels.map((p, i) => (
+                <div key={i} className="bg-green-50 border border-green-200 rounded-lg px-2 py-1.5 text-xs text-green-700 flex items-center gap-1.5">
+                  <span className="w-3.5 h-3.5 rounded-full flex-shrink-0" style={{ backgroundColor: p.color }} />
+                  <span className="truncate">{p.label} — {p.areaSqm.toFixed(0)}m²</span>
+                </div>
+              ))}
             </div>
           )}
           {satLoading && (
             <div className="mt-1 text-xs text-indigo-500 flex items-center gap-1.5">
               <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-              위성사진 타일 로딩 중 (Z{satZoom})...
+              {mapMode === 'cadastral' ? '지적도' : '위성사진'} 타일 로딩 중 (Z{satZoom})...
             </div>
           )}
           {satTiles.length > 0 && !satLoading && (
-            <div className="mt-1 text-xs text-indigo-600">🛰 위성사진 오버레이 완료 (Z{satZoom} · 1px={pixelScale.toFixed(3)}m)</div>
+            <div className="mt-1 text-xs text-indigo-600">
+              {mapMode === 'cadastral' ? '🗺 지적도' : '🛰 위성사진'} 오버레이 완료 (Z{satZoom} · 1px={pixelScale.toFixed(3)}m)
+            </div>
           )}
         </div>
 
@@ -1286,9 +1622,19 @@ export default function MapTab() {
             )}
           </div>
           {drawMode && (
-            <div className="mt-2 bg-blue-50 rounded-lg p-2 text-xs text-blue-700">
-              클릭으로 꼭짓점 추가 · <strong>더블클릭</strong>으로 완료
-              {points.length > 0 && <span className="ml-1 text-blue-500">({points.length}점)</span>}
+            <div className="mt-2 bg-blue-50 rounded-lg p-2 text-xs text-blue-700 space-y-1.5">
+              <div>
+                클릭으로 꼭짓점 추가 · <strong>더블클릭</strong>으로 완료
+                {points.length > 0 && <span className="ml-1 text-blue-500">({points.length}점)</span>}
+              </div>
+              {points.length > 0 && (
+                <button
+                  onClick={handleUndoPoint}
+                  className="flex items-center gap-1 text-xs bg-white border border-blue-300 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-colors"
+                >
+                  ↩ 마지막 점 취소
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1357,8 +1703,9 @@ export default function MapTab() {
               <div className="text-xs text-gray-400 border-t border-blue-200 pt-2">
                 커버율 {installType === '건물지붕형' ? '70%' : '85%'}
                 {slopePercent > 0 ? ` × cos(arctan(${slopePercent}%))` : ''}
-                {apiSource === 'api' ? '  ·  VWorld 경계' : '  ·  수동 측정'}
-                {satTiles.length > 0 ? '  ·  위성 합성' : ''}
+                {apiSource === 'api' ? `  ·  VWorld ${parcels.length}개 필지` : '  ·  수동 측정'}
+                {satTiles.length > 0 ? `  ·  ${mapMode === 'cadastral' ? '지적도' : '위성'}` : ''}
+                {`  ·  경계마진 ${BOUNDARY_MARGIN[installType] ?? 2}m`}
               </div>
             </div>
             <button onClick={handleSendToRevenue}
@@ -1406,7 +1753,10 @@ export default function MapTab() {
           </div>
 
           <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}
-            onClick={handleCanvasClick} onDoubleClick={handleCanvasDblClick}
+            onClick={handleCanvasClick}
+            onDoubleClick={handleCanvasDblClick}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseLeave={handleCanvasMouseLeave}
             className={`w-full h-auto border border-gray-200 rounded-lg bg-gray-50 ${drawMode ? 'cursor-crosshair' : 'cursor-default'}`}
             style={{ maxHeight: '500px' }}
           />
