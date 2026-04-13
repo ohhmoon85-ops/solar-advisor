@@ -239,6 +239,40 @@ function minDistToPolygonEdge(px: number, py: number, poly: Point[]): number {
   return minD
 }
 
+// ── 두 선분 교차 여부 (끝점 접촉 제외) ──────────────────────────────
+function segmentsIntersect(
+  x1: number, y1: number, x2: number, y2: number,
+  x3: number, y3: number, x4: number, y4: number
+): boolean {
+  const d1x = x2 - x1, d1y = y2 - y1
+  const d2x = x4 - x3, d2y = y4 - y3
+  const cross = d1x * d2y - d1y * d2x
+  if (Math.abs(cross) < 1e-10) return false
+  const dx = x3 - x1, dy = y3 - y1
+  const t = (dx * d2y - dy * d2x) / cross
+  const u = (dx * d1y - dy * d1x) / cross
+  return t > 1e-10 && t < 1 - 1e-10 && u > 1e-10 && u < 1 - 1e-10
+}
+
+/** 패널 사각형의 4변이 폴리곤 경계를 가로지르는지 확인 */
+function panelCrossesBoundary(x: number, y: number, w: number, h: number, poly: Point[]): boolean {
+  // 패널 4변
+  const panelEdges: [number, number, number, number][] = [
+    [x, y, x + w, y],         // top
+    [x + w, y, x + w, y + h], // right
+    [x + w, y + h, x, y + h], // bottom
+    [x, y + h, x, y],         // left
+  ]
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length
+    const px1 = poly[i].x, py1 = poly[i].y, px2 = poly[j].x, py2 = poly[j].y
+    for (const [ex1, ey1, ex2, ey2] of panelEdges) {
+      if (segmentsIntersect(ex1, ey1, ex2, ey2, px1, py1, px2, py2)) return true
+    }
+  }
+  return false
+}
+
 // ── Ray-casting point-in-polygon ───────────────────────────────────
 function isPointInPolygon(px: number, py: number, poly: Point[]): boolean {
   let inside = false
@@ -304,6 +338,8 @@ export default function MapTab() {
   const [satLoading, setSatLoading] = useState(false)
   const [satZoom, setSatZoom] = useState(0)
   const [mapMode, setMapMode] = useState<'satellite' | 'cadastral'>('satellite')
+  // vworld 스크린샷 해상도 보정 계수 (기본 1.0, 사용자 조정)
+  const [screenshotScaleCorr, setScreenshotScaleCorr] = useState(1.0)
 
   // ── 복수 필지 ──
   const [parcels, setParcels] = useState<ParcelInfo[]>([])
@@ -379,12 +415,16 @@ export default function MapTab() {
       for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
         for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
           const cx = x + panelPxW / 2, cy = y + panelPxH / 2
-          // 패널 4 꼭짓점 모두 지번 경계선에서 marginPx 이상 안쪽에 있어야 함 (경계 침범 방지)
-          const corners = [
+          // ① 패널 4변이 폴리곤 경계를 가로지르면 즉시 제외 (오목 폴리곤 대응)
+          if (panelCrossesBoundary(x, y, panelPxW, panelPxH, pts)) continue
+          // ② 패널 4 꼭짓점 + 4변 중점 모두 폴리곤 안쪽 & marginPx 이상 이격
+          const checkPts = [
             { x, y }, { x: x + panelPxW, y },
             { x, y: y + panelPxH }, { x: x + panelPxW, y: y + panelPxH },
+            { x: x + panelPxW / 2, y }, { x: x + panelPxW / 2, y: y + panelPxH },
+            { x, y: y + panelPxH / 2 }, { x: x + panelPxW, y: y + panelPxH / 2 },
           ]
-          if (corners.every(c =>
+          if (checkPts.every(c =>
                 isPointInPolygon(c.x, c.y, pts) &&
                 minDistToPolygonEdge(c.x, c.y, pts) >= marginPx) &&
               !holePolygons.some(hole => isPointInPolygon(cx, cy, hole)))
@@ -587,33 +627,16 @@ export default function MapTab() {
       ctx.stroke()
     }
 
-    // ❷-c 마진 경계선 시각화 (설치 가능 영역 내경계 점선 표시)
+    // ❷-c 마진 정보 표시 (경계선 우상단 배지)
     if (isComplete && points.length >= 3) {
       const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
-      const marginPx = marginM / pixelScale
-      // 각 꼭짓점을 중심 방향으로 marginPx만큼 이동한 내접 다각형 근사
-      const cx0 = points.reduce((s, p) => s + p.x, 0) / points.length
-      const cy0 = points.reduce((s, p) => s + p.y, 0) / points.length
-      const innerPts = points.map(p => {
-        const dx = cx0 - p.x, dy = cy0 - p.y
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist < 0.001) return p
-        return { x: p.x + (dx / dist) * marginPx, y: p.y + (dy / dist) * marginPx }
-      })
-      ctx.beginPath()
-      ctx.moveTo(innerPts[0].x, innerPts[0].y)
-      innerPts.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
-      ctx.closePath()
-      ctx.setLineDash([4, 4])
-      ctx.strokeStyle = 'rgba(251,146,60,0.85)'
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-      ctx.setLineDash([])
-      // 마진 라벨
-      const lx = innerPts[0].x + 4, ly = innerPts[0].y - 4
-      ctx.font = '9px sans-serif'; ctx.textAlign = 'left'
-      ctx.fillStyle = 'rgba(251,146,60,0.95)'
-      ctx.fillText(`경계마진 ${marginM}m`, lx, ly)
+      const badge = `경계마진 ${marginM}m`
+      ctx.font = 'bold 10px sans-serif'
+      const bw = ctx.measureText(badge).width + 12
+      ctx.fillStyle = 'rgba(251,146,60,0.90)'
+      ctx.fillRect(CANVAS_W - bw - 4, 32, bw, 18)
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'
+      ctx.fillText(badge, CANVAS_W - bw / 2 - 4, 44)
     }
 
     // ❷-b 제외구역 (hole) — 빨간 점선
@@ -1060,12 +1083,16 @@ export default function MapTab() {
         const rects: PanelRect[] = []
         for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
           for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
-            // 패널 4 꼭짓점 모두 지번 경계선에서 marginPx 이상 안쪽에 있어야 함
-            const corners = [
+            // ① 선분 교차 체크 (오목 폴리곤 대응)
+            if (panelCrossesBoundary(x, y, panelPxW, panelPxH, pts)) continue
+            // ② 4 꼭짓점 + 4변 중점 모두 경계 안쪽 & marginPx 이상
+            const checkPts = [
               { x, y }, { x: x + panelPxW, y },
               { x, y: y + panelPxH }, { x: x + panelPxW, y: y + panelPxH },
+              { x: x + panelPxW / 2, y }, { x: x + panelPxW / 2, y: y + panelPxH },
+              { x, y: y + panelPxH / 2 }, { x: x + panelPxW, y: y + panelPxH / 2 },
             ]
-            if (corners.every(c =>
+            if (checkPts.every(c =>
                   isPointInPolygon(c.x, c.y, pts) &&
                   minDistToPolygonEdge(c.x, c.y, pts) >= marginPx))
               rects.push({ x, y, w: panelPxW, h: panelPxH })
@@ -1168,13 +1195,17 @@ export default function MapTab() {
     setScreenshotImg(null); setScreenshotCentroid(null); setScreenshotRawPts(null)
     setScreenshotRawHoles([]); setHolePolygons([])
     setScreenshotError(''); setScreenshotAnalyzing(false)
+    setScreenshotScaleCorr(1.0)
   }
 
-  // ── 스크린샷 rawPts/zoom 변경 시 Canvas 좌표 재계산 ──────────────
+  // ── 스크린샷 rawPts/zoom/보정계수 변경 시 Canvas 좌표 재계산 ──────
   useEffect(() => {
     if (!screenshotRawPts || !screenshotCentroid) return
-    const lat37Rad = 37 * Math.PI / 180
-    const imgMPerPx = 40075016.686 * Math.cos(lat37Rad) / (256 * Math.pow(2, screenshotZoom))
+    // vworld 화면 픽셀 실측 기반 스케일 (드롭다운 표시값 사용)
+    // 이론 타일 스케일(0.119) 대신 실제 화면 해상도에 맞는 값 사용
+    // 줌 20 = 0.15m/px, 줌 19 = 0.30, 줌 18 = 0.60, 줌 17 = 1.20, 줌 16 = 2.40
+    const VWORLD_BASE_SCALE = 0.15 // zoom 20 기준 vworld 화면 픽셀 스케일 (m/px)
+    const imgMPerPx = VWORLD_BASE_SCALE * Math.pow(2, 20 - screenshotZoom) * screenshotScaleCorr
     const minX = Math.min(...screenshotRawPts.map(p => p.x))
     const maxX = Math.max(...screenshotRawPts.map(p => p.x))
     const minY = Math.min(...screenshotRawPts.map(p => p.y))
@@ -1208,7 +1239,7 @@ export default function MapTab() {
     setDrawMode(false)
     setApiSource('manual')
     calcPanelsFromPolygon(canvasPoints, areaSqm, canvScale)
-  }, [screenshotRawPts, screenshotCentroid, screenshotZoom, screenshotRawHoles, calcPanelsFromPolygon])
+  }, [screenshotRawPts, screenshotCentroid, screenshotZoom, screenshotScaleCorr, screenshotRawHoles, calcPanelsFromPolygon])
 
   // ── vworld 스크린샷 분석 ──────────────────────────────────────────
   const analyzeScreenshot = useCallback((img: HTMLImageElement) => {
@@ -1657,21 +1688,57 @@ export default function MapTab() {
             </div>
           )}
 
-          {/* vworld 줌레벨 선택 */}
+          {/* vworld 줌레벨 선택 + 축척 보정 */}
           {screenshotImg && (
-            <div className="mb-2 flex items-center gap-2">
-              <label className="text-xs text-gray-500 whitespace-nowrap">vworld 줌레벨</label>
-              <select
-                value={screenshotZoom}
-                onChange={e => setScreenshotZoom(Number(e.target.value))}
-                className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
-              >
-                <option value={16}>16단계 (~2.4m/px)</option>
-                <option value={17}>17단계 (~1.2m/px)</option>
-                <option value={18}>18단계 (~0.6m/px) — 기본</option>
-                <option value={19}>19단계 (~0.3m/px)</option>
-                <option value={20}>20단계 (~0.15m/px)</option>
-              </select>
+            <div className="mb-2 space-y-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-700">
+                <div className="font-semibold mb-1">📐 vworld 줌레벨 = 스크린샷 축척 기준</div>
+                <div className="text-blue-600">vworld에서 스크린샷을 찍을 때의 <strong>확대 단계</strong>를 선택하세요.<br/>줌이 높을수록 확대(1px당 더 작은 면적)됩니다.</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-500 whitespace-nowrap font-medium">줌레벨</label>
+                <select
+                  value={screenshotZoom}
+                  onChange={e => { setScreenshotZoom(Number(e.target.value)); setScreenshotScaleCorr(1.0) }}
+                  className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+                >
+                  <option value={16}>16단계 (넓은 지역, ~2.4m/px)</option>
+                  <option value={17}>17단계 (~1.2m/px)</option>
+                  <option value={18}>18단계 (~0.6m/px) — 기본</option>
+                  <option value={19}>19단계 (~0.3m/px)</option>
+                  <option value={20}>20단계 (최대 확대, ~0.15m/px)</option>
+                </select>
+              </div>
+              {/* 축척 보정: 캔버스 스케일바와 vworld 스케일바 불일치 시 조정 */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 space-y-1.5">
+                <div className="text-xs text-yellow-700 font-semibold">🔧 축척 미세 보정</div>
+                <div className="text-xs text-yellow-600">
+                  캔버스 우하단 <strong>「{Math.round(0.15 * Math.pow(2, 20 - screenshotZoom) * screenshotScaleCorr * 310 / (0.15 * Math.pow(2, 20 - screenshotZoom) * screenshotScaleCorr))}m」</strong> 스케일바와 배경지도의 스케일바가 다르면 조정하세요.
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 whitespace-nowrap">보정 ×{screenshotScaleCorr.toFixed(2)}</span>
+                  <input
+                    type="range"
+                    min={0.3}
+                    max={3.0}
+                    step={0.05}
+                    value={screenshotScaleCorr}
+                    onChange={e => setScreenshotScaleCorr(Number(e.target.value))}
+                    className="flex-1"
+                  />
+                </div>
+                <div className="text-xs text-gray-400">
+                  현재 캔버스 축척: 1px ≈ {(0.15 * Math.pow(2, 20 - screenshotZoom) * screenshotScaleCorr * (1 / (Math.min(CANVAS_W, CANVAS_H) * 0.62))).toFixed(3)}m (참고용, 폴리곤 크기에 따라 결정됨)
+                </div>
+                {screenshotScaleCorr !== 1.0 && (
+                  <button
+                    onClick={() => setScreenshotScaleCorr(1.0)}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    기본값 초기화 (×1.00)
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
