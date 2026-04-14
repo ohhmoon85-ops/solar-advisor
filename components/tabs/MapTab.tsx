@@ -67,6 +67,24 @@ interface ParcelInfo {
 function mpdLon(lat: number) { return 111319.9 * Math.cos((lat * Math.PI) / 180) }
 const MPD_LAT = 111319.9
 
+/**
+ * 캔버스 픽셀 좌표 → 지리 미터 로컬 폴리곤 변환
+ * pixelScale: m/px (캔버스 1픽셀 = 몇 미터)
+ * 캔버스 Y축(하향) → 지리 Y축(북=+) 반전
+ */
+function canvasPointsToMeterPolygon(
+  pts: { x: number; y: number }[],
+  scale: number
+): { x: number; y: number }[] {
+  if (pts.length < 3) return []
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length
+  return pts.map(p => ({
+    x: (p.x - cx) * scale,
+    y: -(p.y - cy) * scale,  // Y 반전
+  }))
+}
+
 function geoToCanvas(lon: number, lat: number, cLon: number, cLat: number, scale: number): Point {
   return {
     x: CANVAS_W / 2 + ((lon - cLon) * mpdLon(cLat)) / scale,
@@ -1967,15 +1985,17 @@ export default function MapTab() {
           )}
         </div>
 
-        {/* ── SVG 정밀 배치 분석 (geo-meter 기반, VWorld 필지 경계 필요) ── */}
-        {apiSource === 'api' && parcels.length > 0 && (
+        {/* ── SVG 정밀 배치 분석 (지번 API + 수동 그리기 모두 지원) ── */}
+        {isComplete && (parcels.length > 0 || points.length >= 3) && (
           <div className="mt-4 bg-white rounded-xl border border-indigo-200 p-4">
             <div className="mb-3">
               <h3 className="font-semibold text-gray-800 text-sm flex items-center gap-1.5">
                 🔬 SVG 정밀 배치 분석 <span className="text-xs font-normal text-indigo-500">v5.2</span>
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                지리 미터 좌표 기반 · 위도 {effectiveLatitude.toFixed(4)}° · 방위각/경사지/다구역 지원
+                {apiSource === 'api'
+                  ? `VWorld 필지 경계 · 위도 ${effectiveLatitude.toFixed(4)}° · 방위각/경사지/다구역 지원`
+                  : `수동 그리기 폴리곤 · 위도 ${effectiveLatitude.toFixed(4)}° · pixelScale ${pixelScale.toFixed(4)} m/px`}
               </p>
             </div>
 
@@ -2109,46 +2129,48 @@ export default function MapTab() {
             <div className="flex gap-2">
               <button
                 onClick={async () => {
-                  if (!apiCoords || parcels.length === 0) return
                   setSvgAnalyzing(true)
                   try {
                     const panelSpec = PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.TYPE_A
-                    const polygon = convertGeoRingToLocalPolygon(
-                      parcels[0].ring,
-                      apiCoords.lat,
-                      apiCoords.lon
-                    )
+                    const lat = effectiveLatitude
+
+                    // ── 폴리곤 소스 결정 ──
+                    // API 모드: VWorld 필지 경계 → 미터 변환
+                    // 수동 모드: 캔버스 픽셀 → 미터 변환
+                    let polygon: { x: number; y: number }[]
+                    if (apiSource === 'api' && parcels.length > 0 && apiCoords) {
+                      polygon = convertGeoRingToLocalPolygon(
+                        parcels[0].ring,
+                        apiCoords.lat,
+                        apiCoords.lon
+                      )
+                    } else if (points.length >= 3) {
+                      polygon = canvasPointsToMeterPolygon(points, pixelScale)
+                    } else {
+                      return
+                    }
+
+                    if (polygon.length < 3) return
+
+                    const commonOpts = {
+                      azimuthDeg: svgAzimuthDeg,
+                      slopeAngleDeg: svgHasSlope ? svgSlopeAngle : 0,
+                      slopeAzimuthDeg: svgHasSlope ? svgSlopeAzimuth : 180,
+                      isJimokChangePlanned: svgJimokChangePlanned,
+                    }
 
                     if (svgZoneMode === 'multi') {
-                      // 다구역 자동 분할
-                      const zones = autoSplitPolygon(
-                        polygon,
-                        panelSpec,
-                        svgPlotType,
-                        svgPanelType,
-                        {
-                          azimuthDeg: svgAzimuthDeg,
-                          slopeAngleDeg: svgHasSlope ? svgSlopeAngle : 0,
-                          slopeAzimuthDeg: svgHasSlope ? svgSlopeAzimuth : 180,
-                          isJimokChangePlanned: svgJimokChangePlanned,
-                        }
-                      )
-                      const result = runMultiZoneAnalysis(zones, apiCoords.lat)
-                      setSvgAnalysisResult(result)
+                      const zones = autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts)
+                      setSvgAnalysisResult(runMultiZoneAnalysis(zones, lat))
                     } else {
-                      // 단일 구역
-                      const result = runFullAnalysis({
+                      setSvgAnalysisResult(runFullAnalysis({
                         cadastrePolygon: polygon,
                         plotType: svgPlotType,
                         panelSpec,
                         panelType: svgPanelType,
-                        latitude: apiCoords.lat,
-                        azimuthDeg: svgAzimuthDeg,
-                        slopeAngleDeg: svgHasSlope ? svgSlopeAngle : 0,
-                        slopeAzimuthDeg: svgHasSlope ? svgSlopeAzimuth : 180,
-                        isJimokChangePlanned: svgJimokChangePlanned,
-                      })
-                      setSvgAnalysisResult(result)
+                        latitude: lat,
+                        ...commonOpts,
+                      }))
                     }
                     setShowSvgCanvas(true)
                   } catch (err) {
