@@ -16,6 +16,11 @@ const SolarLayoutCanvas = dynamic(
   { ssr: false }
 )
 
+const LayoutEditor = dynamic(
+  () => import('@/components/LayoutEditor'),
+  { ssr: false }
+)
+
 const STRUCTURE_TYPES = ['철골구조', 'RC(철근콘크리트)', '경량철골', '샌드위치 패널'] as const
 type StructureType = typeof STRUCTURE_TYPES[number]
 
@@ -274,6 +279,7 @@ export default function MapTab() {
   const [svgPanelType, setSvgPanelType] = useState<string>('TYPE_A')
   const [svgPlotType, setSvgPlotType] = useState<PlotType>('land')
   const [showSvgCanvas, setShowSvgCanvas] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
   // v5.2 추가 입력
   const [svgAzimuthDeg, setSvgAzimuthDeg] = useState(180)
   const [svgHasSlope, setSvgHasSlope] = useState(false)
@@ -1531,39 +1537,87 @@ export default function MapTab() {
             {/* 결과 표시 */}
             {showSvgCanvas && svgAnalysisResult && (
               <div className="mt-3">
-                <SolarLayoutCanvas
-                  result={svgAnalysisResult}
-                  width={700}
-                  height={480}
-                  showLabels
-                />
-                {/* 단일 구역 — 검증 결과 */}
-                {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.validation && (
-                  <div className={`mt-2 text-xs rounded px-3 py-2 ${
-                    svgAnalysisResult.validation.isValid
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 border border-amber-200'
-                  }`}>
-                    {svgAnalysisResult.validation.isValid ? '✓ ' : '⚠ '}
-                    {svgAnalysisResult.validation.message}
+                {/* 편집 토글 버튼 (단일 구역만) */}
+                {!isMultiZoneResult(svgAnalysisResult) && (
+                  <div className="flex justify-end mb-2">
+                    <button
+                      onClick={() => setIsEditing(v => !v)}
+                      className={[
+                        'px-3 py-1.5 rounded text-xs font-semibold transition-colors',
+                        isEditing
+                          ? 'bg-amber-500 text-slate-900 hover:bg-amber-400'
+                          : 'bg-slate-700 text-slate-200 hover:bg-slate-600 border border-slate-500',
+                      ].join(' ')}
+                    >
+                      {isEditing ? '✏ 편집 중' : '✏ 배치 편집'}
+                    </button>
                   </div>
                 )}
-                {/* 다구역 — 요약 */}
-                {isMultiZoneResult(svgAnalysisResult) && (
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {(svgAnalysisResult as MultiZoneResult).zones.map(z => (
-                      <div key={z.zoneLabel} className="bg-indigo-50 rounded p-2 text-xs">
-                        <div className="font-semibold text-indigo-700">{z.zoneLabel}</div>
-                        <div className="text-gray-600">{z.layout.totalCount}장 · {z.layout.totalKwp}kWp</div>
+
+                {/* 편집 모드 */}
+                {isEditing && !isMultiZoneResult(svgAnalysisResult) ? (
+                  <LayoutEditor
+                    result={svgAnalysisResult as FullAnalysisResult}
+                    width={920}
+                    height={520}
+                    onComplete={(placements, totalKwp) => {
+                      setIsEditing(false)
+                      // 편집 완료: 패널 수/용량 반영 (분석 결과에 통합)
+                      setSvgAnalysisResult(prev => {
+                        if (!prev || isMultiZoneResult(prev)) return prev
+                        return {
+                          ...prev,
+                          layout: {
+                            ...prev.layout,
+                            placements,
+                            totalCount: placements.length,
+                            totalKwp,
+                            coverageRatio: prev.layout.coverageRatio,
+                            theoreticalMax: prev.layout.theoreticalMax,
+                            utilizationRate: placements.length / (prev.layout.theoreticalMax || 1),
+                          },
+                        }
+                      })
+                    }}
+                    onCancel={() => setIsEditing(false)}
+                  />
+                ) : (
+                  <div>
+                    <SolarLayoutCanvas
+                      result={svgAnalysisResult}
+                      width={700}
+                      height={480}
+                      showLabels
+                    />
+                    {/* 단일 구역 — 검증 결과 */}
+                    {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.validation && (
+                      <div className={`mt-2 text-xs rounded px-3 py-2 ${
+                        svgAnalysisResult.validation.isValid
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-amber-50 text-amber-700 border border-amber-200'
+                      }`}>
+                        {svgAnalysisResult.validation.isValid ? '✓ ' : '⚠ '}
+                        {svgAnalysisResult.validation.message}
                       </div>
-                    ))}
+                    )}
+                    {/* 다구역 — 요약 */}
+                    {isMultiZoneResult(svgAnalysisResult) && (
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        {(svgAnalysisResult as MultiZoneResult).zones.map(z => (
+                          <div key={z.zoneLabel} className="bg-indigo-50 rounded p-2 text-xs">
+                            <div className="font-semibold text-indigo-700">{z.zoneLabel}</div>
+                            <div className="text-gray-600">{z.layout.totalCount}장 · {z.layout.totalKwp}kWp</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* SafeZone 오류 */}
+                    {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.safeZone.error && (
+                      <p className="text-xs text-red-500 mt-2">
+                        ⚠ {svgAnalysisResult.safeZone.error}
+                      </p>
+                    )}
                   </div>
-                )}
-                {/* SafeZone 오류 */}
-                {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.safeZone.error && (
-                  <p className="text-xs text-red-500 mt-2">
-                    ⚠ {svgAnalysisResult.safeZone.error}
-                  </p>
                 )}
               </div>
             )}
