@@ -9,6 +9,8 @@ import { useSolarStore } from '@/store/useStore'
 import { INSTALLATION_TYPES, GENERATION_HOURS } from '@/lib/constants'
 import { calcAnnual, calcYearlyTable, calcROI, findBreakevenYear } from '@/lib/calculations'
 import type { InstallationType } from '@/lib/constants'
+import { calculateRoi, findOptimalPanelCount, ROI_DEFAULTS } from '@/lib/roiAnalyzer'
+import RoiSummary from '@/components/RoiSummary'
 
 const LOAN_YEARS_OPTIONS = [5, 10, 15, 20]
 const INTEREST_SCENARIOS = [
@@ -76,6 +78,40 @@ export default function RevenueTab() {
       const rows = calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, s.rate, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate)
       return { label: s.label, rate: s.rate, breakeven: findBreakevenYear(rows) }
     }), [capacityKw, installationType, totalCost, loanRatio, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate]
+  )
+
+  // ── LCOE·NPV 분석 (roiAnalyzer — calculations.ts 20년 테이블과 중복 없이 추가 지표만) ──
+  const [showRoiSummary, setShowRoiSummary] = useState(false)
+
+  // 패널 수 추정: mapResult가 있으면 실제 패널 수, 없으면 용량 기반 추정
+  const estimatedPanelCount = useMemo(() => {
+    if (mapResult?.panelCount) return mapResult.panelCount
+    // 용량(kWp) ÷ 패널 공칭(kWp/장) — 단결정 PERC 550W 기준
+    return Math.round((capacityKw * 1000) / 550)
+  }, [mapResult, capacityKw])
+
+  const roiResult = useMemo(() =>
+    calculateRoi({
+      panelCount: estimatedPanelCount,
+      wattNominal: 550,
+      costPerPanel: ROI_DEFAULTS.costPerPanelTypeA,
+      installCostPerKwp: ROI_DEFAULTS.installCostPerKwp,
+      electricityPriceKrw: priceOverride.smp + (priceOverride.recBuilding / 1000) * 1.5,
+    }),
+    [estimatedPanelCount, priceOverride]
+  )
+
+  const { results: optimizationResults, optimalMode } = useMemo(() =>
+    findOptimalPanelCount(
+      { placements: [], totalCount: estimatedPanelCount, totalKwp: capacityKw, coverageRatio: 0, theoreticalMax: 0, utilizationRate: 0 },
+      {
+        wattNominal: 550,
+        costPerPanel: ROI_DEFAULTS.costPerPanelTypeA,
+        installCostPerKwp: ROI_DEFAULTS.installCostPerKwp,
+        electricityPriceKrw: priceOverride.smp + (priceOverride.recBuilding / 1000) * 1.5,
+      }
+    ),
+    [estimatedPanelCount, capacityKw, priceOverride]
   )
 
   return (
@@ -480,6 +516,51 @@ export default function RevenueTab() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── LCOE·NPV 심화 분석 (RoiSummary — 20년 테이블과 중복 없는 추가 지표) ── */}
+      <div className="bg-slate-900 rounded-xl border border-slate-700 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="font-semibold text-slate-100 text-sm flex items-center gap-2">
+              🔬 LCOE · NPV 심화 분석
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              균등화 발전비용(LCOE) · 순현재가치(NPV) · 배치 모드별 비교
+              <span className="ml-2 text-slate-500">· 패널 {estimatedPanelCount}장 기준</span>
+            </p>
+          </div>
+          <button
+            onClick={() => setShowRoiSummary(v => !v)}
+            className="text-xs px-3 py-1.5 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-800 transition-colors">
+            {showRoiSummary ? '접기' : '펼치기'}
+          </button>
+        </div>
+
+        {showRoiSummary && (
+          <RoiSummary
+            roiResult={roiResult}
+            panelCount={estimatedPanelCount}
+            panelType="단결정 PERC 550W"
+            optimizationResults={optimizationResults}
+            optimalMode={optimalMode}
+          />
+        )}
+
+        {!showRoiSummary && (
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            {[
+              { label: 'LCOE', value: `${roiResult.lcoeWon.toLocaleString()}원/kWh` },
+              { label: 'NPV (4%)', value: `${roiResult.npvMan >= 0 ? '+' : ''}${roiResult.npvMan.toLocaleString()}만원` },
+              { label: '회수기간', value: roiResult.paybackYears > 0 ? `${roiResult.paybackYears}년` : '—' },
+            ].map(item => (
+              <div key={item.label} className="bg-slate-800 rounded-lg px-3 py-2 text-center">
+                <div className="text-slate-400">{item.label}</div>
+                <div className="font-semibold text-slate-100 mt-0.5">{item.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

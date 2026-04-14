@@ -1,8 +1,20 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { useSolarStore } from '@/store/useStore'
 import { MODULES, GENERATION_HOURS } from '@/lib/constants'
+import { getSolarElevation } from '@/lib/shadowCalculator'
+import { runFullAnalysis, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
+import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
+import PANEL_TYPES, { PRESET_PANELS } from '@/lib/panelConfig'
+import { type MultiZoneResult, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult } from '@/lib/multiZoneLayout'
+
+// SVG 캔버스는 클라이언트 전용
+const SolarLayoutCanvas = dynamic(
+  () => import('@/components/SolarLayoutCanvas'),
+  { ssr: false }
+)
 
 const STRUCTURE_TYPES = ['철골구조', 'RC(철근콘크리트)', '경량철골', '샌드위치 패널'] as const
 type StructureType = typeof STRUCTURE_TYPES[number]
@@ -375,9 +387,27 @@ export default function MapTab() {
   const [screenshotRawHoles, setScreenshotRawHoles] = useState<{ rawPts: Point[]; cx: number; cy: number }[]>([])
   const [holePolygons, setHolePolygons] = useState<Point[][]>([])
 
-  // 이론 이격 거리
+  // SVG 정밀 배치 분석 상태
+  const [svgAnalysisResult, setSvgAnalysisResult] = useState<FullAnalysisResult | MultiZoneResult | null>(null)
+  const [svgAnalyzing, setSvgAnalyzing] = useState(false)
+  const [svgPanelType, setSvgPanelType] = useState<string>('TYPE_A')
+  const [svgPlotType, setSvgPlotType] = useState<PlotType>('land')
+  const [showSvgCanvas, setShowSvgCanvas] = useState(false)
+  // v5.2 추가 입력
+  const [svgAzimuthDeg, setSvgAzimuthDeg] = useState(180)
+  const [svgHasSlope, setSvgHasSlope] = useState(false)
+  const [svgSlopeAngle, setSvgSlopeAngle] = useState(5)
+  const [svgSlopeAzimuth, setSvgSlopeAzimuth] = useState(180)
+  const [svgHasRiver, setSvgHasRiver] = useState(false)
+  const [svgHasRoad, setSvgHasRoad] = useState(false)
+  const [svgJimokChangePlanned, setSvgJimokChangePlanned] = useState(false)
+  const [svgZoneMode, setSvgZoneMode] = useState<'single' | 'multi'>('single')
+
+  // 이론 이격 거리 — 현장 위도 기반 (hardcode 37.5665° → 동적 위도)
   const tiltRad = (tiltAngle * Math.PI) / 180
-  const winterAltRad = ((90 - 37.5665 - 23.45) * Math.PI) / 180
+  const effectiveLatitude = apiCoords?.lat ?? 37.5665
+  const winterElevDeg = getSolarElevation(effectiveLatitude, -23.45)
+  const winterAltRad = (winterElevDeg * Math.PI) / 180
   const theoreticalSpacing =
     Math.round(MODULES[moduleIndex].h * Math.cos(tiltRad) * (1 / Math.tan(winterAltRad)) * 100) / 100
 
@@ -1936,6 +1966,251 @@ export default function MapTab() {
             </div>
           )}
         </div>
+
+        {/* ── SVG 정밀 배치 분석 (geo-meter 기반, VWorld 필지 경계 필요) ── */}
+        {apiSource === 'api' && parcels.length > 0 && (
+          <div className="mt-4 bg-white rounded-xl border border-indigo-200 p-4">
+            <div className="mb-3">
+              <h3 className="font-semibold text-gray-800 text-sm flex items-center gap-1.5">
+                🔬 SVG 정밀 배치 분석 <span className="text-xs font-normal text-indigo-500">v5.2</span>
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                지리 미터 좌표 기반 · 위도 {effectiveLatitude.toFixed(4)}° · 방위각/경사지/다구역 지원
+              </p>
+            </div>
+
+            {/* ── 설정 그리드 ── */}
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {/* 패널 선택 */}
+              <div>
+                <label className="text-xs text-gray-500 font-medium">패널 프리셋</label>
+                <select
+                  value={svgPanelType}
+                  onChange={e => setSvgPanelType(e.target.value)}
+                  className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5">
+                  {Object.entries(PRESET_PANELS).map(([key, spec]) => (
+                    <option key={key} value={key}>{spec.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 부지 용도 */}
+              <div>
+                <label className="text-xs text-gray-500 font-medium">부지 용도</label>
+                <select
+                  value={svgPlotType}
+                  onChange={e => setSvgPlotType(e.target.value as PlotType)}
+                  className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5">
+                  <option value="land">토지 (마진 2m)</option>
+                  <option value="roof">지붕 (마진 0.5m)</option>
+                  <option value="farmland">농지 (마진 2m)</option>
+                  <option value="forest">임야 (마진 2m)</option>
+                  <option value="land_change_planned">지목변경 예정 (마진 1.5m)</option>
+                </select>
+              </div>
+
+              {/* 방위각 슬라이더 */}
+              <div className="col-span-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs text-gray-500 font-medium">방위각</label>
+                  <span className="text-xs font-bold text-indigo-600">
+                    {svgAzimuthDeg}°
+                    {svgAzimuthDeg === 180 ? ' (정남향)' : svgAzimuthDeg < 180 ? ' (남동향)' : ' (남서향)'}
+                  </span>
+                </div>
+                <input
+                  type="range" min={145} max={215} value={svgAzimuthDeg}
+                  onChange={e => setSvgAzimuthDeg(Number(e.target.value))}
+                  className="mt-1 w-full" />
+                <div className="flex justify-between text-xs text-gray-400 mt-0.5">
+                  <span>145° (남동)</span><span>180° (정남)</span><span>215° (남서)</span>
+                </div>
+                {Math.abs(svgAzimuthDeg - 180) > 25 && (
+                  <div className="mt-1 text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
+                    ⚠ 편차 {Math.abs(svgAzimuthDeg - 180)}° — 발전량 약 {(100 - Math.cos((svgAzimuthDeg - 180) * Math.PI / 180) * 100).toFixed(1)}% 감소 (실증 Case 3 기준)
+                  </div>
+                )}
+              </div>
+
+              {/* 경사지 보정 */}
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer mb-2">
+                  <input type="checkbox" checked={svgHasSlope}
+                    onChange={e => setSvgHasSlope(e.target.checked)}
+                    className="accent-indigo-500" />
+                  <span className="text-xs text-gray-700 font-medium">경사지 보정 적용</span>
+                </label>
+                {svgHasSlope && (
+                  <div className="grid grid-cols-2 gap-2 bg-indigo-50 rounded p-2">
+                    <div>
+                      <label className="text-xs text-gray-500">경사각 (°)</label>
+                      <input type="number" min={1} max={45} value={svgSlopeAngle}
+                        onChange={e => setSvgSlopeAngle(Number(e.target.value))}
+                        className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">경사 방위각 (°)</label>
+                      <input type="number" min={0} max={360} value={svgSlopeAzimuth}
+                        onChange={e => setSvgSlopeAzimuth(Number(e.target.value))}
+                        className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 특수 경계 체크박스 */}
+              <div>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={svgHasRiver}
+                    onChange={e => setSvgHasRiver(e.target.checked)}
+                    className="accent-blue-500" />
+                  <span className="text-xs text-gray-700">하천 인접 (마진 +5m)</span>
+                </label>
+              </div>
+              <div>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={svgHasRoad}
+                    onChange={e => setSvgHasRoad(e.target.checked)}
+                    className="accent-orange-500" />
+                  <span className="text-xs text-gray-700">도로 인접 (마진 +3m)</span>
+                </label>
+              </div>
+
+              {/* 지목변경 예정 */}
+              <div className="col-span-2">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={svgJimokChangePlanned}
+                    onChange={e => setSvgJimokChangePlanned(e.target.checked)}
+                    className="accent-purple-500" />
+                  <span className="text-xs text-gray-700">지목변경 예정 (마진 1.5m 자동 적용)</span>
+                </label>
+              </div>
+
+              {/* 구역 모드 */}
+              <div className="col-span-2">
+                <label className="text-xs text-gray-500 font-medium block mb-1">배치 모드</label>
+                <div className="flex gap-2">
+                  {(['single', 'multi'] as const).map(mode => (
+                    <label key={mode} className="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" value={mode}
+                        checked={svgZoneMode === mode}
+                        onChange={() => setSvgZoneMode(mode)}
+                        className="accent-indigo-500" />
+                      <span className="text-xs text-gray-700">
+                        {mode === 'single' ? '단일 구역' : '다구역 자동 분할'}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 실행 버튼 */}
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  if (!apiCoords || parcels.length === 0) return
+                  setSvgAnalyzing(true)
+                  try {
+                    const panelSpec = PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.TYPE_A
+                    const polygon = convertGeoRingToLocalPolygon(
+                      parcels[0].ring,
+                      apiCoords.lat,
+                      apiCoords.lon
+                    )
+
+                    if (svgZoneMode === 'multi') {
+                      // 다구역 자동 분할
+                      const zones = autoSplitPolygon(
+                        polygon,
+                        panelSpec,
+                        svgPlotType,
+                        svgPanelType,
+                        {
+                          azimuthDeg: svgAzimuthDeg,
+                          slopeAngleDeg: svgHasSlope ? svgSlopeAngle : 0,
+                          slopeAzimuthDeg: svgHasSlope ? svgSlopeAzimuth : 180,
+                          isJimokChangePlanned: svgJimokChangePlanned,
+                        }
+                      )
+                      const result = runMultiZoneAnalysis(zones, apiCoords.lat)
+                      setSvgAnalysisResult(result)
+                    } else {
+                      // 단일 구역
+                      const result = runFullAnalysis({
+                        cadastrePolygon: polygon,
+                        plotType: svgPlotType,
+                        panelSpec,
+                        panelType: svgPanelType,
+                        latitude: apiCoords.lat,
+                        azimuthDeg: svgAzimuthDeg,
+                        slopeAngleDeg: svgHasSlope ? svgSlopeAngle : 0,
+                        slopeAzimuthDeg: svgHasSlope ? svgSlopeAzimuth : 180,
+                        isJimokChangePlanned: svgJimokChangePlanned,
+                      })
+                      setSvgAnalysisResult(result)
+                    }
+                    setShowSvgCanvas(true)
+                  } catch (err) {
+                    console.error('SVG 분석 오류:', err)
+                  } finally {
+                    setSvgAnalyzing(false)
+                  }
+                }}
+                disabled={svgAnalyzing}
+                className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors">
+                {svgAnalyzing ? '분석 중...' : '정밀 분석 실행'}
+              </button>
+              {svgAnalysisResult && (
+                <button
+                  onClick={() => setShowSvgCanvas(v => !v)}
+                  className="px-3 py-2 border border-indigo-300 text-indigo-600 text-xs rounded-lg hover:bg-indigo-50">
+                  {showSvgCanvas ? '숨기기' : '결과 보기'}
+                </button>
+              )}
+            </div>
+
+            {/* 결과 표시 */}
+            {showSvgCanvas && svgAnalysisResult && (
+              <div className="mt-3">
+                <SolarLayoutCanvas
+                  result={svgAnalysisResult}
+                  width={700}
+                  height={480}
+                  showLabels
+                />
+                {/* 단일 구역 — 검증 결과 */}
+                {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.validation && (
+                  <div className={`mt-2 text-xs rounded px-3 py-2 ${
+                    svgAnalysisResult.validation.isValid
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                  }`}>
+                    {svgAnalysisResult.validation.isValid ? '✓ ' : '⚠ '}
+                    {svgAnalysisResult.validation.message}
+                  </div>
+                )}
+                {/* 다구역 — 요약 */}
+                {isMultiZoneResult(svgAnalysisResult) && (
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {(svgAnalysisResult as MultiZoneResult).zones.map(z => (
+                      <div key={z.zoneLabel} className="bg-indigo-50 rounded p-2 text-xs">
+                        <div className="font-semibold text-indigo-700">{z.zoneLabel}</div>
+                        <div className="text-gray-600">{z.layout.totalCount}장 · {z.layout.totalKwp}kWp</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* SafeZone 오류 */}
+                {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.safeZone.error && (
+                  <p className="text-xs text-red-500 mt-2">
+                    ⚠ {svgAnalysisResult.safeZone.error}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
