@@ -14,6 +14,7 @@ const PermitTab = dynamic(() => import('@/components/tabs/PermitTab'), { ssr: fa
 const PanelTab = dynamic(() => import('@/components/tabs/PanelTab'), { ssr: false })
 const ChecklistTab = dynamic(() => import('@/components/tabs/ChecklistTab'), { ssr: false })
 const UnitPriceTab = dynamic(() => import('@/components/tabs/UnitPriceTab'), { ssr: false })
+const HistoryTab = dynamic(() => import('@/components/tabs/HistoryTab'), { ssr: false })
 
 const TABS = [
   { id: 'map', label: '지도·배치도', icon: '🗺️', shortLabel: '지도' },
@@ -23,6 +24,7 @@ const TABS = [
   { id: 'panel', label: '패널 사양', icon: '⚡', shortLabel: '패널' },
   { id: 'checklist', label: '실무 체크리스트', icon: '✅', shortLabel: '체크' },
   { id: 'unitprice', label: '단가 관리', icon: '💰', shortLabel: '단가' },
+  { id: 'history', label: '현장 이력', icon: '📁', shortLabel: '이력' },
 ]
 
 export default function Home() {
@@ -93,7 +95,7 @@ export default function Home() {
         {/* Mobile dropdown menu */}
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-gray-100 bg-white shadow-lg">
-            <div className="max-w-screen-2xl mx-auto px-3 py-2 grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+            <div className="max-w-screen-2xl mx-auto px-3 py-2 grid grid-cols-4 sm:grid-cols-8 gap-1.5">
               {TABS.map(tab => (
                 <button
                   key={tab.id}
@@ -158,12 +160,13 @@ export default function Home() {
           {activeTab === 'panel' && <PanelTab />}
           {activeTab === 'checklist' && <ChecklistTab />}
           {activeTab === 'unitprice' && <UnitPriceTab />}
+          {activeTab === 'history' && <HistoryTab />}
         </div>
       </main>
 
       {/* Mobile bottom tab bar */}
       <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-lg safe-area-inset-bottom">
-        <div className="grid grid-cols-7 h-16">
+        <div className="grid grid-cols-8 h-16">
           {TABS.map(tab => (
             <button
               key={tab.id}

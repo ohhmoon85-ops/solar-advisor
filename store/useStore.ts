@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { SMP, REC_PRICE } from '@/lib/constants'
 import type { InstallationType } from '@/lib/constants'
+import type { HistoryEntry } from '@/lib/historyManager'
 
 const PRICE_LS_KEY = 'solar_price_overrides'
 
@@ -58,6 +59,10 @@ interface SolarStore {
   // 단가 관리 (SMP / REC)
   priceOverride: PriceOverride
   setPriceOverride: (p: PriceOverride) => void
+
+  // 현장 이력 → MapTab으로 불러오기
+  pendingHistoryLoad: HistoryEntry | null
+  setPendingHistoryLoad: (entry: HistoryEntry | null) => void
 }
 
 const DEFAULT_PRICE: PriceOverride = {
@@ -112,4 +117,7 @@ export const useSolarStore = create<SolarStore>((set) => ({
     try { localStorage.setItem(PRICE_LS_KEY, JSON.stringify(p)) } catch { /* ignore */ }
     set({ priceOverride: p })
   },
+
+  pendingHistoryLoad: null,
+  setPendingHistoryLoad: (entry) => set({ pendingHistoryLoad: entry }),
 }))
