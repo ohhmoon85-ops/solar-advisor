@@ -7,7 +7,7 @@ import { MODULES, GENERATION_HOURS } from '@/lib/constants'
 import { getSolarElevation } from '@/lib/shadowCalculator'
 import { runFullAnalysis, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
-import PANEL_TYPES, { PRESET_PANELS } from '@/lib/panelConfig'
+import { PRESET_PANELS } from '@/lib/panelConfig'
 import { type MultiZoneResult, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult } from '@/lib/multiZoneLayout'
 
 // SVG 캔버스는 클라이언트 전용
@@ -66,24 +66,6 @@ interface ParcelInfo {
 // ── 지리좌표 헬퍼 (순수함수) ─────────────────────────────────────
 function mpdLon(lat: number) { return 111319.9 * Math.cos((lat * Math.PI) / 180) }
 const MPD_LAT = 111319.9
-
-/**
- * 캔버스 픽셀 좌표 → 지리 미터 로컬 폴리곤 변환
- * pixelScale: m/px (캔버스 1픽셀 = 몇 미터)
- * 캔버스 Y축(하향) → 지리 Y축(북=+) 반전
- */
-function canvasPointsToMeterPolygon(
-  pts: { x: number; y: number }[],
-  scale: number
-): { x: number; y: number }[] {
-  if (pts.length < 3) return []
-  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length
-  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length
-  return pts.map(p => ({
-    x: (p.x - cx) * scale,
-    y: -(p.y - cy) * scale,  // Y 반전
-  }))
-}
 
 function geoToCanvas(lon: number, lat: number, cLon: number, cLat: number, scale: number): Point {
   return {
@@ -146,108 +128,6 @@ function computeZoomAndScale(ring: number[][], cLon: number, cLat: number): { z:
   const z = Math.max(15, Math.min(20, Math.round(rawZ)))
   const scale = tilePixelScaleM(cLat, z) // 실제 m/px — 지도·CAD 축척 일치
   return { z, scale }
-}
-
-// ── Ramer-Douglas-Peucker 폴리곤 단순화 ───────────────────────────
-function rdpSimplify(pts: Point[], epsilon: number): Point[] {
-  if (pts.length <= 2) return pts
-  const first = pts[0], last = pts[pts.length - 1]
-  const dx = last.x - first.x, dy = last.y - first.y
-  const len = Math.sqrt(dx * dx + dy * dy)
-  let maxDist = 0, maxIdx = 0
-  for (let i = 1; i < pts.length - 1; i++) {
-    const d = len > 0
-      ? Math.abs(dy * pts[i].x - dx * pts[i].y + last.x * first.y - last.y * first.x) / len
-      : Math.sqrt((pts[i].x - first.x) ** 2 + (pts[i].y - first.y) ** 2)
-    if (d > maxDist) { maxDist = d; maxIdx = i }
-  }
-  if (maxDist > epsilon) {
-    const left = rdpSimplify(pts.slice(0, maxIdx + 1), epsilon)
-    const right = rdpSimplify(pts.slice(maxIdx), epsilon)
-    return [...left.slice(0, -1), ...right]
-  }
-  return [first, last]
-}
-
-// ── vworld 스크린샷 주황 경계선 감지 → 복수 폴리곤 (외곽 + 제외구역) ─
-function detectAllOrangeBoundaries(
-  imageData: ImageData
-): { rawPts: Point[]; cx: number; cy: number; pixelCount: number }[] {
-  const { data, width, height } = imageData
-
-  // ① 주황 픽셀 마킹
-  const isOrange = new Uint8Array(width * height)
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 4
-      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3]
-      if (a > 100 && r > 170 && r > g * 1.35 && b < 110 && g < 175)
-        isOrange[y * width + x] = 1
-    }
-  }
-
-  // ② 팽창(dilation) 2px — 같은 경계의 픽셀을 하나의 컴포넌트로 묶음
-  const dilated = new Uint8Array(width * height)
-  const DR = 2
-  for (let y = DR; y < height - DR; y++) {
-    for (let x = DR; x < width - DR; x++) {
-      if (!isOrange[y * width + x]) continue
-      for (let dy = -DR; dy <= DR; dy++)
-        for (let dx = -DR; dx <= DR; dx++)
-          dilated[(y + dy) * width + (x + dx)] = 1
-    }
-  }
-
-  // ③ BFS로 연결 컴포넌트 추출 (4-연결)
-  const visited = new Uint8Array(width * height)
-  const components: number[][] = []
-  for (let i = 0; i < width * height; i++) {
-    if (!dilated[i] || visited[i]) continue
-    const comp: number[] = []
-    const stack = [i]
-    visited[i] = 1
-    while (stack.length) {
-      const cur = stack.pop()!
-      comp.push(cur)
-      for (const nb of [cur - 1, cur + 1, cur - width, cur + width]) {
-        if (nb >= 0 && nb < width * height && dilated[nb] && !visited[nb]) {
-          visited[nb] = 1; stack.push(nb)
-        }
-      }
-    }
-    if (comp.length > 30) components.push(comp)
-  }
-  if (components.length === 0) return []
-
-  // ④ 각 컴포넌트에서 원본 주황 픽셀만 추려 각도 스윕 → RDP 폴리곤
-  const results = components.map(comp => {
-    const orangeInComp = comp.filter(idx => isOrange[idx])
-    if (orangeInComp.length < 20) return null
-    const pts = orangeInComp.map(idx => ({ x: idx % width, y: Math.floor(idx / width) }))
-    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length
-    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length
-    const STEPS = 360
-    const maxR = Math.sqrt(width * width + height * height)
-    const sweep: Point[] = []
-    for (let i = 0; i < STEPS; i++) {
-      const angle = (i / STEPS) * 2 * Math.PI
-      const cosA = Math.cos(angle), sinA = Math.sin(angle)
-      let last: Point | null = null
-      for (let r = 2; r < maxR; r += 0.8) {
-        const px = Math.round(cx + cosA * r), py = Math.round(cy + sinA * r)
-        if (px < 0 || px >= width || py < 0 || py >= height) break
-        if (isOrange[py * width + px]) last = { x: px, y: py }
-      }
-      if (last) sweep.push(last)
-    }
-    if (sweep.length < 10) return null
-    const rawPts = rdpSimplify([...sweep, sweep[0]], 3.5).slice(0, -1)
-    return { rawPts, cx, cy, pixelCount: orangeInComp.length }
-  }).filter(Boolean) as { rawPts: Point[]; cx: number; cy: number; pixelCount: number }[]
-
-  // 픽셀 수 내림차순 정렬 (첫 번째 = 외곽 경계, 나머지 = 제외구역)
-  results.sort((a, b) => b.pixelCount - a.pixelCount)
-  return results
 }
 
 // ── 점 ↔ 선분 최단거리 ────────────────────────────────────────────
@@ -356,20 +236,15 @@ export default function MapTab() {
   const [bipvEnabled, setBipvEnabled] = useState(false)
 
   // ── 드로잉 ──
-  const [drawMode, setDrawMode] = useState(false)
-  const [points, setPoints] = useState<Point[]>([])
   const [isComplete, setIsComplete] = useState(false)
   const [area, setArea] = useState(0)
   const [pixelScale, setPixelScale] = useState(0.1) // m/px
-  const [mousePos, setMousePos] = useState<Point | null>(null)   // 미리보기 선용
 
   // ── 위성/지적도 오버레이 ──
   const [satTiles, setSatTiles] = useState<SatTile[]>([])
   const [satLoading, setSatLoading] = useState(false)
   const [satZoom, setSatZoom] = useState(0)
   const [mapMode, setMapMode] = useState<'satellite' | 'cadastral'>('satellite')
-  // vworld 스크린샷 해상도 보정 계수 (기본 1.0, 사용자 조정)
-  const [screenshotScaleCorr, setScreenshotScaleCorr] = useState(1.0)
 
   // ── 복수 필지 ──
   const [parcels, setParcels] = useState<ParcelInfo[]>([])
@@ -378,7 +253,7 @@ export default function MapTab() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [parcelLabel, setParcelLabel] = useState('')
-  const [apiSource, setApiSource] = useState<'none' | 'api' | 'manual'>('none')
+  const [apiSource, setApiSource] = useState<'none' | 'api'>('none')
   const [apiCoords, setApiCoords] = useState<{ lat: number; lon: number } | null>(null)
   const [autoAzimuth, setAutoAzimuth] = useState<number | null>(null)
 
@@ -393,18 +268,6 @@ export default function MapTab() {
   const [panelCount, setPanelCount] = useState(0)
   const [capacityKwp, setCapacityKwp] = useState(0)
   const [annualKwh, setAnnualKwh] = useState(0)
-  const [structureWarning, setStructureWarning] = useState(false)
-
-  // ── vworld 스크린샷 드롭 ──
-  const [screenshotImg, setScreenshotImg] = useState<HTMLImageElement | null>(null)
-  const [screenshotZoom, setScreenshotZoom] = useState(18)
-  const [screenshotAnalyzing, setScreenshotAnalyzing] = useState(false)
-  const [screenshotError, setScreenshotError] = useState('')
-  const [screenshotCentroid, setScreenshotCentroid] = useState<Point | null>(null)
-  const [screenshotRawPts, setScreenshotRawPts] = useState<Point[] | null>(null)
-  const [screenshotRawHoles, setScreenshotRawHoles] = useState<{ rawPts: Point[]; cx: number; cy: number }[]>([])
-  const [holePolygons, setHolePolygons] = useState<Point[][]>([])
-
   // SVG 정밀 배치 분석 상태
   const [svgAnalysisResult, setSvgAnalysisResult] = useState<FullAnalysisResult | MultiZoneResult | null>(null)
   const [svgAnalyzing, setSvgAnalyzing] = useState(false)
@@ -437,87 +300,6 @@ export default function MapTab() {
   useEffect(() => {
     return () => { blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u)) }
   }, [])
-
-
-  // ── 패널 배치 (Point-in-Polygon 그리드, 경계 마진 적용) ──
-  const calcPanelsFromPolygon = useCallback(
-    (pts: Point[], areaSqm: number, scale: number) => {
-      if (pts.length < 3) return
-      const module = MODULES[moduleIndex]
-      const isBuilding = installType === '건물지붕형'
-      const slopeFactor = Math.cos(Math.atan(slopePercent / 100))
-      const ltr = (tiltAngle * Math.PI) / 180
-      const panelPxW = module.w / scale
-      const panelPxH = (module.h * Math.cos(ltr)) / scale
-      const rowPitch = panelPxH + spacingValue / scale
-
-      // 설치 유형별 경계 마진 (미터 → 픽셀)
-      const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
-      const marginPx = marginM / scale
-
-      const minX = Math.min(...pts.map(p => p.x))
-      const maxX = Math.max(...pts.map(p => p.x))
-      const minY = Math.min(...pts.map(p => p.y))
-      const maxY = Math.max(...pts.map(p => p.y))
-      const rects: PanelRect[] = []
-      for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
-        for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
-          const cx = x + panelPxW / 2, cy = y + panelPxH / 2
-          // ① 패널 4변이 폴리곤 경계를 가로지르면 즉시 제외 (오목 폴리곤 대응)
-          if (panelCrossesBoundary(x, y, panelPxW, panelPxH, pts)) continue
-          // ② 패널 4 꼭짓점 + 4변 중점 모두 폴리곤 안쪽 & marginPx 이상 이격
-          const checkPts = [
-            { x, y }, { x: x + panelPxW, y },
-            { x, y: y + panelPxH }, { x: x + panelPxW, y: y + panelPxH },
-            { x: x + panelPxW / 2, y }, { x: x + panelPxW / 2, y: y + panelPxH },
-            { x, y: y + panelPxH / 2 }, { x: x + panelPxW, y: y + panelPxH / 2 },
-          ]
-          if (checkPts.every(c =>
-                isPointInPolygon(c.x, c.y, pts) &&
-                minDistToPolygonEdge(c.x, c.y, pts) >= marginPx) &&
-              !holePolygons.some(hole => isPointInPolygon(cx, cy, hole)))
-            rects.push({ x, y, w: panelPxW, h: panelPxH })
-        }
-      }
-      let finalRects = rects
-      let warn = false
-
-      // ── 면적 기반 패널 수 계산 ──
-      // 경계 마진을 고려한 유효 면적 보정 (둘레 × 마진)
-      const perimeterPx = pts.reduce((sum, p, i) => {
-        const j = (i + 1) % pts.length
-        return sum + Math.sqrt((pts[j].x - p.x) ** 2 + (pts[j].y - p.y) ** 2)
-      }, 0)
-      const perimeterM = perimeterPx * scale
-      const effectiveAreaSqm = Math.max(0, areaSqm - perimeterM * marginM)
-      const footprintPerPanel = module.w * (module.h * Math.cos(ltr) + spacingValue)
-      const coverageRatio = isBuilding ? 0.70 : 0.85
-      let count: number
-      if (areaSqm > 10) {
-        count = Math.floor(effectiveAreaSqm * slopeFactor * coverageRatio / footprintPerPanel)
-      } else {
-        count = finalRects.length
-      }
-
-      if (isBuilding) {
-        const limit = LOAD_LIMITS[structureType]
-        if (limit !== null) {
-          const maxP = Math.floor((areaSqm * slopeFactor * limit) / 25)
-          if (count > maxP) count = maxP
-          if (finalRects.length > maxP) finalRects = rects.slice(0, maxP)
-          warn = structureType === '샌드위치 패널'
-        }
-      }
-      setStructureWarning(warn)
-      const cap = (count * module.watt) / 1000
-      const ann = cap * GENERATION_HOURS * 365
-      setPanelRects(finalRects)
-      setPanelCount(count)
-      setCapacityKwp(Math.round(cap * 100) / 100)
-      setAnnualKwh(Math.round(ann))
-    },
-    [moduleIndex, installType, tiltAngle, spacingValue, slopePercent, structureType, holePolygons]
-  )
 
   // ── 타일 로드 공통 함수 ──
   const loadTiles = useCallback(async (
@@ -565,13 +347,6 @@ export default function MapTab() {
     setSatLoading(false)
   }, [])
 
-  // ── 위성 타일 로드 (하위 호환) ──
-  const loadSatelliteTiles = useCallback(async (
-    cLon: number, cLat: number, z: number, scale: number
-  ) => {
-    return loadTiles(cLon, cLat, z, scale, 'satellite')
-  }, [loadTiles])
-
   // ── Canvas 렌더링 ──
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -580,7 +355,7 @@ export default function MapTab() {
     if (!ctx) return
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
 
-    // ❶ 배경: 위성사진 / vworld 스크린샷 / 기본 그리드
+    // ❶ 배경: 위성사진 / 기본 그리드
     if (satTiles.length > 0) {
       satTiles.forEach(t => ctx.drawImage(t.img, t.cx, t.cy, t.px, t.px))
       ctx.strokeStyle = 'rgba(255,255,255,0.12)'
@@ -590,24 +365,6 @@ export default function MapTab() {
       }
       for (let y = 0; y < CANVAS_H; y += 40) {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_H, y); ctx.stroke()
-      }
-    } else if (screenshotImg && screenshotCentroid) {
-      // vworld 스크린샷 배경 — 이미지 중심(경계 centroid)을 Canvas 중앙에 정렬
-      const lat37Rad = 37 * Math.PI / 180
-      const imgMPerPx = 40075016.686 * Math.cos(lat37Rad) / (256 * Math.pow(2, screenshotZoom))
-      const sf = imgMPerPx / pixelScale  // 이미지px → Canvas px 비율
-      const dw = screenshotImg.naturalWidth * sf
-      const dh = screenshotImg.naturalHeight * sf
-      const dx = CANVAS_W / 2 - screenshotCentroid.x * sf
-      const dy = CANVAS_H / 2 - screenshotCentroid.y * sf
-      ctx.drawImage(screenshotImg, dx, dy, dw, dh)
-      ctx.strokeStyle = 'rgba(255,255,255,0.08)'
-      ctx.lineWidth = 0.5
-      for (let x = 0; x < CANVAS_W; x += 40) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke()
-      }
-      for (let y = 0; y < CANVAS_H; y += 40) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke()
       }
     } else {
       // 기본 그리드 배경
@@ -621,15 +378,13 @@ export default function MapTab() {
     }
 
     const hasParcelData = parcels.length > 0
-    const hasManualPoints = points.length > 0 && !hasParcelData
 
-    if (!hasParcelData && points.length === 0) {
+    if (!hasParcelData) {
       ctx.fillStyle = satTiles.length > 0 ? 'rgba(255,255,255,0.85)' : '#94a3b8'
       ctx.font = '14px sans-serif'; ctx.textAlign = 'center'
-      ctx.fillText('지번을 검색하거나 직접 부지 경계를 그려주세요', CANVAS_W / 2, CANVAS_H / 2 - 12)
-      ctx.fillText('(더블클릭으로 완료)', CANVAS_W / 2, CANVAS_H / 2 + 12)
+      ctx.fillText('지번을 검색하여 부지를 불러와 주세요', CANVAS_W / 2, CANVAS_H / 2)
       ctx.fillStyle = '#94a3b8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'
-      ctx.fillText(`축척: 1px = ${pixelScale.toFixed(3)}m`, 8, CANVAS_H - 8)
+      ctx.fillText(`축척 Z${satZoom}`, 8, CANVAS_H - 8)
       return
     }
 
@@ -660,55 +415,6 @@ export default function MapTab() {
       })
     }
 
-    // ❷-단독 필지 경계 폴리곤 (수동 드로잉)
-    if (hasManualPoints) {
-      ctx.beginPath()
-      ctx.moveTo(points[0].x, points[0].y)
-      points.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
-      if (isComplete) ctx.closePath()
-      ctx.fillStyle = satTiles.length > 0
-        ? 'rgba(59,130,246,0.15)'
-        : (apiSource === 'api' ? 'rgba(16,185,129,0.08)' : 'rgba(59,130,246,0.08)')
-      ctx.fill()
-      ctx.strokeStyle = apiSource === 'api' ? '#10b981' : '#3b82f6'
-      ctx.lineWidth = satTiles.length > 0 ? 2.5 : 2
-      ctx.stroke()
-    }
-
-    // ❷-c 마진 정보 표시 (경계선 우상단 배지)
-    if (isComplete && points.length >= 3) {
-      const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
-      const badge = `경계마진 ${marginM}m`
-      ctx.font = 'bold 10px sans-serif'
-      const bw = ctx.measureText(badge).width + 12
-      ctx.fillStyle = 'rgba(251,146,60,0.90)'
-      ctx.fillRect(CANVAS_W - bw - 4, 32, bw, 18)
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'
-      ctx.fillText(badge, CANVAS_W - bw / 2 - 4, 44)
-    }
-
-    // ❷-b 제외구역 (hole) — 빨간 점선
-    holePolygons.forEach(hole => {
-      if (hole.length < 3) return
-      ctx.beginPath()
-      ctx.moveTo(hole[0].x, hole[0].y)
-      hole.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
-      ctx.closePath()
-      ctx.fillStyle = 'rgba(239,68,68,0.12)'
-      ctx.fill()
-      ctx.setLineDash([5, 3])
-      ctx.strokeStyle = '#ef4444'
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-      ctx.setLineDash([])
-      // 중심 레이블
-      const hcx = hole.reduce((s, p) => s + p.x, 0) / hole.length
-      const hcy = hole.reduce((s, p) => s + p.y, 0) / hole.length
-      ctx.fillStyle = 'rgba(239,68,68,0.85)'
-      ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'
-      ctx.fillText('제외', hcx, hcy + 4)
-    })
-
     // ❸ 패널 그리드
     panelRects.forEach((rect, i) => {
       ctx.fillStyle = 'rgba(59,130,246,0.70)'
@@ -734,59 +440,11 @@ export default function MapTab() {
       ctx.fillText(`이격 ${spacingValue}m`, r0.x + r0.w * 2.5 + 3, r0.y + r0.h + 4)
     }
 
-    // ❺ 꼭짓점
-    points.forEach((p, i) => {
-      ctx.beginPath(); ctx.arc(p.x, p.y, i === 0 ? 5 : 4, 0, Math.PI * 2)
-      ctx.fillStyle = i === 0 ? '#ef4444' : (apiSource === 'api' ? '#10b981' : '#3b82f6')
-      ctx.fill()
-    })
-
-    // ❺-b 수동 드로잉 미리보기 선 (마우스 추적)
-    if (drawMode && points.length > 0 && mousePos && !isComplete) {
-      const last = points[points.length - 1]
-      // 현재 그릴 선 (점선)
-      ctx.setLineDash([6, 4])
-      ctx.strokeStyle = '#f59e0b'
-      ctx.lineWidth = 1.5
-      ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(mousePos.x, mousePos.y); ctx.stroke()
-      // 첫 점까지의 닫는 선 (반투명)
-      if (points.length >= 2) {
-        ctx.setLineDash([3, 5])
-        ctx.strokeStyle = 'rgba(245,158,11,0.4)'
-        ctx.lineWidth = 1
-        ctx.beginPath(); ctx.moveTo(mousePos.x, mousePos.y); ctx.lineTo(points[0].x, points[0].y); ctx.stroke()
-      }
-      ctx.setLineDash([])
-
-      // 마우스 위치에 실시간 면적 표시
-      if (points.length >= 2) {
-        const previewPts = [...points, mousePos]
-        let sho = 0
-        for (let i = 0; i < previewPts.length; i++) {
-          const j = (i + 1) % previewPts.length
-          sho += previewPts[i].x * previewPts[j].y - previewPts[j].x * previewPts[i].y
-        }
-        const previewArea = Math.abs(sho / 2) * pixelScale * pixelScale
-        const areaLabel = previewArea >= 10000
-          ? `${(previewArea / 10000).toFixed(2)}ha`
-          : `${previewArea.toFixed(0)}m²`
-        ctx.font = 'bold 11px sans-serif'
-        const tw = ctx.measureText(areaLabel).width
-        const bx = mousePos.x + 10, by = mousePos.y - 8
-        ctx.fillStyle = 'rgba(245,158,11,0.9)'
-        ctx.fillRect(bx - 4, by - 13, tw + 8, 18)
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'
-        ctx.fillText(areaLabel, bx, by)
-      }
-      // 현재 마우스 위치 점
-      ctx.beginPath(); ctx.arc(mousePos.x, mousePos.y, 3, 0, Math.PI * 2)
-      ctx.fillStyle = '#f59e0b'; ctx.fill()
-    }
-
-    // ❻ 중심 레이블
-    if (isComplete && area > 0) {
-      const cx = points.reduce((s, p) => s + p.x, 0) / points.length
-      const cy = points.reduce((s, p) => s + p.y, 0) / points.length
+    // ❺ 중심 레이블
+    if (isComplete && area > 0 && parcels.length > 0) {
+      const firstPts = parcels[0].canvasPoints
+      const cx = firstPts.reduce((s, p) => s + p.x, 0) / firstPts.length
+      const cy = firstPts.reduce((s, p) => s + p.y, 0) / firstPts.length
       const label = `${area.toFixed(1)}m²  ·  ${panelCount}장`
       ctx.font = 'bold 12px sans-serif'
       const tw = ctx.measureText(label).width
@@ -798,10 +456,10 @@ export default function MapTab() {
       ctx.fillText(label, cx, cy + 4)
     }
 
-    // ❼ 축척 텍스트 (왼쪽 하단)
+    // ❻ 축척 텍스트 (왼쪽 하단)
     const scaleLabel = satZoom > 0
       ? `축척 Z${satZoom}: 1px = ${pixelScale.toFixed(3)}m  (지도=CAD 일치)`
-      : `축척: 1px = ${pixelScale.toFixed(3)}m`
+      : `축척 Z${satZoom}`
     ctx.font = '11px sans-serif'; ctx.textAlign = 'left'
     if (satTiles.length > 0) {
       const sw = ctx.measureText(scaleLabel).width
@@ -813,7 +471,7 @@ export default function MapTab() {
     }
     ctx.fillText(scaleLabel, 8, CANVAS_H - 8)
 
-    // ❼-b 시각적 축척바 (오른쪽 하단) — 지도·CAD 축척 일치 검증용
+    // ❻-b 시각적 축척바 (오른쪽 하단) — 지도·CAD 축척 일치 검증용
     {
       const candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500]
       const targetBarPx = 80
@@ -822,7 +480,7 @@ export default function MapTab() {
       const dispPx = Math.min(rawBarPx, CANVAS_W * 0.28)
       const barX = CANVAS_W - dispPx - 16
       const barY = CANVAS_H - 10
-      const onMap = satTiles.length > 0 || (screenshotImg !== null)
+      const onMap = satTiles.length > 0
       const barFg = onMap ? 'rgba(255,255,255,0.97)' : '#334155'
       const barBg = onMap ? 'rgba(0,0,0,0.50)' : 'rgba(241,245,249,0.92)'
       ctx.fillStyle = barBg
@@ -840,7 +498,7 @@ export default function MapTab() {
       ctx.fillText(`${barM}m`, barX + dispPx / 2, barY - 5)
     }
 
-    // ❽ VWorld 배지
+    // ❼ VWorld 배지
     if (apiSource === 'api') {
       const badgeLabel = parcels.length > 1
         ? `VWorld ${parcels.length}개 필지 경계`
@@ -851,20 +509,11 @@ export default function MapTab() {
       ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'
       ctx.fillText(badgeLabel, CANVAS_W - (bw + 4) / 2, 21)
     }
-  }, [points, isComplete, area, panelRects, spacingValue, panelCount,
+  }, [isComplete, area, panelRects, spacingValue, panelCount,
       pixelScale, apiSource, satTiles, satZoom,
-      screenshotImg, screenshotCentroid, screenshotZoom, holePolygons,
-      parcels, mapMode, drawMode, mousePos, installType])
+      parcels, mapMode])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
-
-  // 파라미터 변경 시 패널 재계산
-  useEffect(() => {
-    if (!isComplete || points.length < 3) return
-    calcPanelsFromPolygon(points, area, pixelScale)
-  }, [isComplete, points, area, pixelScale,
-      moduleIndex, tiltAngle, spacingValue, slopePercent, installType, structureType,
-      calcPanelsFromPolygon])
 
   // KIER 실측 발전시간 도착 시 연간발전량(annualKwh) 갱신 (STEP 5 결과카드)
   useEffect(() => {
@@ -1039,7 +688,7 @@ export default function MapTab() {
     setParcelLabel('')
     setKierResult(null)
     setParcels([])
-    setPoints([]); setArea(0); setPanelRects([]); setPanelCount(0)
+    setArea(0); setPanelRects([]); setPanelCount(0)
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
 
     try {
@@ -1064,7 +713,7 @@ export default function MapTab() {
       }
 
       if (parcelResults.length === 0) {
-        // 경계 없음 — 첫 번째 좌표로 위성 로드 후 수동 드로우 안내
+        // 경계 없음 — 첫 번째 좌표로 위성 로드
         const coords = coordResults.find(c => c && !('error' in c)) as { lon: number; lat: number } | undefined
         if (coords) {
           const defaultZ = 18
@@ -1077,7 +726,7 @@ export default function MapTab() {
           fetchKierData(coords.lat, coords.lon, tiltAngle)
           fetchSlope(coords.lon, coords.lat)
         }
-        setSearchError('필지 경계를 불러올 수 없습니다.\n"직접 그리기"로 부지를 표시해 주세요.')
+        setSearchError('필지 경계를 불러올 수 없습니다.')
         return
       }
 
@@ -1100,7 +749,6 @@ export default function MapTab() {
       setPixelScale(scale)
       setSatZoom(z)
       setIsComplete(true)
-      setDrawMode(false)
       setApiSource('api')
 
       // 첫 번째 필지 기준으로 KIER·경사도·방위각
@@ -1177,171 +825,16 @@ export default function MapTab() {
     }
   }
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!drawMode) return
-    const canvas = canvasRef.current!
-    const rect = canvas.getBoundingClientRect()
-    const x = (e.clientX - rect.left) * (CANVAS_W / rect.width)
-    const y = (e.clientY - rect.top) * (CANVAS_H / rect.height)
-    setPoints(prev => [...prev, { x, y }])
-    setApiSource('manual')
-  }
-
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!drawMode || isComplete) return
-    const canvas = canvasRef.current!
-    const rect = canvas.getBoundingClientRect()
-    setMousePos({
-      x: (e.clientX - rect.left) * (CANVAS_W / rect.width),
-      y: (e.clientY - rect.top) * (CANVAS_H / rect.height),
-    })
-  }
-
-  const handleCanvasMouseLeave = () => setMousePos(null)
-
-  const handleCanvasDblClick = () => {
-    if (points.length >= 3) {
-      let sho = 0
-      for (let i = 0; i < points.length; i++) {
-        const j = (i + 1) % points.length
-        sho += points[i].x * points[j].y - points[j].x * points[i].y
-      }
-      const manualArea = Math.abs(sho / 2) * pixelScale * pixelScale
-      setArea(manualArea)
-      setIsComplete(true)
-      setDrawMode(false)
-      setMousePos(null)
-    }
-  }
-
-  // 마지막 꼭짓점 실행취소
-  const handleUndoPoint = () => {
-    if (!drawMode || points.length === 0) return
-    setPoints(prev => prev.slice(0, -1))
-  }
-
-  const handleStartDraw = () => {
-    setPoints([]); setArea(0); setPanelRects([]); setPanelCount(0)
-    setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
-    setDrawMode(true); setApiSource('manual'); setParcelLabel('')
-    setSearchError('')
-    // 위성 타일이 로드된 경우 pixelScale 유지 (배경 위에서 정확한 면적 계산 보장)
-    if (satTiles.length === 0) setPixelScale(0.1)
-    setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
-  }
-
   const handleReset = () => {
-    setPoints([]); setArea(0); setPanelRects([]); setPanelCount(0)
-    setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false); setDrawMode(false)
+    setArea(0); setPanelRects([]); setPanelCount(0)
+    setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
     setApiSource('none'); setParcelLabel(''); setSearchError('')
     setPixelScale(0.1); setSatTiles([]); setSatZoom(0)
     setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
     // 복수 필지 초기화
     setParcels([])
-    // 스크린샷 초기화
-    setScreenshotImg(null); setScreenshotCentroid(null); setScreenshotRawPts(null)
-    setScreenshotRawHoles([]); setHolePolygons([])
-    setScreenshotError(''); setScreenshotAnalyzing(false)
-    setScreenshotScaleCorr(1.0)
   }
-
-  // ── 스크린샷 rawPts/zoom/보정계수 변경 시 Canvas 좌표 재계산 ──────
-  useEffect(() => {
-    if (!screenshotRawPts || !screenshotCentroid) return
-    // vworld 화면 픽셀 실측 기반 스케일 (드롭다운 표시값 사용)
-    // 이론 타일 스케일(0.119) 대신 실제 화면 해상도에 맞는 값 사용
-    // 줌 20 = 0.15m/px, 줌 19 = 0.30, 줌 18 = 0.60, 줌 17 = 1.20, 줌 16 = 2.40
-    const VWORLD_BASE_SCALE = 0.15 // zoom 20 기준 vworld 화면 픽셀 스케일 (m/px)
-    const imgMPerPx = VWORLD_BASE_SCALE * Math.pow(2, 20 - screenshotZoom) * screenshotScaleCorr
-    const minX = Math.min(...screenshotRawPts.map(p => p.x))
-    const maxX = Math.max(...screenshotRawPts.map(p => p.x))
-    const minY = Math.min(...screenshotRawPts.map(p => p.y))
-    const maxY = Math.max(...screenshotRawPts.map(p => p.y))
-    const extentPx = Math.max(maxX - minX, maxY - minY, 10)
-    const canvScale = (extentPx * imgMPerPx) / (Math.min(CANVAS_W, CANVAS_H) * 0.62)
-    const sf = imgMPerPx / canvScale
-    const canvasPoints: Point[] = screenshotRawPts.map(p => ({
-      x: CANVAS_W / 2 + (p.x - screenshotCentroid.x) * sf,
-      y: CANVAS_H / 2 + (p.y - screenshotCentroid.y) * sf,
-    }))
-    // 넓이 (쇼레이스 공식)
-    let sho = 0
-    for (let i = 0; i < canvasPoints.length; i++) {
-      const j = (i + 1) % canvasPoints.length
-      sho += canvasPoints[i].x * canvasPoints[j].y - canvasPoints[j].x * canvasPoints[i].y
-    }
-    const areaSqm = Math.abs(sho / 2) * canvScale * canvScale
-    // hole 폴리곤도 같은 sf/centroid 기준으로 변환
-    const mappedHoles = screenshotRawHoles.map(h =>
-      h.rawPts.map(p => ({
-        x: CANVAS_W / 2 + (p.x - screenshotCentroid.x) * sf,
-        y: CANVAS_H / 2 + (p.y - screenshotCentroid.y) * sf,
-      }))
-    )
-    setHolePolygons(mappedHoles)
-    setPixelScale(canvScale)
-    setPoints(canvasPoints)
-    setArea(areaSqm)
-    setIsComplete(true)
-    setDrawMode(false)
-    setApiSource('manual')
-    calcPanelsFromPolygon(canvasPoints, areaSqm, canvScale)
-  }, [screenshotRawPts, screenshotCentroid, screenshotZoom, screenshotScaleCorr, screenshotRawHoles, calcPanelsFromPolygon])
-
-  // ── vworld 스크린샷 분석 ──────────────────────────────────────────
-  const analyzeScreenshot = useCallback((img: HTMLImageElement) => {
-    setScreenshotAnalyzing(true)
-    setScreenshotError('')
-    // 오프스크린 Canvas로 픽셀 데이터 추출
-    const off = document.createElement('canvas')
-    off.width = img.naturalWidth
-    off.height = img.naturalHeight
-    const offCtx = off.getContext('2d')
-    if (!offCtx) { setScreenshotAnalyzing(false); return }
-    offCtx.drawImage(img, 0, 0)
-    const imgData = offCtx.getImageData(0, 0, off.width, off.height)
-    const results = detectAllOrangeBoundaries(imgData)
-    setScreenshotAnalyzing(false)
-    if (!results.length) {
-      setScreenshotError('주황색 경계선을 감지하지 못했습니다. vworld에서 주황색 경계가 그려진 화면을 스크린샷 해주세요.')
-      return
-    }
-    // 첫 번째 = 외곽 경계, 나머지 = 제외구역
-    setScreenshotCentroid({ x: results[0].cx, y: results[0].cy })
-    setScreenshotRawPts(results[0].rawPts)
-    setScreenshotRawHoles(results.slice(1).map(r => ({ rawPts: r.rawPts, cx: r.cx, cy: r.cy })))
-  }, [])
-
-  // ── 파일 드롭 / 선택 핸들러 ──────────────────────────────────────
-  const handleDropFile = useCallback((file: File) => {
-    if (!file.type.startsWith('image/')) return
-    const url = URL.createObjectURL(file)
-    const img = new Image()
-    img.onload = () => {
-      setScreenshotImg(img)
-      analyzeScreenshot(img)
-    }
-    img.onerror = () => {
-      setScreenshotError('이미지를 불러올 수 없습니다.')
-      URL.revokeObjectURL(url)
-    }
-    img.src = url
-  }, [analyzeScreenshot])
-
-  // Ctrl+V 클립보드 이미지 붙여넣기 감지
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const items = Array.from(e.clipboardData?.items ?? [])
-      const imgItem = items.find(it => it.type.startsWith('image/'))
-      if (!imgItem) return
-      e.preventDefault()
-      const file = imgItem.getAsFile()
-      if (file) handleDropFile(file)
-    }
-    document.addEventListener('paste', onPaste)
-    return () => document.removeEventListener('paste', onPaste)
-  }, [handleDropFile])
 
   const handleSendToRevenue = () => {
     const addressLabel = addresses.filter(Boolean).join(', ')
@@ -1374,7 +867,7 @@ export default function MapTab() {
     const addressLabel = addresses.filter(Boolean).join(', ')
     const rows: [string, string][] = [
       ['지번', `${addressLabel || '-'}${parcelLabel ? ' (' + parcelLabel + ')' : ''}`],
-      ['출처', apiSource === 'api' ? 'VWorld 필지 자동 경계' : '수동 측정'],
+      ['출처', apiSource === 'api' ? 'VWorld 필지 자동 경계' : '직접 측정'],
       ['부지면적', `${area.toFixed(2)} m²`],
       ['설치유형', installType],
       ['모듈', `${MODULES[moduleIndex].name} (${MODULES[moduleIndex].watt}W)`],
@@ -1396,7 +889,7 @@ export default function MapTab() {
           <div style="font-size:11px;color:#64748b">SolarAdvisor v5.2 — 자동 생성</div>
         </div>
       </div>
-      <table style="border-collapse:collapse;width:100%;margin-bottom:14px;font-size:12px">
+      <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px">
         ${rows.map(([k, v], i) => `
           <tr style="background:${i % 2 === 0 ? '#f8fafc' : 'white'}">
             <td style="padding:5px 10px;color:#64748b;width:140px;border:1px solid #e2e8f0">${k}</td>
@@ -1447,7 +940,6 @@ export default function MapTab() {
 
   const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
-  const step4Done = isComplete && area > 0
   const step5Done = panelCount > 0
 
   const stepCircle = (done: boolean, num: string | number, active?: boolean) =>
@@ -1460,7 +952,7 @@ export default function MapTab() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-4">
-      {/* ── 왼쪽: 5단계 컨트롤 ── */}
+      {/* ── 왼쪽: 컨트롤 ── */}
       <div className="w-full lg:w-72 xl:w-80 flex-shrink-0 space-y-3">
 
         {/* STEP 1 */}
@@ -1558,6 +1050,14 @@ export default function MapTab() {
             <div className="mt-1 text-xs text-indigo-600">
               {mapMode === 'cadastral' ? '🗺 지적도' : '🛰 위성사진'} 오버레이 완료 (Z{satZoom} · 1px={pixelScale.toFixed(3)}m)
             </div>
+          )}
+
+          {/* 초기화 버튼 */}
+          {isComplete && (
+            <button onClick={handleReset}
+              className="mt-2 w-full px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50">
+              초기화
+            </button>
           )}
         </div>
 
@@ -1691,156 +1191,6 @@ export default function MapTab() {
           </div>
         </div>
 
-        {/* STEP 4 — 수동 그리기 */}
-        <div className={stepCard(step4Done, drawMode)}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className={stepCircle(step4Done, '4', drawMode)}>{step4Done ? '✓' : '4'}</div>
-            <h3 className="font-semibold text-gray-800 text-sm">수동 부지 그리기</h3>
-          </div>
-          <p className="text-xs text-gray-400 mb-2">API 키 없을 때 — vworld 스크린샷 붙여넣기 또는 캔버스에 직접 그리기</p>
-
-          {/* vworld 스크린샷 붙여넣기 안내 */}
-          <div className={`mb-2 border-2 rounded-lg p-3 text-center transition-colors ${
-            screenshotAnalyzing
-              ? 'border-orange-300 bg-orange-50'
-              : screenshotImg && !screenshotError
-              ? 'border-green-400 bg-green-50'
-              : 'border-gray-200 bg-gray-50'
-          }`}>
-            {screenshotAnalyzing ? (
-              <div className="flex items-center justify-center gap-2 text-xs text-orange-600">
-                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-                경계선 분석 중...
-              </div>
-            ) : screenshotImg && !screenshotError ? (
-              <div className="text-xs text-green-700 font-semibold">
-                ✓ 스크린샷 경계 인식 완료
-                <div className="text-green-600 font-normal mt-0.5">다시 붙여넣으면 교체됩니다 (Ctrl+V)</div>
-              </div>
-            ) : (
-              <div className="text-xs text-gray-500">
-                <div className="text-base mb-1">🗺</div>
-                <div className="font-medium text-gray-700">vworld 스크린샷 후 <kbd className="bg-gray-200 text-gray-700 px-1 py-0.5 rounded text-xs">Ctrl+V</kbd></div>
-                <div className="text-gray-400 mt-0.5">화면 어디서나 붙여넣기 가능</div>
-              </div>
-            )}
-          </div>
-
-          {/* 오류 메시지 */}
-          {screenshotError && (
-            <div className="mb-2 bg-red-50 border border-red-200 rounded-lg p-2 text-xs text-red-600">
-              {screenshotError}
-            </div>
-          )}
-
-          {/* vworld 줌레벨 선택 + 축척 보정 */}
-          {screenshotImg && (
-            <div className="mb-2 space-y-2">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-700">
-                <div className="font-semibold mb-1">📐 vworld 줌레벨 = 스크린샷 축척 기준</div>
-                <div className="text-blue-600">vworld에서 스크린샷을 찍을 때의 <strong>확대 단계</strong>를 선택하세요.<br/>줌이 높을수록 확대(1px당 더 작은 면적)됩니다.</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-gray-500 whitespace-nowrap font-medium">줌레벨</label>
-                <select
-                  value={screenshotZoom}
-                  onChange={e => { setScreenshotZoom(Number(e.target.value)); setScreenshotScaleCorr(1.0) }}
-                  className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
-                >
-                  <option value={16}>16단계 (넓은 지역, ~2.4m/px)</option>
-                  <option value={17}>17단계 (~1.2m/px)</option>
-                  <option value={18}>18단계 (~0.6m/px) — 기본</option>
-                  <option value={19}>19단계 (~0.3m/px)</option>
-                  <option value={20}>20단계 (최대 확대, ~0.15m/px)</option>
-                </select>
-              </div>
-              {/* 축척 보정: 캔버스 스케일바와 vworld 스케일바 불일치 시 조정 */}
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 space-y-1.5">
-                <div className="text-xs text-yellow-700 font-semibold">🔧 축척 미세 보정</div>
-                <div className="text-xs text-yellow-600">
-                  캔버스 우하단 <strong>「{Math.round(0.15 * Math.pow(2, 20 - screenshotZoom) * screenshotScaleCorr * 310 / (0.15 * Math.pow(2, 20 - screenshotZoom) * screenshotScaleCorr))}m」</strong> 스케일바와 배경지도의 스케일바가 다르면 조정하세요.
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 whitespace-nowrap">보정 ×{screenshotScaleCorr.toFixed(2)}</span>
-                  <input
-                    type="range"
-                    min={0.3}
-                    max={3.0}
-                    step={0.05}
-                    value={screenshotScaleCorr}
-                    onChange={e => setScreenshotScaleCorr(Number(e.target.value))}
-                    className="flex-1"
-                  />
-                </div>
-                <div className="text-xs text-gray-400">
-                  현재 캔버스 축척: 1px ≈ {(0.15 * Math.pow(2, 20 - screenshotZoom) * screenshotScaleCorr * (1 / (Math.min(CANVAS_W, CANVAS_H) * 0.62))).toFixed(3)}m (참고용, 폴리곤 크기에 따라 결정됨)
-                </div>
-                {screenshotScaleCorr !== 1.0 && (
-                  <button
-                    onClick={() => setScreenshotScaleCorr(1.0)}
-                    className="text-xs text-blue-600 hover:underline"
-                  >
-                    기본값 초기화 (×1.00)
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* 직접 그리기 버튼 */}
-          <div className="flex gap-2">
-            <button onClick={handleStartDraw}
-              className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors ${
-                drawMode ? 'bg-red-50 border-red-400 text-red-600' : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'}`}>
-              {drawMode ? '✕ 취소' : '✏ 직접 그리기'}
-            </button>
-            {(points.length > 0 || isComplete || screenshotImg) && (
-              <button onClick={handleReset}
-                className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50">
-                초기화
-              </button>
-            )}
-          </div>
-          {drawMode && (
-            <div className="mt-2 bg-blue-50 rounded-lg p-2 text-xs text-blue-700 space-y-1.5">
-              <div>
-                클릭으로 꼭짓점 추가 · <strong>더블클릭</strong>으로 완료
-                {points.length > 0 && <span className="ml-1 text-blue-500">({points.length}점)</span>}
-              </div>
-              {satTiles.length === 0 && (
-                <div className="bg-yellow-50 border border-yellow-300 rounded p-1.5 space-y-1">
-                  <div className="text-yellow-700 font-semibold">⚠ 위성사진 없음 — 수동 축척 설정 필수</div>
-                  <div className="text-yellow-600">지번 검색 후 그리기를 권장합니다 (자동 축척)</div>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <label className="text-gray-600 whitespace-nowrap">1px =</label>
-                    <input
-                      type="number"
-                      step={0.01}
-                      min={0.001}
-                      value={pixelScale}
-                      onChange={e => setPixelScale(Math.max(0.001, Number(e.target.value)))}
-                      className="w-20 border border-gray-300 rounded px-1.5 py-0.5 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    />
-                    <span className="text-gray-600">m/px</span>
-                  </div>
-                  <div className="text-gray-400">캔버스 800px 기준 총 {(pixelScale * 800).toFixed(0)}m 폭</div>
-                </div>
-              )}
-              {points.length > 0 && (
-                <button
-                  onClick={handleUndoPoint}
-                  className="flex items-center gap-1 text-xs bg-white border border-blue-300 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-colors"
-                >
-                  ↩ 마지막 점 취소
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
         {/* KIER 실측 일사량 */}
         {(kierLoading || kierResult) && (
           <div className={`rounded-xl border-2 p-4 ${kierResult ? 'bg-emerald-50 border-emerald-300' : 'bg-gray-50 border-gray-200'}`}>
@@ -1878,11 +1228,11 @@ export default function MapTab() {
           </div>
         )}
 
-        {/* STEP 5 — 결과 */}
+        {/* STEP 4 — 결과 */}
         {step5Done && (
           <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border-2 border-blue-300 p-4">
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-blue-500 text-white">5</div>
+              <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-blue-500 text-white">4</div>
               <h3 className="font-semibold text-blue-800 text-sm">분석 결과</h3>
             </div>
             <div className="space-y-2">
@@ -1905,7 +1255,7 @@ export default function MapTab() {
               <div className="text-xs text-gray-400 border-t border-blue-200 pt-2">
                 커버율 {installType === '건물지붕형' ? '70%' : '85%'}
                 {slopePercent > 0 ? ` × cos(arctan(${slopePercent}%))` : ''}
-                {apiSource === 'api' ? `  ·  VWorld ${parcels.length}개 필지` : '  ·  수동 측정'}
+                {apiSource === 'api' ? `  ·  VWorld ${parcels.length}개 필지` : ''}
                 {satTiles.length > 0 ? `  ·  ${mapMode === 'cadastral' ? '지적도' : '위성'}` : ''}
                 {`  ·  경계마진 ${BOUNDARY_MARGIN[installType] ?? 2}m`}
               </div>
@@ -1955,11 +1305,7 @@ export default function MapTab() {
           </div>
 
           <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}
-            onClick={handleCanvasClick}
-            onDoubleClick={handleCanvasDblClick}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseLeave={handleCanvasMouseLeave}
-            className={`w-full h-auto border border-gray-200 rounded-lg bg-gray-50 ${drawMode ? 'cursor-crosshair' : 'cursor-default'}`}
+            className="w-full h-auto border border-gray-200 rounded-lg bg-gray-50 cursor-default"
             style={{ maxHeight: '500px' }}
           />
 
@@ -1985,17 +1331,15 @@ export default function MapTab() {
           )}
         </div>
 
-        {/* ── SVG 정밀 배치 분석 (지번 API + 수동 그리기 모두 지원) ── */}
-        {isComplete && (parcels.length > 0 || points.length >= 3) && (
+        {/* ── SVG 정밀 배치 분석 (API 모드) ── */}
+        {isComplete && parcels.length > 0 && (
           <div className="mt-4 bg-white rounded-xl border border-indigo-200 p-4">
             <div className="mb-3">
               <h3 className="font-semibold text-gray-800 text-sm flex items-center gap-1.5">
                 🔬 SVG 정밀 배치 분석 <span className="text-xs font-normal text-indigo-500">v5.2</span>
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                {apiSource === 'api'
-                  ? `VWorld 필지 경계 · 위도 ${effectiveLatitude.toFixed(4)}° · 방위각/경사지/다구역 지원`
-                  : `수동 그리기 폴리곤 · 위도 ${effectiveLatitude.toFixed(4)}° · pixelScale ${pixelScale.toFixed(4)} m/px`}
+                VWorld 필지 경계 · 위도 {effectiveLatitude.toFixed(4)}° · 방위각/경사지/다구역 지원
               </p>
             </div>
 
@@ -2129,26 +1473,18 @@ export default function MapTab() {
             <div className="flex gap-2">
               <button
                 onClick={async () => {
+                  if (!apiCoords || parcels.length === 0) return
                   setSvgAnalyzing(true)
                   try {
                     const panelSpec = PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.TYPE_A
                     const lat = effectiveLatitude
 
-                    // ── 폴리곤 소스 결정 ──
                     // API 모드: VWorld 필지 경계 → 미터 변환
-                    // 수동 모드: 캔버스 픽셀 → 미터 변환
-                    let polygon: { x: number; y: number }[]
-                    if (apiSource === 'api' && parcels.length > 0 && apiCoords) {
-                      polygon = convertGeoRingToLocalPolygon(
-                        parcels[0].ring,
-                        apiCoords.lat,
-                        apiCoords.lon
-                      )
-                    } else if (points.length >= 3) {
-                      polygon = canvasPointsToMeterPolygon(points, pixelScale)
-                    } else {
-                      return
-                    }
+                    const polygon = convertGeoRingToLocalPolygon(
+                      parcels[0].ring,
+                      apiCoords.lat,
+                      apiCoords.lon
+                    )
 
                     if (polygon.length < 3) return
 
