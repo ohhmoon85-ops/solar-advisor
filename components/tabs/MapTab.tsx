@@ -1503,6 +1503,7 @@ export default function MapTab() {
                     if (svgZoneMode === 'multi') {
                       const zones = autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts)
                       setSvgAnalysisResult(runMultiZoneAnalysis(zones, lat))
+                      setIsEditing(false)
                     } else {
                       setSvgAnalysisResult(runFullAnalysis({
                         cadastrePolygon: polygon,
@@ -1512,6 +1513,7 @@ export default function MapTab() {
                         latitude: lat,
                         ...commonOpts,
                       }))
+                      setIsEditing(true)
                     }
                     setShowSvgCanvas(true)
                   } catch (err) {
