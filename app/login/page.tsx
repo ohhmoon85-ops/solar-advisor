@@ -7,8 +7,10 @@ const SAVED_ID_KEY = 'solar_saved_id'
 const AUTH_COOKIE = 'solar_auth'
 
 // 승인된 계정
-const VALID_ID = 'choyd6448'
-const VALID_PW = 'leesh7221!'
+const ACCOUNTS: Record<string, string> = {
+  choyd6448: 'leesh7221!',
+  admin: 'admin1234',
+}
 
 function setAuthCookie() {
   const expires = new Date()
@@ -40,7 +42,7 @@ export default function LoginPage() {
     setLoading(true)
 
     setTimeout(() => {
-      if (id === VALID_ID && pw === VALID_PW) {
+      if (ACCOUNTS[id] === pw) {
         // ID 저장 처리
         if (saveId) {
           localStorage.setItem(SAVED_ID_KEY, id)
