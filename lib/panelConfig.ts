@@ -128,16 +128,6 @@ export const PRESET_PANELS: Record<string, PanelSpec> = {
 }
 
 /**
- * 하위 호환용 PANEL_TYPES (v4.x MapTab에서 그대로 import 가능)
- */
-export const PANEL_TYPES: Record<'TYPE_A' | 'TYPE_B', PanelSpec> = {
-  TYPE_A: PRESET_PANELS.TYPE_A,
-  TYPE_B: PRESET_PANELS.TYPE_B,
-}
-
-export type PanelTypeKey = keyof typeof PANEL_TYPES
-
-/**
  * 사용자 지정 패널 사양 생성
  */
 export function createCustomPanel(
@@ -159,4 +149,4 @@ export function createCustomPanel(
   }
 }
 
-export default PANEL_TYPES
+export default PRESET_PANELS

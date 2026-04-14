@@ -47,10 +47,6 @@ interface SolarStore {
   loanYears: number
   setLoanYears: (years: number) => void
 
-  // Tab 5 → Tab 2 연동
-  selectedPanelIndex: number | null
-  setSelectedPanelIndex: (index: number | null) => void
-
   // KIER 실측 일사량 데이터
   kierPvHours: number | null
   setKierPvHours: (h: number | null) => void
@@ -103,9 +99,6 @@ export const useSolarStore = create<SolarStore>((set) => ({
   setLoanRate: (rate) => set({ loanRate: rate }),
   loanYears: 15,
   setLoanYears: (years) => set({ loanYears: years }),
-
-  selectedPanelIndex: null,
-  setSelectedPanelIndex: (index) => set({ selectedPanelIndex: index }),
 
   kierPvHours: null,
   setKierPvHours: (h) => set({ kierPvHours: h }),
