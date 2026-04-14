@@ -29,7 +29,7 @@ const SPACING_OPTIONS = [
   { label: '2단 2.3m', value: 2.3 },
 ]
 
-const INSTALL_TYPES = ['건물지붕형', '일반토지형', '영농형농지', '임야형', '수상형'] as const
+const INSTALL_TYPES = ['건물지붕형', '일반토지형', '영농형농지', '임야형'] as const
 
 const LOAD_LIMITS: Record<StructureType, number | null> = {
   '철골구조': null,
@@ -50,7 +50,6 @@ const BOUNDARY_MARGIN: Record<string, number> = {
   '일반토지형': 2.0,
   '영농형농지': 2.0,
   '임야형': 2.0,
-  '수상형': 2.0,
 }
 
 interface Point { x: number; y: number }
