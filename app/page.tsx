@@ -5,6 +5,8 @@ import { useState } from 'react'
 import { useSolarStore } from '@/store/useStore'
 
 // Dynamic imports to avoid SSR issues with canvas/leaflet
+const WelcomeModal = dynamic(() => import('@/components/WelcomeModal'), { ssr: false })
+const FloatingBadge = dynamic(() => import('@/components/FloatingBadge'), { ssr: false })
 const MapTab = dynamic(() => import('@/components/tabs/MapTab'), { ssr: false })
 const RevenueTab = dynamic(() => import('@/components/tabs/RevenueTab'), { ssr: false })
 const OrdinanceTab = dynamic(() => import('@/components/tabs/OrdinanceTab'), { ssr: false })
@@ -31,6 +33,8 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
+      <WelcomeModal />
+      <FloatingBadge />
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
         <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 py-3 flex items-center gap-3">
