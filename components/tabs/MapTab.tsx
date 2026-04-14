@@ -9,7 +9,6 @@ import { runFullAnalysis, type FullAnalysisResult, type PlotType } from '@/lib/l
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
 import { type MultiZoneResult, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult } from '@/lib/multiZoneLayout'
-import { saveHistory } from '@/lib/historyManager'
 
 // SVG 캔버스는 클라이언트 전용
 const SolarLayoutCanvas = dynamic(
@@ -226,7 +225,6 @@ function calcAutoAzimuth(pts: Point[]): number {
 export default function MapTab() {
   const {
     setMapResult, setActiveTab, setKierPvHours, setKierGhi, setLocationCoords,
-    pendingHistoryLoad, setPendingHistoryLoad,
     setLastFullAnalysisJson,
     pendingRestore, setPendingRestore,
   } = useSolarStore()
@@ -311,18 +309,6 @@ export default function MapTab() {
   useEffect(() => {
     return () => { blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u)) }
   }, [])
-
-  // ── 현장 이력 불러오기 (구형 HistoryEntry) ──
-  useEffect(() => {
-    if (!pendingHistoryLoad) return
-    const entry = pendingHistoryLoad
-    const restored = [...entry.addresses, '', '', '', '', ''].slice(0, 5)
-    setAddresses(restored)
-    setInstallType(entry.installType)
-    setModuleIndex(entry.moduleIndex)
-    setTiltAngle(entry.tiltAngle)
-    setPendingHistoryLoad(null)
-  }, [pendingHistoryLoad, setPendingHistoryLoad])
 
   // ── 시뮬레이션 이력 불러오기 (SimulationRecord) ──
   useEffect(() => {
@@ -883,20 +869,6 @@ export default function MapTab() {
   const handleSendToRevenue = () => {
     const addressLabel = addresses.filter(Boolean).join(', ')
     setMapResult({ panelCount, capacityKwp, annualKwh, area, address: addressLabel, tiltAngle, moduleIndex })
-    // 현장 이력 자동 저장
-    saveHistory({
-      addresses: addresses.filter(Boolean),
-      parcelLabel: parcelLabel || addressLabel,
-      installType,
-      moduleIndex,
-      tiltAngle,
-      panelCount,
-      capacityKwp,
-      annualKwh,
-      areaSqm: area,
-      lat: apiCoords?.lat,
-      lon: apiCoords?.lon,
-    })
     setActiveTab('revenue')
   }
 

@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { SMP, REC_PRICE } from '@/lib/constants'
 import type { InstallationType } from '@/lib/constants'
-import type { HistoryEntry } from '@/lib/historyManager'
 import type { SimulationRecord } from '@/lib/simulationHistory'
 
 const PRICE_LS_KEY = 'solar_price_overrides'
@@ -61,12 +60,8 @@ interface SolarStore {
   priceOverride: PriceOverride
   setPriceOverride: (p: PriceOverride) => void
 
-  // 현장 이력 → MapTab으로 불러오기 (구형)
-  pendingHistoryLoad: HistoryEntry | null
-  setPendingHistoryLoad: (entry: HistoryEntry | null) => void
-
-  // ── 시뮬레이션 이력 v2 ──────────────────────────────────────────
-  /** SVG 정밀 분석 최신 결과 (직렬화 전 원본) */
+  // ── 시뮬레이션 이력 ─────────────────────────────────────────────
+  /** SVG 정밀 분석 최신 결과 JSON (저장 모달에서 snapshot으로 사용) */
   lastFullAnalysisJson: string | null
   setLastFullAnalysisJson: (json: string | null) => void
 
@@ -82,7 +77,7 @@ interface SolarStore {
   pendingRestore: SimulationRecord | null
   setPendingRestore: (r: SimulationRecord | null) => void
 
-  /** 이력 건수 (버튼 배지용 — 패널 열릴 때 갱신) */
+  /** 이력 건수 (헤더 버튼 배지용) */
   historyCount: number
   setHistoryCount: (n: number) => void
 }
@@ -139,9 +134,6 @@ export const useSolarStore = create<SolarStore>((set) => ({
     try { localStorage.setItem(PRICE_LS_KEY, JSON.stringify(p)) } catch { /* ignore */ }
     set({ priceOverride: p })
   },
-
-  pendingHistoryLoad: null,
-  setPendingHistoryLoad: (entry) => set({ pendingHistoryLoad: entry }),
 
   lastFullAnalysisJson: null,
   setLastFullAnalysisJson: (json) => set({ lastFullAnalysisJson: json }),
