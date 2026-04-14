@@ -227,6 +227,8 @@ export default function MapTab() {
   const {
     setMapResult, setActiveTab, setKierPvHours, setKierGhi, setLocationCoords,
     pendingHistoryLoad, setPendingHistoryLoad,
+    setLastFullAnalysisJson,
+    pendingRestore, setPendingRestore,
   } = useSolarStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const blobUrlsRef = useRef<string[]>([]) // cleanup용
@@ -310,11 +312,10 @@ export default function MapTab() {
     return () => { blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u)) }
   }, [])
 
-  // ── 현장 이력 불러오기 ──
+  // ── 현장 이력 불러오기 (구형 HistoryEntry) ──
   useEffect(() => {
     if (!pendingHistoryLoad) return
     const entry = pendingHistoryLoad
-    // 주소 필드 복원
     const restored = [...entry.addresses, '', '', '', '', ''].slice(0, 5)
     setAddresses(restored)
     setInstallType(entry.installType)
@@ -322,6 +323,27 @@ export default function MapTab() {
     setTiltAngle(entry.tiltAngle)
     setPendingHistoryLoad(null)
   }, [pendingHistoryLoad, setPendingHistoryLoad])
+
+  // ── 시뮬레이션 이력 불러오기 (SimulationRecord) ──
+  useEffect(() => {
+    if (!pendingRestore) return
+    const rec = pendingRestore
+    // 주소 복원
+    const addrParts = rec.address.split(',').map(s => s.trim()).slice(0, 5)
+    const restored = [...addrParts, '', '', '', '', ''].slice(0, 5)
+    setAddresses(restored)
+    // fullAnalysisSnapshot 복원
+    if (rec.fullAnalysisSnapshot) {
+      try {
+        const parsed = JSON.parse(rec.fullAnalysisSnapshot)
+        setSvgAnalysisResult(parsed)
+        setLastFullAnalysisJson(rec.fullAnalysisSnapshot)
+        setShowSvgCanvas(true)
+        setIsEditing(false)
+      } catch { /* 무시 */ }
+    }
+    setPendingRestore(null)
+  }, [pendingRestore, setPendingRestore, setLastFullAnalysisJson])
 
   // ── 타일 로드 공통 함수 ──
   const loadTiles = useCallback(async (
@@ -1532,18 +1554,21 @@ export default function MapTab() {
                     }
 
                     if (svgZoneMode === 'multi') {
-                      const zones = autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts)
-                      setSvgAnalysisResult(runMultiZoneAnalysis(zones, lat))
+                      const mzResult = runMultiZoneAnalysis(autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat)
+                      setSvgAnalysisResult(mzResult)
+                      setLastFullAnalysisJson(JSON.stringify(mzResult))
                       setIsEditing(false)
                     } else {
-                      setSvgAnalysisResult(runFullAnalysis({
+                      const faResult = runFullAnalysis({
                         cadastrePolygon: polygon,
                         plotType: svgPlotType,
                         panelSpec,
                         panelType: svgPanelType,
                         latitude: lat,
                         ...commonOpts,
-                      }))
+                      })
+                      setSvgAnalysisResult(faResult)
+                      setLastFullAnalysisJson(JSON.stringify(faResult))
                       setIsEditing(true)
                     }
                     setShowSvgCanvas(true)

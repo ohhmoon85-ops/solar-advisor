@@ -35,6 +35,7 @@ export default function RevenueTab() {
     loanYears, setLoanYears,
     kierPvHours, kierGhi,
     priceOverride,
+    setShowSaveModal,
   } = useSolarStore()
 
   const [activeView, setActiveView] = useState<'table' | 'chart' | 'compare'>('chart')
@@ -559,6 +560,18 @@ export default function RevenueTab() {
                 <div className="font-semibold text-slate-100 mt-0.5">{item.value}</div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 이력 저장 버튼 */}
+        {mapResult && (
+          <div className="mt-4 pt-4 border-t border-slate-700">
+            <button
+              onClick={() => setShowSaveModal(true)}
+              className="w-full py-2.5 bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              💾 이 시뮬레이션 이력에 저장
+            </button>
           </div>
         )}
       </div>

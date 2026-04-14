@@ -1,7 +1,8 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useState } from 'react'
+import Link from 'next/link'
+import { useState, useEffect } from 'react'
 import { useSolarStore } from '@/store/useStore'
 
 // Dynamic imports to avoid SSR issues with canvas/leaflet
@@ -15,6 +16,8 @@ const PanelTab = dynamic(() => import('@/components/tabs/PanelTab'), { ssr: fals
 const ChecklistTab = dynamic(() => import('@/components/tabs/ChecklistTab'), { ssr: false })
 const UnitPriceTab = dynamic(() => import('@/components/tabs/UnitPriceTab'), { ssr: false })
 const HistoryTab = dynamic(() => import('@/components/tabs/HistoryTab'), { ssr: false })
+const SimulationHistoryPanel = dynamic(() => import('@/components/SimulationHistoryPanel'), { ssr: false })
+const SaveSimulationModal = dynamic(() => import('@/components/SaveSimulationModal'), { ssr: false })
 
 const TABS = [
   { id: 'map', label: '지도·배치도', icon: '🗺️', shortLabel: '지도' },
@@ -28,15 +31,31 @@ const TABS = [
 ]
 
 export default function Home() {
-  const { activeTab, setActiveTab, priceOverride } = useSolarStore()
+  const {
+    activeTab, setActiveTab, priceOverride,
+    historyPanelOpen, setHistoryPanelOpen,
+    historyCount, setHistoryCount,
+  } = useSolarStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const currentTab = TABS.find(t => t.id === activeTab) ?? TABS[0]
+
+  // 초기 이력 건수 로드
+  useEffect(() => {
+    import('@/lib/simulationHistory').then(m => {
+      setHistoryCount(m.getAllSimulations().length)
+    })
+  }, [setHistoryCount])
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <WelcomeModal />
       <FloatingBadge />
+      <SimulationHistoryPanel />
+      <SaveSimulationModal onSaved={() => {
+        import('@/lib/simulationHistory').then(m => setHistoryCount(m.getAllSimulations().length))
+      }} />
+
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
         <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 py-3 flex items-center gap-3">
@@ -79,6 +98,32 @@ export default function Home() {
             <span className="hidden md:inline-flex text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium border border-green-200">
               SMP {priceOverride.smp}원 확정
             </span>
+            {/* 이력 버튼 */}
+            <button
+              onClick={() => setHistoryPanelOpen(!historyPanelOpen)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium transition-colors"
+              title="시뮬레이션 이력"
+            >
+              <span>📋</span>
+              <span className="hidden sm:inline">이력</span>
+              {historyCount > 0 && (
+                <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center">
+                  {historyCount > 99 ? '99+' : historyCount}
+                </span>
+              )}
+            </button>
+            {/* 이력 관리 페이지 링크 */}
+            <Link
+              href="/history"
+              className="hidden md:flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors px-2 py-1.5 rounded-lg hover:bg-gray-50"
+              title="이력 관리 페이지"
+            >
+              <svg width="12" height="12" fill="none" viewBox="0 0 12 12">
+                <path d="M7 1H3a1 1 0 00-1 1v8a1 1 0 001 1h6a1 1 0 001-1V5L7 1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                <path d="M7 1v4h4" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+              </svg>
+              <span>전체</span>
+            </Link>
             {/* Mobile menu button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
