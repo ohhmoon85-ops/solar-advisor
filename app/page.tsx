@@ -2,7 +2,8 @@
 
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { useSolarStore } from '@/store/useStore'
 
 // Dynamic imports to avoid SSR issues with canvas/leaflet
@@ -35,6 +36,12 @@ export default function Home() {
     historyCount, setHistoryCount,
   } = useSolarStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const router = useRouter()
+
+  const handleLogout = useCallback(() => {
+    document.cookie = 'solar_auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    router.replace('/login')
+  }, [router])
 
   const currentTab = TABS.find(t => t.id === activeTab) ?? TABS[0]
 
@@ -122,6 +129,17 @@ export default function Home() {
               </svg>
               <span>전체</span>
             </Link>
+            {/* 로그아웃 버튼 */}
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-gray-500 hover:bg-red-50 hover:text-red-500 transition-colors"
+              title="로그아웃"
+            >
+              <svg width="13" height="13" fill="none" viewBox="0 0 13 13">
+                <path d="M5 2H2a1 1 0 00-1 1v7a1 1 0 001 1h3M9 9l3-3-3-3M12 6.5H5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <span className="hidden sm:inline">로그아웃</span>
+            </button>
             {/* Mobile menu button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
