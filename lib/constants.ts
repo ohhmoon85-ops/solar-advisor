@@ -7,11 +7,9 @@ export const REC_PRICE = {
   일반토지형: 70000,
   영농형농지: 70000,
   임야형: 70000,
-  수상형: 70000,
 } as const
 
 export const REC_WEIGHT = {
-  수상형: 1.6,
   건물지붕형: 1.5,
   공장창고: 1.5,
   산업단지: 1.5,
@@ -29,14 +27,13 @@ export const OP_COST_RATE = 0.02 // 운영비 총수익의 2%
 // 연간발전량: 127,750 kWh
 // SMP수익: 1,405만원, REC수익: 2,012만원, 총수익: 3,417만원
 
-export type InstallationType = '건물지붕형' | '일반토지형' | '영농형농지' | '임야형' | '수상형'
+export type InstallationType = '건물지붕형' | '일반토지형' | '영농형농지' | '임야형'
 
 export const INSTALLATION_TYPES: InstallationType[] = [
   '건물지붕형',
   '일반토지형',
   '영농형농지',
   '임야형',
-  '수상형',
 ]
 
 export const MODULES = [

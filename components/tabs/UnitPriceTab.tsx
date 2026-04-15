@@ -146,7 +146,6 @@ export const REC_PRICE = {
   일반토지형: ${priceOverride.recLand},
   영농형농지: ${priceOverride.recLand},
   임야형: ${priceOverride.recLand},
-  수상형: ${priceOverride.recLand},
 } as const`
 
   const handleCopy = () => {
@@ -305,7 +304,6 @@ export const REC_PRICE = {
             </thead>
             <tbody>
               {[
-                { type: '수상형 (저수지·댐)', weight: 1.6, priceKey: 'land' },
                 { type: '건물지붕형 / 공장·창고', weight: 1.5, priceKey: 'building' },
                 { type: '일반토지형', weight: 1.2, priceKey: 'land' },
                 { type: '영농형농지', weight: 1.2, priceKey: 'land' },
@@ -372,7 +370,7 @@ export const REC_PRICE = {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">
-                REC 토지/영농/임야/수상형 (원/MWh)
+                REC 토지/영농/임야형 (원/MWh)
                 <span className="ml-1 text-gray-400 font-normal">기본: {fmt(REC_PRICE.일반토지형)}원</span>
               </label>
               <input type="number" step="1000" min="0"
