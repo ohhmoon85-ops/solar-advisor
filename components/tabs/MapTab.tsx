@@ -562,10 +562,9 @@ export default function MapTab() {
       ])
       if (!ghiRes.ok || !pvRes.ok) return
       const [ghiData, pvData] = await Promise.all([ghiRes.json(), pvRes.json()])
-      const ghiItem = ghiData?.response?.body?.items?.item
-      const pvItem = pvData?.response?.body?.items?.item
-      const ghi = parseFloat(ghiItem?.ghi ?? ghiItem?.annGhi ?? 0)
-      const pvPot = parseFloat(pvItem?.pvPot ?? pvItem?.annPvPot ?? 0)
+      if (ghiData?.fallback || pvData?.fallback) return
+      const ghi = parseFloat(ghiData?.annualTotal ?? 0)
+      const pvPot = parseFloat(pvData?.annualTotal ?? 0)
       if (ghi > 0 && pvPot > 0) {
         const pvHours = Math.round((pvPot / 365) * 100) / 100
         setKierResult({ ghi, pvPot, pvHours })
