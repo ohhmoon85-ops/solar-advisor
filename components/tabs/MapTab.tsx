@@ -614,11 +614,24 @@ export default function MapTab() {
     }
   }, [])
 
-  // ── 주소 → 좌표 변환 (Kakao → Naver → VWorld 순) ──
+  // ── 주소 → 좌표 변환 (Naver → VWorld → Kakao → Nominatim 순) ──
   const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | { error: string } | null> => {
     const errors: string[] = []
 
-    // 1차: VWorld 검색 API (기존 키 재사용, 지번/도로명 모두 지원)
+    // 1차: Naver Geocoding API (승인 완료, 우선 사용)
+    try {
+      const naverRes = await fetch(`/api/naver?query=${encodeURIComponent(q)}`)
+      const naverData = await naverRes.json()
+      if (naverRes.ok && !naverData.fallback && naverData.addresses?.length > 0) {
+        const addr = naverData.addresses[0]
+        const lon = parseFloat(addr.x)
+        const lat = parseFloat(addr.y)
+        if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'naver' }
+      }
+      errors.push('Naver: ' + (naverData?.error ?? `HTTP ${naverRes.status}`))
+    } catch (e) { errors.push('Naver: ' + String(e)) }
+
+    // 2차: VWorld 검색 API (지번 특화)
     try {
       const vwSRes = await fetch(`/api/vworld?type=search&query=${encodeURIComponent(q)}`)
       const vwSData = await vwSRes.json()
@@ -634,7 +647,18 @@ export default function MapTab() {
       errors.push('VWorld검색: ' + (vwSData?.response?.status ?? `HTTP ${vwSRes.status}`))
     } catch (e) { errors.push('VWorld검색: ' + String(e)) }
 
-    // 2차: Kakao Local API
+    // 3차: VWorld 주소→좌표 (구형)
+    try {
+      const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
+      const vwData = await vwRes.json()
+      if (vwRes.ok && !vwData?.error) {
+        const point = vwData?.response?.result?.point
+        if (point) return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
+      }
+      errors.push('VWorld: ' + (vwData?.error ?? `HTTP ${vwRes.status}`))
+    } catch (e) { errors.push('VWorld: ' + String(e)) }
+
+    // 4차: Kakao Local API (승인 후 자동 활성화)
     try {
       const kakaoRes = await fetch(`/api/kakao?query=${encodeURIComponent(q)}`)
       const kakaoData = await kakaoRes.json()
@@ -646,30 +670,6 @@ export default function MapTab() {
       }
       errors.push('Kakao: ' + (kakaoData?.error ?? `HTTP ${kakaoRes.status}`))
     } catch (e) { errors.push('Kakao: ' + String(e)) }
-
-    // 3차: Naver Geocoding API
-    try {
-      const naverRes = await fetch(`/api/naver?query=${encodeURIComponent(q)}`)
-      const naverData = await naverRes.json()
-      if (naverRes.ok && !naverData.fallback && naverData.addresses?.length > 0) {
-        const addr = naverData.addresses[0]
-        const lon = parseFloat(addr.x)
-        const lat = parseFloat(addr.y)
-        if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'naver' }
-      }
-      errors.push('Naver: ' + (naverData?.error ?? `HTTP ${naverRes.status}`))
-    } catch (e) { errors.push('Naver: ' + String(e)) }
-
-    // 4차: VWorld 주소→좌표 (구형)
-    try {
-      const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
-      const vwData = await vwRes.json()
-      if (vwRes.ok && !vwData?.error) {
-        const point = vwData?.response?.result?.point
-        if (point) return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
-      }
-      errors.push('VWorld: ' + (vwData?.error ?? `HTTP ${vwRes.status}`))
-    } catch (e) { errors.push('VWorld: ' + String(e)) }
 
     // 5차: OpenStreetMap Nominatim (무료, API키 불필요)
     try {
