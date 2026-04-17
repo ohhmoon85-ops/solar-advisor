@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const url = `https://maps.apigw.naver.com/map-geocode/v2/geocode?query=${encodeURIComponent(query)}`
+    const url = `https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode?query=${encodeURIComponent(query)}`
     const res = await fetch(url, {
       headers: {
         'X-NCP-APIGW-API-KEY-ID': clientId,
