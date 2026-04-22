@@ -239,13 +239,20 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
       switch (action.preset) {
         case 'dense':
-          return { ...saved, corridors: [], rowConfigs: [], isDirty: true }
+          // 최밀집: 원본 배치 완전 복원 + 통로·다단 제거
+          return {
+            ...saved,
+            placements: deepCopyPlacements(saved.originalPlacements),
+            corridors: [],
+            rowConfigs: [],
+            isDirty: true,
+          }
 
         case 'standard':
           return { ...saved, corridors: [], rowConfigs: [], isDirty: true }
 
         case 'corridors': {
-          // 5행마다 점검통로 삽입
+          // 5행마다 점검통로 삽입 + 통로 공간만큼 끝 행 제거
           const newCorridors: Corridor[] = rows
             .filter((_, i) => (i + 1) % 5 === 0 && i < rows.length - 1)
             .map(rowIdx => ({
@@ -260,11 +267,25 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
             hasCorridorAfter: true,
             corridorWidthM: c.widthM,
           }))
-          return { ...saved, corridors: newCorridors, rowConfigs, isDirty: true }
+
+          // 통로당 차지하는 행 수 추정 (행 간 평균 피치 기준)
+          let placements = saved.placements
+          if (newCorridors.length > 0 && rows.length > 1) {
+            const rowCenterY = (rowIdx: number) => {
+              const rp = saved.placements.filter(p => p.row === rowIdx)
+              return rp.reduce((s, p) => s + p.centerY, 0) / (rp.length || 1)
+            }
+            const avgPitch = Math.abs(rowCenterY(rows[rows.length - 1]) - rowCenterY(rows[0])) / (rows.length - 1)
+            const rowsToRemove = Math.max(1, Math.round((1.2 / (avgPitch || 2.5)) * newCorridors.length))
+            const keepRows = new Set(rows.slice(0, rows.length - rowsToRemove))
+            placements = saved.placements.filter(p => keepRows.has(p.row))
+          }
+
+          return { ...saved, placements, corridors: newCorridors, rowConfigs, isDirty: true }
         }
 
         case 'stack3': {
-          // 전체 행을 3단으로 설정
+          // 전체 3단: 3행씩 그룹화 표시 (수량 변화 없음)
           const rowConfigs = rows.map(rowIdx => ({
             rowIndex: rowIdx,
             stackCount: 3 as const,
