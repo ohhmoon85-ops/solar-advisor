@@ -212,15 +212,15 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Tab content */}
+        {/* Tab content — 탭 전환 시 언마운트 방지: CSS hidden으로 상태 유지 */}
         <div>
-          {activeTab === 'map' && <MapTab />}
-          {activeTab === 'revenue' && <RevenueTab />}
-          {activeTab === 'ordinance' && <OrdinanceTab />}
-          {activeTab === 'permit' && <PermitTab />}
-          {activeTab === 'panel' && <PanelTab />}
-          {activeTab === 'checklist' && <ChecklistTab />}
-          {activeTab === 'unitprice' && <UnitPriceTab />}
+          <div className={activeTab !== 'map' ? 'hidden' : ''}><MapTab /></div>
+          <div className={activeTab !== 'revenue' ? 'hidden' : ''}><RevenueTab /></div>
+          <div className={activeTab !== 'ordinance' ? 'hidden' : ''}><OrdinanceTab /></div>
+          <div className={activeTab !== 'permit' ? 'hidden' : ''}><PermitTab /></div>
+          <div className={activeTab !== 'panel' ? 'hidden' : ''}><PanelTab /></div>
+          <div className={activeTab !== 'checklist' ? 'hidden' : ''}><ChecklistTab /></div>
+          <div className={activeTab !== 'unitprice' ? 'hidden' : ''}><UnitPriceTab /></div>
         </div>
       </main>
 

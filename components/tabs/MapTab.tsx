@@ -288,6 +288,7 @@ export default function MapTab() {
 
   // ── 위성/지적도 오버레이 ──
   const [satTiles, setSatTiles] = useState<SatTile[]>([])
+  const [cadImgTiles, setCadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
   const [satLoading, setSatLoading] = useState(false)
   const [satZoom, setSatZoom] = useState(0)
   const [mapMode, setMapMode] = useState<'satellite' | 'cadastral'>('satellite')
@@ -375,14 +376,34 @@ export default function MapTab() {
   ) => {
     setSatLoading(true)
     setSatTiles([])
+    setCadImgTiles([])
     blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u))
     blobUrlsRef.current = []
 
     const { tx: ctX, ty: ctY } = lonLatToTile(cLon, cLat, z)
     const tileMeter = tilePixelScaleM(cLat, z) * 256
     const tilePx = tileMeter / scale
-
     const R = 2
+
+    if (mode === 'cadastral') {
+      // 지적도: VWorld WMS → CORS 없이 <img>로 로드 (인접 필지 포함)
+      const tiles: {src:string;cx:number;cy:number;px:number}[] = []
+      for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+          const tx = ctX + dx, ty = ctY + dy
+          const origin = tileOriginLonLat(tx, ty, z)
+          const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
+          const bbox = tileToWgs84Bbox(z, tx, ty)
+          const src = `${VW}/req/wms?service=WMS&request=GetMap&version=1.3.0&layers=lt_c_landinfobasemap&width=256&height=256&format=image/png&transparent=true&crs=EPSG:4326&bbox=${bbox}&key=${VW_KEY}`
+          tiles.push({ src, cx, cy, px: tilePx })
+        }
+      }
+      setCadImgTiles(tiles)
+      setSatLoading(false)
+      return
+    }
+
+    // 위성사진: ArcGIS CORS 허용 → canvas drawImage
     const jobs: Promise<SatTile | null>[] = []
     for (let dy = -R; dy <= R; dy++) {
       for (let dx = -R; dx <= R; dx++) {
@@ -391,15 +412,7 @@ export default function MapTab() {
           try {
             const origin = tileOriginLonLat(tx, ty, z)
             const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
-            let tileUrl: string
-            if (mode === 'cadastral') {
-              // 연속지적도: WMTS 불가 → WMS GetMap 방식 (VWorld 안내)
-              const bbox = tileToWgs84Bbox(z, tx, ty)
-              tileUrl = `${VW}/req/wms?service=WMS&request=GetMap&version=1.3.0&layers=lt_c_landinfobasemap&width=256&height=256&format=image/png&transparent=true&crs=EPSG:4326&bbox=${bbox}&key=${VW_KEY}`
-            } else {
-              // ArcGIS World Imagery — CORS 허용, 직접 로드
-              tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`
-            }
+            const tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`
             return await new Promise<SatTile | null>(resolve => {
               const img = new Image()
               img.crossOrigin = 'anonymous'
@@ -435,8 +448,8 @@ export default function MapTab() {
       for (let y = 0; y < CANVAS_H; y += 40) {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_H, y); ctx.stroke()
       }
-    } else {
-      // 기본 그리드 배경
+    } else if (cadImgTiles.length === 0) {
+      // 기본 그리드 배경 (지적도 WMS img 없을 때만)
       ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5
       for (let x = 0; x < CANVAS_W; x += 20) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke()
@@ -579,7 +592,7 @@ export default function MapTab() {
       ctx.fillText(badgeLabel, CANVAS_W - (bw + 4) / 2, 21)
     }
   }, [isComplete, area, panelRects, spacingValue, panelCount,
-      pixelScale, apiSource, satTiles, satZoom,
+      pixelScale, apiSource, satTiles, cadImgTiles, satZoom,
       parcels, mapMode])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
@@ -1382,10 +1395,30 @@ export default function MapTab() {
             </div>
           </div>
 
-          <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}
-            className="w-full h-auto border border-gray-200 rounded-lg bg-gray-50 cursor-default"
-            style={{ maxHeight: '500px' }}
-          />
+          <div className="relative w-full">
+            {/* VWorld 지적도 WMS 타일 — CORS 우회: <img>로 canvas 뒤에 배치 (인접 필지 경계 표시) */}
+            {cadImgTiles.map((t, i) => (
+              <img key={i} src={t.src} alt=""
+                style={{
+                  position: 'absolute',
+                  left: `${t.cx / CANVAS_W * 100}%`,
+                  top: `${t.cy / CANVAS_H * 100}%`,
+                  width: `${t.px / CANVAS_W * 100}%`,
+                  height: `${t.px / CANVAS_H * 100}%`,
+                  zIndex: 0,
+                  pointerEvents: 'none',
+                }}
+              />
+            ))}
+            <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}
+              className="relative w-full h-auto border border-gray-200 rounded-lg cursor-default"
+              style={{
+                zIndex: 1,
+                maxHeight: '500px',
+                background: cadImgTiles.length > 0 ? 'transparent' : '#f8fafc',
+              }}
+            />
+          </div>
 
           {isComplete && area > 0 && (
             <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
