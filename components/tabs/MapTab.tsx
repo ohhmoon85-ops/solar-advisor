@@ -927,9 +927,17 @@ export default function MapTab() {
     setParcels([])
   }
 
-  const handleSendToRevenue = () => {
+  const handleSendToRevenue = (source: 'quick' | 'precision' = 'quick') => {
     const addressLabel = addresses.filter(Boolean).join(', ')
-    setMapResult({ panelCount, capacityKwp, annualKwh, area, address: addressLabel, tiltAngle, moduleIndex })
+    if (source === 'precision' && svgAnalysisResult && !isMultiZoneResult(svgAnalysisResult)) {
+      const genHours = kierResult?.pvHours ?? GENERATION_HOURS
+      const svgCount = svgAnalysisResult.layout.totalCount
+      const svgKwp = svgAnalysisResult.layout.totalKwp
+      const svgAnnualKwh = Math.round(svgKwp * genHours * 365)
+      setMapResult({ panelCount: svgCount, capacityKwp: svgKwp, annualKwh: svgAnnualKwh, area, address: addressLabel, tiltAngle, moduleIndex })
+    } else {
+      setMapResult({ panelCount, capacityKwp, annualKwh, area, address: addressLabel, tiltAngle, moduleIndex })
+    }
     setActiveTab('revenue')
   }
 
@@ -1351,10 +1359,29 @@ export default function MapTab() {
                 {`  ·  경계마진 ${BOUNDARY_MARGIN[installType] ?? 2}m`}
               </div>
             </div>
-            <button onClick={handleSendToRevenue}
-              className="mt-3 w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold transition-colors">
-              수익성 시뮬레이터로 연동 →
-            </button>
+            {/* 수익성 연동 — 정밀분석 결과가 있으면 두 가지 선택 제공 */}
+            {svgAnalysisResult && !isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.layout.totalCount > 0 ? (
+              <div className="mt-3 space-y-2">
+                <div className="text-xs text-gray-500 text-center">수익성 시뮬레이터에 적용할 수량을 선택하세요</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => handleSendToRevenue('quick')}
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-xs font-semibold transition-colors border border-gray-300">
+                    <div className="text-[10px] text-gray-400 mb-0.5">간이분석</div>
+                    {panelCount.toLocaleString()}장 · {capacityKwp}kWp
+                  </button>
+                  <button onClick={() => handleSendToRevenue('precision')}
+                    className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-xs font-semibold transition-colors">
+                    <div className="text-[10px] text-blue-200 mb-0.5">정밀분석 ★권장</div>
+                    {svgAnalysisResult.layout.totalCount.toLocaleString()}장 · {svgAnalysisResult.layout.totalKwp}kWp
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => handleSendToRevenue('quick')}
+                className="mt-3 w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold transition-colors">
+                수익성 시뮬레이터로 연동 →
+              </button>
+            )}
           </div>
         )}
 
