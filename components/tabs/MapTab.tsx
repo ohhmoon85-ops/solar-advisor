@@ -72,6 +72,39 @@ interface ParcelInfo {
   color: string
 }
 
+// ── VWorld 헬퍼 ────────────────────────────────────────────────────
+
+/** 타일 z/x/y → WGS84 bbox (WMS 1.3.0: minLat,minLon,maxLat,maxLon) */
+function tileToWgs84Bbox(z: number, tx: number, ty: number): string {
+  const n = Math.pow(2, z)
+  const west = (tx / n) * 360 - 180
+  const east = ((tx + 1) / n) * 360 - 180
+  const latN = Math.atan(Math.sinh(Math.PI * (1 - 2 * ty / n))) * 180 / Math.PI
+  const latS = Math.atan(Math.sinh(Math.PI * (1 - 2 * (ty + 1) / n))) * 180 / Math.PI
+  return `${latS},${west},${latN},${east}`
+}
+
+/** VWorld JSONP 호출 (CORS 미지원 우회) */
+function vwJsonp<T = unknown>(url: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const cb = '_vw_' + Math.random().toString(36).slice(2)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window as any)[cb] = (data: T) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any)[cb]
+      script.remove()
+      resolve(data)
+    }
+    const script = document.createElement('script')
+    script.src = url + (url.includes('?') ? '&' : '?') + `callback=${cb}`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    script.onerror = () => { delete (window as any)[cb]; script.remove(); reject(new Error('JSONP failed')) }
+    document.head.appendChild(script)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setTimeout(() => { delete (window as any)[cb]; script.remove(); reject(new Error('JSONP timeout')) }, 10000)
+  })
+}
+
 // ── 지리좌표 헬퍼 (순수함수) ─────────────────────────────────────
 function mpdLon(lat: number) { return 111319.9 * Math.cos((lat * Math.PI) / 180) }
 const MPD_LAT = 111319.9
@@ -360,7 +393,9 @@ export default function MapTab() {
             const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
             let tileUrl: string
             if (mode === 'cadastral') {
-              tileUrl = `${VW}/req/wmts/1.0.0/${VW_KEY}/LP/${z}/${ty}/${tx}.png`
+              // 연속지적도: WMTS 불가 → WMS GetMap 방식 (VWorld 안내)
+              const bbox = tileToWgs84Bbox(z, tx, ty)
+              tileUrl = `${VW}/req/wms?service=WMS&request=GetMap&version=1.3.0&layers=lt_c_landinfobasemap&width=256&height=256&format=image/png&transparent=true&crs=EPSG:4326&bbox=${bbox}&key=${VW_KEY}`
             } else {
               // ArcGIS World Imagery — CORS 허용, 직접 로드
               tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`
@@ -628,11 +663,12 @@ export default function MapTab() {
   const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | { error: string } | null> => {
     const errors: string[] = []
 
-    // 1차: VWorld 검색 API — 브라우저 직접 호출 (한국 IP)
+    // 1차: VWorld 검색 API — JSONP (CORS 미지원 우회)
     try {
-      const vwSRes = await fetch(`${VW}/req/search?service=search&request=search&version=2.0&crs=epsg:4326&size=1&page=1&format=json&key=${VW_KEY}&query=${encodeURIComponent(q)}&type=address&category=PARCEL`)
-      const vwSData = await vwSRes.json()
-      if (vwSRes.ok && vwSData?.response?.status === 'OK') {
+      const vwSData = await vwJsonp<{ response?: { status?: string; result?: { items?: { point?: { x: string; y: string } }[] } } }>(
+        `${VW}/req/search?service=search&request=search&version=2.0&crs=epsg:4326&size=1&page=1&format=json&key=${VW_KEY}&query=${encodeURIComponent(q)}&type=address&category=PARCEL`
+      )
+      if (vwSData?.response?.status === 'OK') {
         const item = vwSData?.response?.result?.items?.[0]
         const point = item?.point
         if (point) {
@@ -641,7 +677,7 @@ export default function MapTab() {
           if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'vworld-search' }
         }
       }
-      errors.push('VWorld검색: ' + (vwSData?.response?.status ?? `HTTP ${vwSRes.status}`))
+      errors.push('VWorld검색: ' + (vwSData?.response?.status ?? 'no result'))
     } catch (e) { errors.push('VWorld검색: ' + String(e)) }
 
     // 2차: Kakao Local API
@@ -670,15 +706,14 @@ export default function MapTab() {
       errors.push('Naver: ' + (naverData?.error ?? `HTTP ${naverRes.status}`))
     } catch (e) { errors.push('Naver: ' + String(e)) }
 
-    // 4차: VWorld 주소→좌표 — 브라우저 직접 호출
+    // 4차: VWorld 주소→좌표 — JSONP (CORS 미지원 우회)
     try {
-      const vwRes = await fetch(`${VW}/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&refine=true&simple=false&format=json&key=${VW_KEY}&address=${encodeURIComponent(q)}&type=parcel`)
-      const vwData = await vwRes.json()
-      if (vwRes.ok && !vwData?.error) {
-        const point = vwData?.response?.result?.point
-        if (point) return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
-      }
-      errors.push('VWorld: ' + (vwData?.error ?? `HTTP ${vwRes.status}`))
+      const vwData = await vwJsonp<{ response?: { result?: { point?: { x: string; y: string } }; error?: string } }>(
+        `${VW}/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&refine=true&simple=false&format=json&key=${VW_KEY}&address=${encodeURIComponent(q)}&type=parcel`
+      )
+      const point = vwData?.response?.result?.point
+      if (point) return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
+      errors.push('VWorld: ' + (vwData?.response?.error ?? '결과없음'))
     } catch (e) { errors.push('VWorld: ' + String(e)) }
 
     // 5차: OpenStreetMap Nominatim (무료, API키 불필요)
@@ -701,9 +736,11 @@ export default function MapTab() {
     ring: number[][], label: string
   } | null> => {
     try {
-      // VWorld 필지 경계 — 브라우저 직접 호출
-      const parcelRes = await fetch(`${VW}/req/data?service=data&request=GetFeature&data=LP_PA_CBND_BUBUN&key=${VW_KEY}&format=json&geometry=true&attribute=true&crs=epsg:4326&page=1&size=1&geomFilter=POINT(${lon}%20${lat})`)
-      const parcelData = await parcelRes.json()
+      // VWorld 필지 경계 — JSONP (CORS 미지원 우회)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const parcelData = await vwJsonp<any>(
+        `${VW}/req/data?service=data&request=GetFeature&data=LP_PA_CBND_BUBUN&key=${VW_KEY}&format=json&geometry=true&attribute=true&crs=epsg:4326&page=1&size=1&geomFilter=POINT(${lon}%20${lat})`
+      )
       const features = parcelData?.response?.result?.featureCollection?.features
       if (!features?.length) return null
       const geometry = features[0].geometry
