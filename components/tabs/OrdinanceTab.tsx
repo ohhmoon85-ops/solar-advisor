@@ -194,10 +194,25 @@ export default function OrdinanceTab() {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-40"
             >
               <option value="">시·군·구 선택...</option>
-              {sigunguList.map(sg => (
-                <option key={sg} value={sg}>{sg}</option>
-              ))}
+              {sigunguList.map(sg => {
+                const hasData = !!findRecord(selectedSido, sg)
+                return (
+                  <option
+                    key={sg}
+                    value={sg}
+                    style={{ color: hasData ? '#1d4ed8' : '#9ca3af' }}
+                  >
+                    {hasData ? `● ${sg}` : `○ ${sg}`}
+                  </option>
+                )
+              })}
             </select>
+            {selectedSido && (
+              <div className="flex gap-3 mt-1 text-xs text-gray-400">
+                <span><span className="text-blue-600">●</span> 조례 데이터 있음</span>
+                <span><span className="text-gray-400">○</span> 데이터 없음</span>
+              </div>
+            )}
           </div>
 
           {/* 추가 버튼 */}
