@@ -140,6 +140,29 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    // ── 진단 엔드포인트 (운영 후 제거 예정) ──
+    if (type === 'diag') {
+      const testUrl =
+        `https://api.vworld.kr/req/data` +
+        `?service=data&request=GetFeature&data=LP_PA_CBND_BUBUN` +
+        `&key=${apiKey}&format=json&geometry=true&attribute=true` +
+        `&crs=epsg:4326&page=1&size=1` +
+        `&geomFilter=POINT(129.1413%2036.5534)`
+      try {
+        const r = await vwFetch(testUrl)
+        const ct = r.headers.get('content-type') ?? ''
+        const body = await r.text()
+        return NextResponse.json({
+          httpStatus: r.status,
+          contentType: ct,
+          apiKeyPrefix: apiKey.slice(0, 8) + '...',
+          body: body.slice(0, 800),
+        })
+      } catch (e) {
+        return NextResponse.json({ fetchError: String(e) })
+      }
+    }
+
     if (type === 'parcel') {
       const lon = searchParams.get('lon') ?? ''
       const lat = searchParams.get('lat') ?? ''
@@ -153,7 +176,6 @@ export async function GET(req: NextRequest) {
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('json')) {
         const raw = await res.text()
-        // VWorld 실제 에러 메시지를 진단용으로 반환
         return NextResponse.json({
           response: { status: 'ERROR', result: null },
           _debug: { httpStatus: res.status, contentType: ct, body: raw.slice(0, 500) }
