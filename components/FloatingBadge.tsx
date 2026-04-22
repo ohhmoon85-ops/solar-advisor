@@ -1,8 +1,27 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+
+const HIDE_KEY = 'solar_badge_hide_until'
+
 export default function FloatingBadge() {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const hideUntil = localStorage.getItem(HIDE_KEY)
+    if (hideUntil && Date.now() < parseInt(hideUntil, 10)) return
+    setVisible(true)
+  }, [])
+
+  const handleHideToday = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const tomorrow = new Date()
+    tomorrow.setHours(23, 59, 59, 999)
+    localStorage.setItem(HIDE_KEY, String(tomorrow.getTime()))
+    setVisible(false)
+  }
+
   const handleClick = () => {
-    // 지도 탭 입력 폼으로 스크롤
     const target =
       document.querySelector<HTMLElement>('input[placeholder*="지번"], input[placeholder*="주소"]') ??
       document.querySelector<HTMLElement>('main')
@@ -11,6 +30,8 @@ export default function FloatingBadge() {
       target.focus?.()
     }
   }
+
+  if (!visible) return null
 
   return (
     <>
@@ -46,7 +67,7 @@ export default function FloatingBadge() {
         <div className="h-0.5 w-full" style={{ background: 'linear-gradient(90deg,#f5a623,#4ecdc4)' }} />
 
         <div className="px-4 py-3">
-          {/* 아이콘 + 타이틀 */}
+          {/* 아이콘 + 타이틀 + 닫기 */}
           <div className="flex items-center gap-2 mb-1.5">
             <div
               className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -66,7 +87,7 @@ export default function FloatingBadge() {
                 </g>
               </svg>
             </div>
-            <div>
+            <div className="flex-1">
               <div className="text-xs font-bold text-slate-100 leading-tight">SolarPath Advisor</div>
             </div>
           </div>
@@ -85,7 +106,7 @@ export default function FloatingBadge() {
 
           {/* CTA */}
           <div
-            className="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-semibold"
+            className="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-semibold mb-2"
             style={{ background: 'rgba(245,166,35,0.12)', color: '#f5c842' }}
           >
             <span>무료 시뮬레이션 시작</span>
@@ -93,6 +114,14 @@ export default function FloatingBadge() {
               <path d="M2 6h8M7 3l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
             </svg>
           </div>
+
+          {/* 오늘 하루 보지 않기 */}
+          <button
+            onClick={handleHideToday}
+            className="w-full text-center text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            오늘 하루 보지 않기
+          </button>
         </div>
       </div>
     </>
