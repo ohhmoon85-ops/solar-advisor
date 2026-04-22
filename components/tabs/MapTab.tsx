@@ -1422,7 +1422,7 @@ export default function MapTab() {
             </div>
           </div>
 
-          <div className="relative w-full">
+          <div className="relative w-full overflow-hidden">
             {/* VWorld 지적도 WMS 타일 — CORS 우회: <img>로 canvas 뒤에 배치 (인접 필지 경계 표시) */}
             {cadImgTiles.map((t, i) => (
               <img key={i} src={t.src} alt=""
