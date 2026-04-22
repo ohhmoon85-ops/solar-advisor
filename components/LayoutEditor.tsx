@@ -137,6 +137,8 @@ export default function LayoutEditor({
   const [dragRect, setDragRect] = useState<{
     x1: number; y1: number; x2: number; y2: number
   } | null>(null)
+  // ref로 최신 dragRect 추적 (stale closure 방지)
+  const dragRectRef = useRef<typeof dragRect>(null)
   const dragStart = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null)
 
   // ── ViewBox ────────────────────────────────────────────────────────
@@ -201,7 +203,9 @@ export default function LayoutEditor({
 
     if (tool === 'select') {
       dragStart.current = { sx, sy, x: worldPt.x, y: worldPt.y }
-      setDragRect({ x1: worldPt.x, y1: worldPt.y, x2: worldPt.x, y2: worldPt.y })
+      const r = { x1: worldPt.x, y1: worldPt.y, x2: worldPt.x, y2: worldPt.y }
+      dragRectRef.current = r
+      setDragRect(r)
     }
   }, [tool, getSvgCoord, vb, SVG_W, SVG_H])
 
@@ -209,7 +213,11 @@ export default function LayoutEditor({
     if (!dragStart.current || tool !== 'select') return
     const { sx, sy } = getSvgCoord(e)
     const worldPt = fromSvg(sx, sy, vb, SVG_W, SVG_H)
-    setDragRect(r => r ? { ...r, x2: worldPt.x, y2: worldPt.y } : null)
+    setDragRect(r => {
+      const next = r ? { ...r, x2: worldPt.x, y2: worldPt.y } : null
+      dragRectRef.current = next
+      return next
+    })
   }, [tool, getSvgCoord, vb, SVG_W, SVG_H])
 
   const handleSvgMouseUp = useCallback((e: React.MouseEvent) => {
@@ -221,16 +229,18 @@ export default function LayoutEditor({
     if (dist < 4 && tool === 'select') {
       // 단순 클릭: 선택 해제
       dispatch({ type: 'DESELECT_ALL' })
-    } else if (tool === 'select' && dragRect) {
+    } else if (tool === 'select' && dragRectRef.current) {
+      // ref에서 최신 dragRect 읽기 (stale closure 방지)
       const ids = state.placements
-        .filter(p => panelInRect(p, dragRect))
+        .filter(p => panelInRect(p, dragRectRef.current!))
         .map(p => p.id)
       dispatch({ type: 'SELECT_RECT', ids })
     }
 
     dragStart.current = null
+    dragRectRef.current = null
     setDragRect(null)
-  }, [tool, getSvgCoord, dragRect, state.placements])
+  }, [tool, getSvgCoord, state.placements])
 
   // ── 패널 클릭 핸들러 ─────────────────────────────────────────────
 
@@ -240,7 +250,7 @@ export default function LayoutEditor({
   ) => {
     e.stopPropagation()
     if (tool === 'select') {
-      dispatch({ type: 'SELECT_PANEL', id: panel.id, additive: e.shiftKey })
+      dispatch({ type: 'SELECT_PANEL', id: panel.id, additive: e.shiftKey || e.ctrlKey || e.metaKey })
     } else if (tool === 'stack') {
       dispatch({ type: 'SET_ROW_STACK', rowIndex: panel.row, stackCount: stackTarget })
     } else if (tool === 'spacing') {
