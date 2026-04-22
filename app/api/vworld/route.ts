@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// Edge Runtime: 한국 사용자 → 서울 Cloudflare PoP에서 실행
+// → VWorld(한국)를 한국 IP로 호출하여 502 해결
+export const runtime = 'edge'
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const type = searchParams.get('type')
