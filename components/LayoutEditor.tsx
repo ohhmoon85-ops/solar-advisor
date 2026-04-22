@@ -197,62 +197,57 @@ export default function LayoutEditor({
     }
   }, [SVG_W, SVG_H])
 
+  // ── 패널 추가 헬퍼 (worldPt 위치에 가장 가까운 패널 형태 복제) ────
+  const addPanelAt = useCallback((worldPt: { x: number; y: number }) => {
+    let nearest: PanelPlacement | null = null
+    let nearestDist = Infinity
+    for (const p of state.placements) {
+      const d = Math.hypot(p.centerX - worldPt.x, p.centerY - worldPt.y)
+      if (d < nearestDist) { nearestDist = d; nearest = p }
+    }
+    if (!nearest) return
+
+    const c = nearest.corners
+    const wx = c[1].x - c[0].x, wy = c[1].y - c[0].y
+    const hx = c[3].x - c[0].x, hy = c[3].y - c[0].y
+    const hw = Math.hypot(wx, wy) / 2, hh = Math.hypot(hx, hy) / 2
+    const wnx = wx / (hw * 2), wny = wy / (hw * 2)
+    const hnx = hx / (hh * 2), hny = hy / (hh * 2)
+
+    const corners: [typeof c[0], typeof c[0], typeof c[0], typeof c[0]] = [
+      { x: worldPt.x - wnx * hw - hnx * hh, y: worldPt.y - wny * hw - hny * hh },
+      { x: worldPt.x + wnx * hw - hnx * hh, y: worldPt.y + wny * hw - hny * hh },
+      { x: worldPt.x + wnx * hw + hnx * hh, y: worldPt.y + wny * hw + hny * hh },
+      { x: worldPt.x - wnx * hw + hnx * hh, y: worldPt.y - wny * hw + hny * hh },
+    ]
+    const rowCols = state.placements.filter(p => p.row === nearest!.row).map(p => p.col)
+    const newCol = rowCols.length > 0 ? Math.max(...rowCols) + 1 : 0
+    dispatch({
+      type: 'ADD_PANEL',
+      placement: { row: nearest.row, col: newCol, centerX: worldPt.x, centerY: worldPt.y, corners },
+    })
+  }, [state.placements])
+
   const handleSvgMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return
     const { sx, sy } = getSvgCoord(e)
     const worldPt = fromSvg(sx, sy, vb, SVG_W, SVG_H)
 
+    // select: 드래그 선택 준비 / add: 클릭 위치 기록 (mouseUp에서 처리)
+    dragStart.current = { sx, sy, x: worldPt.x, y: worldPt.y }
     if (tool === 'select') {
-      dragStart.current = { sx, sy, x: worldPt.x, y: worldPt.y }
       const r = { x1: worldPt.x, y1: worldPt.y, x2: worldPt.x, y2: worldPt.y }
       dragRectRef.current = r
       setDragRect(r)
     }
   }, [tool, getSvgCoord, vb, SVG_W, SVG_H])
 
-  // ── SVG 배경 클릭 핸들러 (deselect / add panel) ──────────────────
+  // ── SVG 배경 클릭 핸들러 (select 모드 deselect 전용) ─────────────
   // panel onClick의 stopPropagation() 덕분에 패널 클릭 시엔 발화 안 함
   const handleSvgClick = useCallback((e: React.MouseEvent) => {
-    if (e.target !== e.currentTarget) return  // 자식 요소(패널 등) 클릭은 무시
-
-    if (tool === 'select') {
-      dispatch({ type: 'DESELECT_ALL' })
-    } else if (tool === 'add') {
-      const { sx, sy } = getSvgCoord(e)
-      const worldPt = fromSvg(sx, sy, vb, SVG_W, SVG_H)
-
-      // 가장 가까운 패널을 템플릿으로 복제
-      let nearest: PanelPlacement | null = null
-      let nearestDist = Infinity
-      for (const p of state.placements) {
-        const d = Math.hypot(p.centerX - worldPt.x, p.centerY - worldPt.y)
-        if (d < nearestDist) { nearestDist = d; nearest = p }
-      }
-      if (!nearest) return
-
-      // 코너에서 패널 방향 벡터 추출
-      const c = nearest.corners
-      const wx = c[1].x - c[0].x, wy = c[1].y - c[0].y  // 폭 방향
-      const hx = c[3].x - c[0].x, hy = c[3].y - c[0].y  // 높이 방향
-      const hw = Math.hypot(wx, wy) / 2, hh = Math.hypot(hx, hy) / 2
-      const wnx = wx / (hw * 2), wny = wy / (hw * 2)
-      const hnx = hx / (hh * 2), hny = hy / (hh * 2)
-
-      const corners: [typeof c[0], typeof c[0], typeof c[0], typeof c[0]] = [
-        { x: worldPt.x - wnx * hw - hnx * hh, y: worldPt.y - wny * hw - hny * hh },
-        { x: worldPt.x + wnx * hw - hnx * hh, y: worldPt.y + wny * hw - hny * hh },
-        { x: worldPt.x + wnx * hw + hnx * hh, y: worldPt.y + wny * hw + hny * hh },
-        { x: worldPt.x - wnx * hw + hnx * hh, y: worldPt.y - wny * hw + hny * hh },
-      ]
-      // col: 해당 행의 최대 col + 1 (임시 고유값)
-      const rowCols = state.placements.filter(p => p.row === nearest!.row).map(p => p.col)
-      const newCol = rowCols.length > 0 ? Math.max(...rowCols) + 1 : 0
-      dispatch({
-        type: 'ADD_PANEL',
-        placement: { row: nearest.row, col: newCol, centerX: worldPt.x, centerY: worldPt.y, corners },
-      })
-    }
-  }, [tool, getSvgCoord, vb, SVG_W, SVG_H, state.placements])
+    if (e.target !== e.currentTarget) return
+    if (tool === 'select') dispatch({ type: 'DESELECT_ALL' })
+  }, [tool])
 
   const handleSvgMouseMove = useCallback((e: React.MouseEvent) => {
     if (!dragStart.current || tool !== 'select') return
@@ -267,11 +262,14 @@ export default function LayoutEditor({
 
   const handleSvgMouseUp = useCallback((e: React.MouseEvent) => {
     if (!dragStart.current) return
-    const { sx: sx0, sy: sy0 } = dragStart.current
+    const { sx: sx0, sy: sy0, x: wx0, y: wy0 } = dragStart.current
     const { sx, sy } = getSvgCoord(e)
     const dist = Math.hypot(sx - sx0, sy - sy0)
 
-    if (dist >= 4 && tool === 'select' && dragRectRef.current) {
+    if (tool === 'add' && dist < 6) {
+      // 클릭 위치(mouseDown 기준)에 패널 추가 — mouseDown/Up은 stopPropagation 영향 없음
+      addPanelAt({ x: wx0, y: wy0 })
+    } else if (dist >= 4 && tool === 'select' && dragRectRef.current) {
       // ref에서 최신 dragRect 읽기 (stale closure 방지)
       const ids = state.placements
         .filter(p => panelInRect(p, dragRectRef.current!))
@@ -282,7 +280,7 @@ export default function LayoutEditor({
     dragStart.current = null
     dragRectRef.current = null
     setDragRect(null)
-  }, [tool, getSvgCoord, state.placements])
+  }, [tool, getSvgCoord, state.placements, addPanelAt])
 
   // ── 행 전체 선택 헬퍼 ────────────────────────────────────────────
 
