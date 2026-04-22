@@ -162,12 +162,19 @@ export default function LayoutEditor({
 
   const summary = useMemo(() => getEditSummary(state), [state])
 
-  // ── 패널 kwp 계산 ─────────────────────────────────────────────────
+  // ── 패널 kwp 계산 (stackCount 반영) ──────────────────────────────
   const wattPerPanel = result.layout.totalKwp > 0 && result.layout.totalCount > 0
     ? (result.layout.totalKwp / result.layout.totalCount) * 1000
     : 600
+
+  // 행별 stackCount를 곱한 실효 패널 수
+  const effectivePanelCount = useMemo(() => {
+    const cfgMap = new Map(state.rowConfigs.map(r => [r.rowIndex, r.stackCount]))
+    return state.placements.reduce((sum, p) => sum + (cfgMap.get(p.row) ?? 1), 0)
+  }, [state.placements, state.rowConfigs])
+
   const currentKwp = parseFloat(
-    (state.placements.length * wattPerPanel / 1000).toFixed(2)
+    (effectivePanelCount * wattPerPanel / 1000).toFixed(2)
   )
 
   // ── 키보드 단축키 ─────────────────────────────────────────────────
@@ -643,13 +650,15 @@ export default function LayoutEditor({
               <StatRow label="자동 배치" value={`${summary.autoPanelCount}장`} />
               <StatRow
                 label="현재 배치"
-                value={`${summary.currentPanelCount}장`}
-                accent={summary.delta !== 0 ? (summary.delta > 0 ? 'green' : 'red') : undefined}
+                value={`${effectivePanelCount}장`}
+                accent={effectivePanelCount !== summary.autoPanelCount ? (effectivePanelCount > summary.autoPanelCount ? 'green' : 'red') : undefined}
               />
               <StatRow
                 label="변경"
-                value={summary.delta >= 0 ? `+${summary.delta}` : String(summary.delta)}
-                accent={summary.delta > 0 ? 'green' : summary.delta < 0 ? 'red' : undefined}
+                value={effectivePanelCount - summary.autoPanelCount >= 0
+                  ? `+${effectivePanelCount - summary.autoPanelCount}`
+                  : String(effectivePanelCount - summary.autoPanelCount)}
+                accent={effectivePanelCount > summary.autoPanelCount ? 'green' : effectivePanelCount < summary.autoPanelCount ? 'red' : undefined}
               />
               <StatRow label="추가" value={`+${summary.addedCount}`} accent="green" />
               <StatRow label="삭제" value={`-${summary.removedCount}`} accent="red" />
