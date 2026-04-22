@@ -210,6 +210,50 @@ export default function LayoutEditor({
     }
   }, [tool, getSvgCoord, vb, SVG_W, SVG_H])
 
+  // ── SVG 배경 클릭 핸들러 (deselect / add panel) ──────────────────
+  // panel onClick의 stopPropagation() 덕분에 패널 클릭 시엔 발화 안 함
+  const handleSvgClick = useCallback((e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return  // 자식 요소(패널 등) 클릭은 무시
+
+    if (tool === 'select') {
+      dispatch({ type: 'DESELECT_ALL' })
+    } else if (tool === 'add') {
+      const { sx, sy } = getSvgCoord(e)
+      const worldPt = fromSvg(sx, sy, vb, SVG_W, SVG_H)
+
+      // 가장 가까운 패널을 템플릿으로 복제
+      let nearest: PanelPlacement | null = null
+      let nearestDist = Infinity
+      for (const p of state.placements) {
+        const d = Math.hypot(p.centerX - worldPt.x, p.centerY - worldPt.y)
+        if (d < nearestDist) { nearestDist = d; nearest = p }
+      }
+      if (!nearest) return
+
+      // 코너에서 패널 방향 벡터 추출
+      const c = nearest.corners
+      const wx = c[1].x - c[0].x, wy = c[1].y - c[0].y  // 폭 방향
+      const hx = c[3].x - c[0].x, hy = c[3].y - c[0].y  // 높이 방향
+      const hw = Math.hypot(wx, wy) / 2, hh = Math.hypot(hx, hy) / 2
+      const wnx = wx / (hw * 2), wny = wy / (hw * 2)
+      const hnx = hx / (hh * 2), hny = hy / (hh * 2)
+
+      const corners: [typeof c[0], typeof c[0], typeof c[0], typeof c[0]] = [
+        { x: worldPt.x - wnx * hw - hnx * hh, y: worldPt.y - wny * hw - hny * hh },
+        { x: worldPt.x + wnx * hw - hnx * hh, y: worldPt.y + wny * hw - hny * hh },
+        { x: worldPt.x + wnx * hw + hnx * hh, y: worldPt.y + wny * hw + hny * hh },
+        { x: worldPt.x - wnx * hw + hnx * hh, y: worldPt.y - wny * hw + hny * hh },
+      ]
+      // col: 해당 행의 최대 col + 1 (임시 고유값)
+      const rowCols = state.placements.filter(p => p.row === nearest!.row).map(p => p.col)
+      const newCol = rowCols.length > 0 ? Math.max(...rowCols) + 1 : 0
+      dispatch({
+        type: 'ADD_PANEL',
+        placement: { row: nearest.row, col: newCol, centerX: worldPt.x, centerY: worldPt.y, corners },
+      })
+    }
+  }, [tool, getSvgCoord, vb, SVG_W, SVG_H, state.placements])
+
   const handleSvgMouseMove = useCallback((e: React.MouseEvent) => {
     if (!dragStart.current || tool !== 'select') return
     const { sx, sy } = getSvgCoord(e)
@@ -227,10 +271,7 @@ export default function LayoutEditor({
     const { sx, sy } = getSvgCoord(e)
     const dist = Math.hypot(sx - sx0, sy - sy0)
 
-    if (dist < 4 && tool === 'select') {
-      // 단순 클릭: 선택 해제
-      dispatch({ type: 'DESELECT_ALL' })
-    } else if (tool === 'select' && dragRectRef.current) {
+    if (dist >= 4 && tool === 'select' && dragRectRef.current) {
       // ref에서 최신 dragRect 읽기 (stale closure 방지)
       const ids = state.placements
         .filter(p => panelInRect(p, dragRectRef.current!))
@@ -242,6 +283,13 @@ export default function LayoutEditor({
     dragRectRef.current = null
     setDragRect(null)
   }, [tool, getSvgCoord, state.placements])
+
+  // ── 행 전체 선택 헬퍼 ────────────────────────────────────────────
+
+  const selectRow = useCallback((rowIndex: number) => {
+    const ids = state.placements.filter(p => p.row === rowIndex).map(p => p.id)
+    dispatch({ type: 'SELECT_RECT', ids })
+  }, [state.placements])
 
   // ── 패널 클릭 핸들러 ─────────────────────────────────────────────
 
@@ -569,6 +617,7 @@ export default function LayoutEditor({
             height={SVG_H}
             className="block"
             style={{ cursor: tool === 'add' ? 'crosshair' : 'default', userSelect: 'none' }}
+            onClick={handleSvgClick}
             onMouseDown={handleSvgMouseDown}
             onMouseMove={handleSvgMouseMove}
             onMouseUp={handleSvgMouseUp}
@@ -615,6 +664,7 @@ export default function LayoutEditor({
                   opacity={isSelected ? 1 : 0.85}
                   style={{ cursor: 'pointer' }}
                   onClick={e => handlePanelClick(e, panel)}
+                  onDoubleClick={e => { e.stopPropagation(); if (tool === 'select') selectRow(panel.row) }}
                 />
               )
             })}
@@ -634,9 +684,14 @@ export default function LayoutEditor({
             </g>
 
             {/* 툴 힌트 오버레이 */}
+            {tool === 'select' && (
+              <text x="8" y="16" fontSize="10" fill="#94a3b8">
+                클릭: 단일선택 | Ctrl+클릭: 복수선택 | 드래그: 범위선택 | 더블클릭: 행 전체선택
+              </text>
+            )}
             {tool === 'add' && (
               <text x="8" y="16" fontSize="10" fill="#fbbf24">
-                클릭: 패널 추가 (Esc: 선택 모드)
+                빈 곳 클릭: 패널 추가 (가까운 패널 형태 복제) | Esc: 선택 모드
               </text>
             )}
             {tool === 'corridor' && (
@@ -756,17 +811,27 @@ export default function LayoutEditor({
 
           {/* 행 목록 */}
           <div className="px-3 py-2 border-b border-slate-700 flex-1">
-            <div className="text-xs font-semibold text-slate-400 mb-1.5">
+            <div className="text-xs font-semibold text-slate-400 mb-1">
               행별 상태 ({uniqueRows.length}행)
             </div>
+            <div className="text-[10px] text-slate-500 mb-1.5">클릭: 행 전체 선택</div>
             <div className="space-y-0.5 max-h-40 overflow-y-auto">
               {uniqueRows.map(rowIndex => {
                 const cfg = rowCfgMap.get(rowIndex)
                 const count = state.placements.filter(p => p.row === rowIndex).length
+                const isRowSelected = state.placements
+                  .filter(p => p.row === rowIndex)
+                  .every(p => state.selectedIds.has(p.id)) && count > 0
                 return (
                   <div
                     key={rowIndex}
-                    className="flex items-center justify-between text-xs text-slate-400 py-0.5"
+                    className={[
+                      'flex items-center justify-between text-xs py-0.5 px-1 rounded cursor-pointer',
+                      isRowSelected
+                        ? 'bg-blue-900/50 text-blue-300'
+                        : 'text-slate-400 hover:bg-slate-700',
+                    ].join(' ')}
+                    onClick={() => selectRow(rowIndex)}
                   >
                     <span>행 {rowIndex + 1}</span>
                     <span className="text-slate-300">{count}장</span>
@@ -774,7 +839,7 @@ export default function LayoutEditor({
                       <span className="text-violet-400">{cfg.stackCount}단</span>
                     )}
                     {cfg && cfg.hasCorridorAfter && (
-                      <span className="text-yellow-400">↑통로</span>
+                      <span className="text-yellow-400">↑통</span>
                     )}
                   </div>
                 )
