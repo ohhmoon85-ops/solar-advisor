@@ -407,6 +407,52 @@ export default function LayoutEditor({
     onComplete?.(state.placements, currentKwp)
   }
 
+  // ── SVG → PNG 저장 ───────────────────────────────────────────────
+  function handleExportPNG() {
+    const svgEl = svgRef.current
+    if (!svgEl) return
+    const svgData = new XMLSerializer().serializeToString(svgEl)
+    const canvas = document.createElement('canvas')
+    canvas.width = svgEl.clientWidth * 2
+    canvas.height = svgEl.clientHeight * 2
+    const ctx = canvas.getContext('2d')!
+    const img = new Image()
+    img.onload = () => {
+      ctx.fillStyle = '#0f172a'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      const link = document.createElement('a')
+      link.download = `layout-precision-${Date.now()}.png`
+      link.href = canvas.toDataURL('image/png')
+      link.click()
+    }
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData)
+  }
+
+  // ── SVG → PDF 출력 ───────────────────────────────────────────────
+  async function handleExportPDF() {
+    const svgEl = svgRef.current
+    if (!svgEl) return
+    const svgData = new XMLSerializer().serializeToString(svgEl)
+    const { jsPDF } = await import('jspdf')
+    const imgCanvas = document.createElement('canvas')
+    imgCanvas.width = svgEl.clientWidth * 2
+    imgCanvas.height = svgEl.clientHeight * 2
+    const ctx = imgCanvas.getContext('2d')!
+    const img = new Image()
+    img.onload = () => {
+      ctx.fillStyle = '#0f172a'
+      ctx.fillRect(0, 0, imgCanvas.width, imgCanvas.height)
+      ctx.drawImage(img, 0, 0, imgCanvas.width, imgCanvas.height)
+      const pdf = new jsPDF('l', 'mm', 'a4')
+      const pw = pdf.internal.pageSize.getWidth() - 16
+      const ph = (imgCanvas.height / imgCanvas.width) * pw
+      pdf.addImage(imgCanvas.toDataURL('image/png'), 'PNG', 8, 8, pw, ph)
+      pdf.save(`layout-precision-${Date.now()}.pdf`)
+    }
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData)
+  }
+
   // ── 렌더링 ────────────────────────────────────────────────────────
 
   const toolButtons: { id: Tool; label: string; key: string; icon: string }[] = [
@@ -744,13 +790,13 @@ export default function LayoutEditor({
                 onClick={handleExport}
                 className="w-full text-left px-2 py-1 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600"
               >
-                ↓ 저장
+                ↓ JSON 저장
               </button>
               <button
                 onClick={() => setShowImport(v => !v)}
                 className="w-full text-left px-2 py-1 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600"
               >
-                ↑ 불러오기
+                ↑ JSON 불러오기
               </button>
               {showImport && (
                 <div className="space-y-1">
@@ -768,6 +814,25 @@ export default function LayoutEditor({
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* PNG / PDF 내보내기 */}
+          <div className="px-3 py-2 border-b border-slate-700">
+            <div className="text-xs font-semibold text-slate-400 mb-1.5">내보내기</div>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                onClick={handleExportPNG}
+                className="py-1 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
+              >
+                🖼 PNG
+              </button>
+              <button
+                onClick={handleExportPDF}
+                className="py-1 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
+              >
+                📄 PDF
+              </button>
             </div>
           </div>
 
