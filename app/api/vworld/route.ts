@@ -148,7 +148,12 @@ export async function GET(req: NextRequest) {
       const res = await vwFetch(url)
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('json')) {
-        return NextResponse.json({ response: { status: 'ERROR', result: null } })
+        const raw = await res.text()
+        // VWorld 실제 에러 메시지를 진단용으로 반환
+        return NextResponse.json({
+          response: { status: 'ERROR', result: null },
+          _debug: { httpStatus: res.status, contentType: ct, body: raw.slice(0, 500) }
+        })
       }
       const data = await res.json()
       return NextResponse.json(data)
@@ -225,6 +230,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'invalid type' }, { status: 400 })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown error'
-    return NextResponse.json({ error: 'VWorld API request failed: ' + msg }, { status: 500 })
+    return NextResponse.json({
+      error: 'VWorld API request failed: ' + msg,
+      _debug: { type, apiKeySet: !!apiKey, apiKeyPrefix: apiKey?.slice(0, 8) }
+    }, { status: 500 })
   }
 }
