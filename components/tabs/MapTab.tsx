@@ -1,5 +1,10 @@
 'use client'
 
+// VWorld는 Vercel/Cloudflare 서버 IP를 모두 차단함
+// → 브라우저(한국 사용자 IP)에서 직접 호출하는 방식으로 전환
+const VW_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY ?? ''
+const VW = 'https://api.vworld.kr'
+
 import { useState, useRef, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { useSolarStore } from '@/store/useStore'
@@ -355,7 +360,7 @@ export default function MapTab() {
             const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
             let tileUrl: string
             if (mode === 'cadastral') {
-              tileUrl = `/api/vworld?type=cadtile&z=${z}&x=${tx}&y=${ty}`
+              tileUrl = `${VW}/req/wmts/1.0.0/${VW_KEY}/LP/${z}/${ty}/${tx}.png`
             } else {
               // ArcGIS World Imagery — CORS 허용, 직접 로드
               tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`
@@ -599,26 +604,33 @@ export default function MapTab() {
   const fetchSlope = useCallback(async (lon: number, lat: number) => {
     setSlopeFetching(true)
     try {
-      const res = await fetch(`/api/vworld?type=elevation&lon=${lon}&lat=${lat}`)
-      if (!res.ok) return
-      const data = await res.json()
-      if (data?.fallback || data?.error) return
-      if (typeof data.slope === 'number') {
-        setSlopePercent(Math.min(data.slope, 50))
-        setSlopeAuto(true)
+      const dLat = 20 / 111319.9
+      const dLon = 20 / (111319.9 * Math.cos(lat * Math.PI / 180))
+      const pts = [[lon,lat],[lon,lat+dLat],[lon,lat-dLat],[lon+dLon,lat],[lon-dLon,lat]]
+      const getElev = async (lo: number, la: number) => {
+        try {
+          const r = await fetch(`${VW}/req/dem?service=dem&request=getElevation&version=2.0&crs=epsg:4326&key=${VW_KEY}&format=json&point=${lo},${la}`)
+          if (!r.ok) return null
+          const d = await r.json()
+          const h = d?.response?.result?.height ?? d?.response?.result?.elevation
+          return h != null ? parseFloat(h) : null
+        } catch { return null }
       }
-    } catch { /* 무시 — 수동 조작 유지 */ } finally {
-      setSlopeFetching(false)
-    }
+      const [hC,hN,hS,hE,hW] = await Promise.all(pts.map(([lo,la]) => getElev(lo,la)))
+      if (hC==null||hN==null||hS==null||hE==null||hW==null) return
+      const slopePct = Math.round(Math.sqrt(((hN-hS)/40)**2 + ((hE-hW)/40)**2) * 100)
+      setSlopePercent(Math.min(slopePct, 50))
+      setSlopeAuto(true)
+    } catch { /* 무시 */ } finally { setSlopeFetching(false) }
   }, [])
 
   // ── 주소 → 좌표 변환 (VWorld → Kakao → Naver → Nominatim 순) ──
   const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | { error: string } | null> => {
     const errors: string[] = []
 
-    // 1차: VWorld 검색 API (지번 특화)
+    // 1차: VWorld 검색 API — 브라우저 직접 호출 (한국 IP)
     try {
-      const vwSRes = await fetch(`/api/vworld?type=search&query=${encodeURIComponent(q)}`)
+      const vwSRes = await fetch(`${VW}/req/search?service=search&request=search&version=2.0&crs=epsg:4326&size=1&page=1&format=json&key=${VW_KEY}&query=${encodeURIComponent(q)}&type=address&category=PARCEL`)
       const vwSData = await vwSRes.json()
       if (vwSRes.ok && vwSData?.response?.status === 'OK') {
         const item = vwSData?.response?.result?.items?.[0]
@@ -658,9 +670,9 @@ export default function MapTab() {
       errors.push('Naver: ' + (naverData?.error ?? `HTTP ${naverRes.status}`))
     } catch (e) { errors.push('Naver: ' + String(e)) }
 
-    // 4차: VWorld 주소→좌표 (구형)
+    // 4차: VWorld 주소→좌표 — 브라우저 직접 호출
     try {
-      const vwRes = await fetch(`/api/vworld?type=coord&address=${encodeURIComponent(q)}`)
+      const vwRes = await fetch(`${VW}/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&refine=true&simple=false&format=json&key=${VW_KEY}&address=${encodeURIComponent(q)}&type=parcel`)
       const vwData = await vwRes.json()
       if (vwRes.ok && !vwData?.error) {
         const point = vwData?.response?.result?.point
@@ -689,7 +701,8 @@ export default function MapTab() {
     ring: number[][], label: string
   } | null> => {
     try {
-      const parcelRes = await fetch(`/api/vworld?type=parcel&lon=${lon}&lat=${lat}`)
+      // VWorld 필지 경계 — 브라우저 직접 호출
+      const parcelRes = await fetch(`${VW}/req/data?service=data&request=GetFeature&data=LP_PA_CBND_BUBUN&key=${VW_KEY}&format=json&geometry=true&attribute=true&crs=epsg:4326&page=1&size=1&geomFilter=POINT(${lon}%20${lat})`)
       const parcelData = await parcelRes.json()
       const features = parcelData?.response?.result?.featureCollection?.features
       if (!features?.length) return null
