@@ -677,7 +677,7 @@ export default function LayoutEditor({
               />
               <QuickBtn
                 label="표준 배치"
-                desc="권장 이격 적용"
+                desc="10행마다 1.0m 통로"
                 onClick={() => dispatch({
                   type: 'APPLY_QUICK', preset: 'standard',
                   baseSpacing: result.rowSpacing,

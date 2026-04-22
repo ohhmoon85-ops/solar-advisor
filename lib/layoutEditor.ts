@@ -248,8 +248,35 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
             isDirty: true,
           }
 
-        case 'standard':
-          return { ...saved, corridors: [], rowConfigs: [], isDirty: true }
+        case 'standard': {
+          // 표준 배치: 10행마다 1.0m 점검통로 + 통로만큼 끝 행 제거
+          const stdCorridors: Corridor[] = rows
+            .filter((_, i) => (i + 1) % 10 === 0 && i < rows.length - 1)
+            .map(rowIdx => ({
+              id: nextCorridorId(),
+              type: 'inspection' as const,
+              afterRowIndex: rowIdx,
+              widthM: 1.0,
+            }))
+          const stdRowConfigs = stdCorridors.map(c => ({
+            rowIndex: c.afterRowIndex,
+            stackCount: 1 as const,
+            hasCorridorAfter: true,
+            corridorWidthM: c.widthM,
+          }))
+          let stdPlacements = saved.placements
+          if (stdCorridors.length > 0 && rows.length > 1) {
+            const rowCenterY = (rowIdx: number) => {
+              const rp = saved.placements.filter(p => p.row === rowIdx)
+              return rp.reduce((s, p) => s + p.centerY, 0) / (rp.length || 1)
+            }
+            const avgPitch = Math.abs(rowCenterY(rows[rows.length - 1]) - rowCenterY(rows[0])) / (rows.length - 1)
+            const rowsToRemove = Math.max(1, Math.round((1.0 / (avgPitch || 2.5)) * stdCorridors.length))
+            const keepRows = new Set(rows.slice(0, rows.length - rowsToRemove))
+            stdPlacements = saved.placements.filter(p => keepRows.has(p.row))
+          }
+          return { ...saved, placements: stdPlacements, corridors: stdCorridors, rowConfigs: stdRowConfigs, isDirty: true }
+        }
 
         case 'corridors': {
           // 5행마다 점검통로 삽입 + 통로 공간만큼 끝 행 제거
