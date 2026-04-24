@@ -49,6 +49,8 @@ export type EditorAction =
   | { type: 'REMOVE_ALL_CORRIDORS' }
   | { type: 'SET_ROW_STACK'; rowIndex: number; stackCount: 1 | 2 | 3 }
   | { type: 'SET_ROW_SPACING'; rowIndex: number; spacingM: number | undefined }
+  | { type: 'ROTATE_SELECTED'; angleDeg: number }
+  | { type: 'MOVE_SELECTED'; dx: number; dy: number }
   | { type: 'UNDO' }
   | { type: 'RESET' }
   | { type: 'APPLY_QUICK'; preset: 'dense' | 'standard' | 'corridors' | 'stack3'; baseSpacing: number }
@@ -214,6 +216,38 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         { ...saved, isDirty: true },
         { ...rowCfg, rowSpacingOverride: action.spacingM }
       )
+    }
+
+    case 'ROTATE_SELECTED': {
+      if (state.selectedIds.size === 0) return state
+      const saved = pushHistory(state)
+      const cos = Math.cos(action.angleDeg * Math.PI / 180)
+      const sin = Math.sin(action.angleDeg * Math.PI / 180)
+      const placements = saved.placements.map(p => {
+        if (!state.selectedIds.has(p.id)) return p
+        const cx = p.centerX, cy = p.centerY
+        const rot = (pt: { x: number; y: number }) => ({
+          x: cx + (pt.x - cx) * cos - (pt.y - cy) * sin,
+          y: cy + (pt.x - cx) * sin + (pt.y - cy) * cos,
+        })
+        return { ...p, corners: p.corners.map(rot) as typeof p.corners }
+      })
+      return { ...saved, placements, isDirty: true }
+    }
+
+    case 'MOVE_SELECTED': {
+      if (state.selectedIds.size === 0) return state
+      const saved = pushHistory(state)
+      const placements = saved.placements.map(p => {
+        if (!state.selectedIds.has(p.id)) return p
+        return {
+          ...p,
+          centerX: p.centerX + action.dx,
+          centerY: p.centerY + action.dy,
+          corners: p.corners.map(c => ({ x: c.x + action.dx, y: c.y + action.dy })) as typeof p.corners,
+        }
+      })
+      return { ...saved, placements, isDirty: true }
     }
 
     case 'UNDO': {

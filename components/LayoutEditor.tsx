@@ -180,6 +180,15 @@ export default function LayoutEditor({
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); setTool('spacing') }
       if (e.key === 'Escape') { dispatch({ type: 'DESELECT_ALL' }); setTool('select') }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); dispatch({ type: 'UNDO' }) }
+      // 선택된 패널 회전: [ = -5°, ] = +5°, Shift+[ = -15°, Shift+] = +15°
+      if (e.key === '[') { e.preventDefault(); dispatch({ type: 'ROTATE_SELECTED', angleDeg: e.shiftKey ? -15 : -5 }) }
+      if (e.key === ']') { e.preventDefault(); dispatch({ type: 'ROTATE_SELECTED', angleDeg: e.shiftKey ? 15 : 5 }) }
+      // 선택된 패널 이동: 화살표 (기본 0.1m, Shift = 0.5m)
+      const step = e.shiftKey ? 0.5 : 0.1
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: -step, dy: 0 }) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx:  step, dy: 0 }) }
+      if (e.key === 'ArrowUp')    { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: 0, dy:  step }) }
+      if (e.key === 'ArrowDown')  { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: -step }) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -669,7 +678,7 @@ export default function LayoutEditor({
             {/* 툴 힌트 오버레이 */}
             {tool === 'select' && (
               <text x="8" y="16" fontSize="10" fill="#94a3b8">
-                클릭: 단일선택 | Ctrl+클릭: 복수선택 | 드래그: 범위선택 | 더블클릭: 행 전체선택
+                클릭: 단일선택 | Ctrl+클릭: 복수선택 | 드래그: 범위선택 | 더블클릭: 행 전체선택 | [ ]: 회전 | 화살표: 이동
               </text>
             )}
             {tool === 'add' && (
@@ -689,24 +698,68 @@ export default function LayoutEditor({
             )}
           </svg>
 
-          {/* 선택 삭제 플로팅 버튼 */}
+          {/* 선택 패널 조작 플로팅 패널 */}
           {state.selectedIds.size > 0 && (
-            <div className="absolute bottom-2 left-2 flex gap-1">
-              <div className="bg-slate-800/90 border border-slate-600 rounded px-2 py-1 text-xs text-slate-300">
-                {state.selectedIds.size}장 선택됨
+            <div className="absolute bottom-2 left-2 flex flex-col gap-1.5">
+              {/* 상태 표시 */}
+              <div className="bg-slate-800/95 border border-slate-600 rounded px-2.5 py-1 text-xs text-blue-300 font-semibold">
+                ✓ {state.selectedIds.size}장 선택됨
               </div>
-              <button
-                onClick={() => dispatch({ type: 'REMOVE_SELECTED' })}
-                className="bg-red-600 hover:bg-red-500 rounded px-2 py-1 text-xs text-white"
-              >
-                삭제 [D]
-              </button>
-              <button
-                onClick={() => dispatch({ type: 'DESELECT_ALL' })}
-                className="bg-slate-700 hover:bg-slate-600 rounded px-2 py-1 text-xs text-slate-300"
-              >
-                선택 해제
-              </button>
+
+              {/* 회전 */}
+              <div className="bg-slate-800/95 border border-slate-600 rounded px-2 py-1.5">
+                <div className="text-[10px] text-slate-400 mb-1">회전 [ / ] · Shift=15°</div>
+                <div className="flex gap-1">
+                  {([-15, -5, 5, 15] as const).map(deg => (
+                    <button key={deg}
+                      onClick={() => dispatch({ type: 'ROTATE_SELECTED', angleDeg: deg })}
+                      className="px-2 py-0.5 rounded text-xs bg-slate-700 text-amber-300 hover:bg-amber-900/50 font-mono"
+                    >
+                      {deg > 0 ? `+${deg}°` : `${deg}°`}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => dispatch({ type: 'ROTATE_SELECTED', angleDeg: 90 })}
+                    className="px-2 py-0.5 rounded text-xs bg-slate-700 text-amber-300 hover:bg-amber-900/50 font-mono"
+                  >
+                    +90°
+                  </button>
+                </div>
+              </div>
+
+              {/* 이동 */}
+              <div className="bg-slate-800/95 border border-slate-600 rounded px-2 py-1.5">
+                <div className="text-[10px] text-slate-400 mb-1">이동 ← ↑ ↓ → · Shift=0.5m</div>
+                <div className="flex gap-1 items-center">
+                  <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: -0.1, dy: 0 })}
+                    className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">←</button>
+                  <div className="flex flex-col gap-0.5">
+                    <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: 0.1 })}
+                      className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">↑</button>
+                    <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: -0.1 })}
+                      className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">↓</button>
+                  </div>
+                  <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0.1, dy: 0 })}
+                    className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">→</button>
+                  <span className="text-[10px] text-slate-500 ml-0.5">0.1m</span>
+                </div>
+              </div>
+
+              {/* 삭제 / 해제 */}
+              <div className="flex gap-1">
+                <button
+                  onClick={() => dispatch({ type: 'REMOVE_SELECTED' })}
+                  className="bg-red-700 hover:bg-red-600 rounded px-2.5 py-1 text-xs text-white"
+                >
+                  삭제 [D]
+                </button>
+                <button
+                  onClick={() => dispatch({ type: 'DESELECT_ALL' })}
+                  className="bg-slate-700 hover:bg-slate-600 rounded px-2.5 py-1 text-xs text-slate-300"
+                >
+                  해제
+                </button>
+              </div>
             </div>
           )}
         </div>
