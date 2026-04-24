@@ -24,7 +24,7 @@ const SEL_STROKE = '#3b82f6'
 const CORRIDOR_COLOR = 'rgba(234,179,8,0.18)'
 const CORRIDOR_STROKE = '#eab308'
 
-type Tool = 'select' | 'add' | 'corridor' | 'stack' | 'spacing'
+type Tool = 'select' | 'add' | 'stack' | 'spacing'
 
 // ── 좌표 변환 ───────────────────────────────────────────────────────
 
@@ -126,7 +126,6 @@ export default function LayoutEditor({
     initEditorState
   )
   const [tool, setTool] = useState<Tool>('select')
-  const [corridorWidthInput, setCorridorWidthInput] = useState('1.2')
   const [stackTarget, setStackTarget] = useState<1 | 2 | 3>(1)
   const [spacingInput, setSpacingInput] = useState('')
   const [showImport, setShowImport] = useState(false)
@@ -177,7 +176,6 @@ export default function LayoutEditor({
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (e.key === 'a' || e.key === 'A') { e.preventDefault(); setTool('add') }
       if (e.key === 'd' || e.key === 'D') { dispatch({ type: 'REMOVE_SELECTED' }) }
-      if (e.key === 'c' || e.key === 'C') { e.preventDefault(); setTool('corridor') }
       if (e.key === 's' || e.key === 'S') { e.preventDefault(); setTool('stack') }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); setTool('spacing') }
       if (e.key === 'Escape') { dispatch({ type: 'DESELECT_ALL' }); setTool('select') }
@@ -305,18 +303,8 @@ export default function LayoutEditor({
       if (!isNaN(v) && v > 0) {
         dispatch({ type: 'SET_ROW_SPACING', rowIndex: panel.row, spacingM: v })
       }
-    } else if (tool === 'corridor') {
-      const w = parseFloat(corridorWidthInput)
-      dispatch({
-        type: 'ADD_CORRIDOR',
-        corridor: {
-          type: 'inspection',
-          afterRowIndex: panel.row,
-          widthM: isNaN(w) || w <= 0 ? 1.2 : w,
-        },
-      })
     }
-  }, [tool, stackTarget, spacingInput, corridorWidthInput])
+  }, [tool, stackTarget, spacingInput])
 
   // ── 통로 시각화 ──────────────────────────────────────────────────
 
@@ -504,7 +492,6 @@ export default function LayoutEditor({
   const toolButtons: { id: Tool; label: string; key: string; icon: string }[] = [
     { id: 'select', label: '선택', key: 'Esc', icon: '▢' },
     { id: 'add', label: '낱장 추가', key: 'A', icon: '+' },
-    { id: 'corridor', label: '통로 삽입', key: 'C', icon: '⟷' },
     { id: 'stack', label: '단수 설정', key: 'S', icon: '≡' },
     { id: 'spacing', label: '이격 조정', key: 'R', icon: '↕' },
   ]
@@ -535,21 +522,19 @@ export default function LayoutEditor({
           </button>
         ))}
 
+        {/* 등장 삭제 버튼 (Item 7) */}
+        <button
+          onClick={() => dispatch({ type: 'REMOVE_SELECTED' })}
+          disabled={state.selectedIds.size === 0}
+          className="px-2.5 py-1 rounded text-xs font-medium transition-colors bg-slate-700 text-red-400 hover:bg-red-900/40 disabled:opacity-30"
+          title="선택한 패널 삭제 [D]"
+        >
+          <span className="mr-1">-</span>등장 삭제
+        </button>
+
         <div className="w-px h-5 bg-slate-600 mx-1" />
 
         {/* 툴별 옵션 */}
-        {tool === 'corridor' && (
-          <label className="flex items-center gap-1 text-xs text-slate-300">
-            폭(m)
-            <input
-              type="number"
-              className="w-14 bg-slate-700 border border-slate-600 rounded px-1.5 py-0.5 text-white text-xs"
-              value={corridorWidthInput}
-              onChange={e => setCorridorWidthInput(e.target.value)}
-              min="0.5" max="5" step="0.1"
-            />
-          </label>
-        )}
 
         {tool === 'stack' && (
           <div className="flex items-center gap-1">
@@ -690,11 +675,6 @@ export default function LayoutEditor({
             {tool === 'add' && (
               <text x="8" y="16" fontSize="10" fill="#fbbf24">
                 빈 곳 클릭: 패널 추가 (가까운 패널 형태 복제) | Esc: 선택 모드
-              </text>
-            )}
-            {tool === 'corridor' && (
-              <text x="8" y="16" fontSize="10" fill="#fbbf24">
-                패널 클릭: 해당 행 다음에 통로 삽입
               </text>
             )}
             {tool === 'stack' && (

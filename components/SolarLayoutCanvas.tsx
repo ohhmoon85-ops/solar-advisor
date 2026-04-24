@@ -4,7 +4,7 @@
 // v5.2: FullAnalysisResult | MultiZoneResult 지원, 방위각 회전 패널(polygon), 검증 배지
 // 외부 차트 라이브러리 없이 React + SVG만 사용
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useCallback } from 'react'
 import type { FullAnalysisResult, Point, Polygon, PanelPlacement } from '@/lib/layoutEngine'
 import { type MultiZoneResult, type ZoneLayoutResult, isMultiZoneResult } from '@/lib/multiZoneLayout'
 
@@ -13,6 +13,9 @@ import { type MultiZoneResult, type ZoneLayoutResult, isMultiZoneResult } from '
 /** 구역별 색상 (최대 5구역) */
 const ZONE_COLORS = ['#f5a623', '#4ecdc4', '#bc8cff', '#3fb950', '#f85149']
 const ZONE_STROKES = ['#c47c00', '#2a9d8f', '#8b5cf6', '#2e7d32', '#c62828']
+
+const MIN_ZOOM = 0.5
+const MAX_ZOOM = 12
 
 // ── 타입 ───────────────────────────────────────────────────────────
 
@@ -206,6 +209,23 @@ export default function SolarLayoutCanvas({
   showLabels = true,
 }: Props) {
   const [hoveredPanel, setHoveredPanel] = useState<PanelPlacement | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+
+  // Refs to avoid stale closures in event handlers
+  const isDraggingRef = useRef(false)
+  const dragStartRef = useRef({ x: 0, y: 0 })
+  const panStartRef = useRef({ x: 0, y: 0 })
+  const zoomRef = useRef(1)
+  const panRef = useRef({ x: 0, y: 0 })
+  const touchDistRef = useRef<number | null>(null)
+  const touchZoomStartRef = useRef(1)
+  const touchPanStartRef = useRef({ x: 0, y: 0 })
+  const touchMidStartRef = useRef({ x: 0, y: 0 })
+
+  // Keep refs in sync with state
+  zoomRef.current = zoom
+  panRef.current = pan
 
   const isMulti = isMultiZoneResult(result)
 
@@ -242,6 +262,119 @@ export default function SolarLayoutCanvas({
   const svgH = height - LEGEND_H
   const drawH = svgH
 
+  // ── 줌/팬 핸들러 ─────────────────────────────────────────────────
+
+  const handleWheel = useCallback((e: React.WheelEvent<SVGSVGElement>) => {
+    e.preventDefault()
+    const factor = e.deltaY < 0 ? 1.12 : 0.89
+    const curZoom = zoomRef.current
+    const curPan = panRef.current
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, curZoom * factor))
+
+    // 커서 위치 기준으로 확대/축소
+    const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
+    const dataX = (mouseX - curPan.x) / curZoom
+    const dataY = (mouseY - curPan.y) / curZoom
+    const newPan = {
+      x: mouseX - dataX * newZoom,
+      y: mouseY - dataY * newZoom,
+    }
+
+    setZoom(newZoom)
+    setPan(newPan)
+  }, [])
+
+  const handleMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    // 패널 호버 중 드래그 방지 (패널 클릭은 hover로만 처리)
+    isDraggingRef.current = true
+    dragStartRef.current = { x: e.clientX, y: e.clientY }
+    panStartRef.current = { ...panRef.current }
+    ;(e.currentTarget as SVGSVGElement).style.cursor = 'grabbing'
+  }, [])
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (!isDraggingRef.current) return
+    setPan({
+      x: panStartRef.current.x + e.clientX - dragStartRef.current.x,
+      y: panStartRef.current.y + e.clientY - dragStartRef.current.y,
+    })
+  }, [])
+
+  const handleMouseUp = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    isDraggingRef.current = false
+    ;(e.currentTarget as SVGSVGElement).style.cursor = 'grab'
+  }, [])
+
+  const handleMouseLeave = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    isDraggingRef.current = false
+    ;(e.currentTarget as SVGSVGElement).style.cursor = 'grab'
+  }, [])
+
+  // 터치 핸들러 (1손가락: 팬, 2손가락: 핀치 줌)
+  const handleTouchStart = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      )
+      touchDistRef.current = dist
+      touchZoomStartRef.current = zoomRef.current
+      touchPanStartRef.current = { ...panRef.current }
+      touchMidStartRef.current = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      }
+    } else if (e.touches.length === 1) {
+      isDraggingRef.current = true
+      dragStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      panStartRef.current = { ...panRef.current }
+    }
+  }, [])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    e.preventDefault()
+    if (e.touches.length === 2 && touchDistRef.current !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      )
+      const scale = dist / touchDistRef.current
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, touchZoomStartRef.current * scale))
+
+      const curMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2
+      const curMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      const startMid = touchMidStartRef.current
+      const startPan = touchPanStartRef.current
+      const startZoom = touchZoomStartRef.current
+
+      // 핀치 중심점 기준 줌 + 팬 반영
+      const dataX = (startMid.x - startPan.x) / startZoom
+      const dataY = (startMid.y - startPan.y) / startZoom
+      setZoom(newZoom)
+      setPan({
+        x: curMidX - dataX * newZoom,
+        y: curMidY - dataY * newZoom,
+      })
+    } else if (e.touches.length === 1 && isDraggingRef.current) {
+      setPan({
+        x: panStartRef.current.x + e.touches[0].clientX - dragStartRef.current.x,
+        y: panStartRef.current.y + e.touches[0].clientY - dragStartRef.current.y,
+      })
+    }
+  }, [])
+
+  const handleTouchEnd = useCallback(() => {
+    isDraggingRef.current = false
+    touchDistRef.current = null
+  }, [])
+
+  const handleReset = useCallback(() => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }, [])
+
   if (allPoints.length < 3) {
     return (
       <div className="flex items-center justify-center h-48 text-gray-400 text-sm">
@@ -250,42 +383,72 @@ export default function SolarLayoutCanvas({
     )
   }
 
+  // 줌 퍼센트 표시
+  const zoomPct = Math.round(zoom * 100)
+
   return (
     <div className="relative" style={{ width, height }}>
       <svg
         viewBox={`0 0 ${svgW} ${drawH}`}
         width={svgW}
         height={drawH}
-        className="bg-slate-900 rounded-lg border border-slate-700"
-        style={{ display: 'block' }}
+        className="bg-slate-900 rounded-lg border border-slate-700 select-none"
+        style={{ display: 'block', cursor: 'grab', touchAction: 'none' }}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
-        {/* 구역별 레이어 */}
-        {analysisItems.map((item, idx) => {
-          const color = ZONE_COLORS[idx % ZONE_COLORS.length]
-          const stroke = ZONE_STROKES[idx % ZONE_STROKES.length]
-          const zoneLabel = isMulti
-            ? (item as ZoneLayoutResult).zoneLabel
-            : undefined
+        {/* 줌/팬 변환 그룹 */}
+        <g transform={`translate(${pan.x.toFixed(2)}, ${pan.y.toFixed(2)}) scale(${zoom.toFixed(4)})`}>
+          {/* 구역별 레이어 */}
+          {analysisItems.map((item, idx) => {
+            const color = ZONE_COLORS[idx % ZONE_COLORS.length]
+            const stroke = ZONE_STROKES[idx % ZONE_STROKES.length]
+            const zoneLabel = isMulti
+              ? (item as ZoneLayoutResult).zoneLabel
+              : undefined
 
-          return (
-            <ZoneLayer
-              key={idx}
-              result={item}
-              vb={vb}
-              svgW={svgW}
-              svgH={drawH}
-              panelColor={color}
-              panelStroke={stroke}
-              zoneIndex={idx}
-              hoveredPanel={hoveredPanel}
-              onHover={setHoveredPanel}
-              showOriginal={idx === 0}  // 원본 필지는 첫 번째 구역만
-              zoneLabel={zoneLabel}
-            />
-          )
-        })}
+            return (
+              <ZoneLayer
+                key={idx}
+                result={item}
+                vb={vb}
+                svgW={svgW}
+                svgH={drawH}
+                panelColor={color}
+                panelStroke={stroke}
+                zoneIndex={idx}
+                hoveredPanel={hoveredPanel}
+                onHover={setHoveredPanel}
+                showOriginal={idx === 0}
+                zoneLabel={zoneLabel}
+              />
+            )
+          })}
 
-        {/* 북방위 표시 */}
+          {/* 호버 툴팁 (줌 그룹 내부 — 패널과 같이 이동) */}
+          {hoveredPanel && (() => {
+            const ctr = panelCenter(hoveredPanel.corners, vb, svgW, drawH)
+            const tx = Math.min(ctr.sx, svgW - 110)
+            const ty = Math.max(ctr.sy - 32, 8)
+            return (
+              <g>
+                <rect x={tx - 4} y={ty - 14} width="110" height="20"
+                  fill="rgba(15,23,42,0.92)" rx="3" />
+                <text x={tx} y={ty} fontSize="9" fill="#f8fafc" textAnchor="start">
+                  {`행${hoveredPanel.row + 1} 열${hoveredPanel.col + 1}  #${hoveredPanel.id + 1}`}
+                </text>
+              </g>
+            )
+          })()}
+        </g>
+
+        {/* 북방위 표시 (줌과 무관하게 고정) */}
         <g transform={`translate(${svgW - 36}, 28)`}>
           <circle r="16" fill="rgba(15,23,42,0.7)" stroke="#475569" strokeWidth="1" />
           <polygon points="0,-12 4,4 0,2 -4,4" fill="#f8fafc" />
@@ -293,7 +456,7 @@ export default function SolarLayoutCanvas({
           <text x="0" y="-14" textAnchor="middle" fontSize="8" fill="#f8fafc" fontWeight="bold">N</text>
         </g>
 
-        {/* 검증 경고 배지 (좌상단) */}
+        {/* 검증 경고 배지 (좌상단, 줌 고정) */}
         {hasWarning && validation && (
           <g transform="translate(8, 8)">
             <rect x={0} y={0} width={220} height={36} rx={5}
@@ -309,22 +472,52 @@ export default function SolarLayoutCanvas({
           </g>
         )}
 
-        {/* 호버 툴팁 */}
-        {hoveredPanel && (() => {
-          const ctr = panelCenter(hoveredPanel.corners, vb, svgW, drawH)
-          const tx = Math.min(ctr.sx, svgW - 100)
-          const ty = Math.max(ctr.sy - 32, 8)
-          return (
-            <g>
-              <rect x={tx - 4} y={ty - 14} width="100" height="20"
-                fill="rgba(15,23,42,0.9)" rx="3" />
-              <text x={tx} y={ty} fontSize="9" fill="#f8fafc" textAnchor="start">
-                {`행${hoveredPanel.row + 1} 열${hoveredPanel.col + 1}  #${hoveredPanel.id + 1}`}
-              </text>
-            </g>
-          )
-        })()}
+        {/* 줌 레벨 표시 (우하단) */}
+        <g transform={`translate(${svgW - 8}, ${drawH - 8})`}>
+          <rect x={-44} y={-16} width={44} height={16} rx={3}
+            fill="rgba(15,23,42,0.7)" />
+          <text x={-22} y={-4} fontSize={9} fill="#94a3b8" textAnchor="middle">
+            {zoomPct}%
+          </text>
+        </g>
       </svg>
+
+      {/* 줌 컨트롤 버튼 (SVG 우측 하단 오버레이) */}
+      <div
+        className="absolute flex flex-col gap-1"
+        style={{ bottom: LEGEND_H + 8, right: 8 }}
+        onMouseDown={e => e.stopPropagation()}
+      >
+        <button
+          onClick={() => {
+            const newZoom = Math.min(MAX_ZOOM, zoom * 1.3)
+            setZoom(newZoom)
+            setPan(p => ({
+              x: svgW / 2 - (svgW / 2 - p.x) * (newZoom / zoom),
+              y: drawH / 2 - (drawH / 2 - p.y) * (newZoom / zoom),
+            }))
+          }}
+          className="w-7 h-7 bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold rounded flex items-center justify-center border border-slate-500 transition-colors"
+          title="확대"
+        >+</button>
+        <button
+          onClick={() => {
+            const newZoom = Math.max(MIN_ZOOM, zoom / 1.3)
+            setZoom(newZoom)
+            setPan(p => ({
+              x: svgW / 2 - (svgW / 2 - p.x) * (newZoom / zoom),
+              y: drawH / 2 - (drawH / 2 - p.y) * (newZoom / zoom),
+            }))
+          }}
+          className="w-7 h-7 bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold rounded flex items-center justify-center border border-slate-500 transition-colors"
+          title="축소"
+        >−</button>
+        <button
+          onClick={handleReset}
+          className="w-7 h-7 bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-bold rounded flex items-center justify-center border border-slate-500 transition-colors"
+          title="초기화"
+        >↺</button>
+      </div>
 
       {/* 통계 오버레이 (상단) */}
       {showLabels && (
@@ -387,6 +580,7 @@ export default function SolarLayoutCanvas({
               : ''}
           </span>
         )}
+        <span className="text-slate-600 text-[10px]">휠: 확대/축소 · 드래그: 이동</span>
       </div>
     </div>
   )

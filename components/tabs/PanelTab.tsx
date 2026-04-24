@@ -63,6 +63,10 @@ export default function PanelTab() {
 
             <div className="space-y-2 mt-4">
               <div className="flex justify-between items-center py-1 border-b border-gray-100">
+                <span className="text-xs text-gray-500">모듈 사이즈</span>
+                <span className="text-xs font-semibold text-gray-700">{panel.size}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-gray-100">
                 <span className="text-xs text-gray-500">모듈 효율</span>
                 <span className="text-sm font-semibold text-gray-800">{panel.efficiency}</span>
               </div>
@@ -160,6 +164,7 @@ export default function PanelTab() {
               <tr className="bg-gray-50">
                 <th className="px-4 py-2.5 text-left font-semibold text-gray-600">모델</th>
                 <th className="px-4 py-2.5 text-center font-semibold text-gray-600">출력(W)</th>
+                <th className="px-4 py-2.5 text-center font-semibold text-gray-600">사이즈(mm)</th>
                 <th className="px-4 py-2.5 text-center font-semibold text-gray-600">효율</th>
                 <th className="px-4 py-2.5 text-center font-semibold text-gray-600">REC가중치</th>
                 <th className="px-4 py-2.5 text-center font-semibold text-gray-600">시공단가</th>
@@ -179,6 +184,7 @@ export default function PanelTab() {
                     {p.highlight && <span className="ml-2 text-xs bg-yellow-400 text-yellow-900 px-1.5 py-0.5 rounded-full">현장</span>}
                   </td>
                   <td className="px-4 py-2.5 text-center font-bold text-blue-600">{p.watt}</td>
+                  <td className="px-4 py-2.5 text-center text-gray-500 text-xs">{p.size}</td>
                   <td className="px-4 py-2.5 text-center">{p.efficiency}</td>
                   <td className="px-4 py-2.5 text-center text-green-600 font-medium">{p.recWeight}</td>
                   <td className="px-4 py-2.5 text-center text-gray-700">{p.costPerKw}</td>

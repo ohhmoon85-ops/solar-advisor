@@ -476,10 +476,7 @@ export default function RevenueTab() {
                         <tbody>
                           {[
                             { place: '건물지붕형 / 공장·창고', rec: '1.5', fund: '지원', note: 'BIPV 우대, 에너지공단 2%', highlight: installationType === '건물지붕형' },
-                            { place: '산업단지 지붕형', rec: '1.5', fund: '지원', note: '개발행위허가 불필요', highlight: false },
                             { place: '일반토지형', rec: '1.2', fund: '조건부', note: '주거이격·농지전용 확인 필수', highlight: installationType === '일반토지형' },
-                            { place: '영농형농지', rec: '1.2', fund: '지원', note: '농지전용허가 + 영농 병행 필수', highlight: installationType === '영농형농지' },
-                            { place: '임야형', rec: '0.7', fund: '제한', note: '산지전용허가 취득 난이도 높음', highlight: installationType === '임야형' },
                           ].map((row, i) => (
                             <tr key={i} className={`border-t border-gray-100 ${row.highlight ? 'bg-blue-50 font-semibold' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                               <td className="px-3 py-2 font-medium text-gray-800">

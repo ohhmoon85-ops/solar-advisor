@@ -37,6 +37,7 @@ export const STATIC_ORDINANCE: Record<string, OrdinanceData> = {
 export interface PanelData {
   name: string
   watt: number
+  size: string
   efficiency: string
   recWeight: string
   costPerKw: string
@@ -46,17 +47,29 @@ export interface PanelData {
 
 export const PANEL_DATA: PanelData[] = [
   {
-    name: '단결정 PERC',
-    watt: 550,
+    name: 'S645',
+    watt: 645,
+    size: '2,382×1,134mm',
     efficiency: '21~22%',
     recWeight: '1.0~1.5',
     costPerKw: '100~140만원/kW',
-    suitable: '노지·토지',
+    suitable: '건물지붕·토지',
     highlight: false,
   },
   {
-    name: 'TOPCon (GS710wp)',
+    name: 'S650',
+    watt: 650,
+    size: '2,382×1,134mm',
+    efficiency: '21~23%',
+    recWeight: '1.0~1.5',
+    costPerKw: '100~140만원/kW',
+    suitable: '건물지붕·토지',
+    highlight: false,
+  },
+  {
+    name: 'GS710wp',
     watt: 710,
+    size: '2,384×1,303mm',
     efficiency: '22~24%',
     recWeight: '1.0~1.5',
     costPerKw: '110~150만원/kW',
@@ -64,30 +77,23 @@ export const PANEL_DATA: PanelData[] = [
     highlight: true,
   },
   {
-    name: '양면형 Bifacial',
-    watt: 580,
-    efficiency: '21~23%',
-    recWeight: '1.0~1.6',
-    costPerKw: '110~145만원/kW',
-    suitable: '수상·대규모',
-    highlight: false,
-  },
-  {
-    name: '박막형',
-    watt: 400,
-    efficiency: '11~16%',
+    name: 'S700',
+    watt: 700,
+    size: '2,384×1,303mm',
+    efficiency: '22~23%',
     recWeight: '1.0~1.5',
-    costPerKw: '90~120만원/kW',
-    suitable: '커튼월',
+    costPerKw: '110~145만원/kW',
+    suitable: '토지·대규모',
     highlight: false,
   },
   {
-    name: 'BIPV',
-    watt: 300,
-    efficiency: '12~16%',
-    recWeight: '1.5 (건물일체)',
-    costPerKw: '250~350만원/kW',
-    suitable: '건물 외장',
+    name: 'S730',
+    watt: 730,
+    size: '2,384×1,303mm',
+    efficiency: '22~24%',
+    recWeight: '1.0~1.5',
+    costPerKw: '115~155만원/kW',
+    suitable: '고출력 대규모',
     highlight: false,
   },
 ]

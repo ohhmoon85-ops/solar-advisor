@@ -312,6 +312,8 @@ export function exportToCsv(): void {
     } catch { return iso }
   }
 
+  // 하위호환: farmland/forest/land_change_planned는 신규 입력 불가,
+  // 과거 저장 레코드의 CSV 내보내기를 위해 매핑 유지
   const plotTypeLabel: Record<string, string> = {
     land: '일반토지형', roof: '건물지붕형',
     farmland: '영농형농지', forest: '임야형',

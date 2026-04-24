@@ -13,7 +13,7 @@ import { getSolarElevation } from '@/lib/shadowCalculator'
 import { runFullAnalysis, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
-import { type MultiZoneResult, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult } from '@/lib/multiZoneLayout'
+import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult } from '@/lib/multiZoneLayout'
 
 // SVG 캔버스는 클라이언트 전용
 const SolarLayoutCanvas = dynamic(
@@ -29,12 +29,8 @@ const LayoutEditor = dynamic(
 const STRUCTURE_TYPES = ['철골구조', 'RC(철근콘크리트)', '경량철골', '샌드위치 패널'] as const
 type StructureType = typeof STRUCTURE_TYPES[number]
 
-const SPACING_OPTIONS = [
-  { label: '1단 1.2m', value: 1.2 },
-  { label: '2단 2.3m', value: 2.3 },
-]
 
-const INSTALL_TYPES = ['건물지붕형', '일반토지형', '영농형농지', '임야형'] as const
+const INSTALL_TYPES = ['건물지붕형', '일반토지형'] as const
 
 const LOAD_LIMITS: Record<StructureType, number | null> = {
   '철골구조': null,
@@ -53,8 +49,6 @@ const PARCEL_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'] as
 const BOUNDARY_MARGIN: Record<string, number> = {
   '건물지붕형': 0.5,
   '일반토지형': 2.0,
-  '영농형농지': 2.0,
-  '임야형': 2.0,
 }
 
 interface Point { x: number; y: number }
@@ -275,6 +269,8 @@ export default function MapTab() {
   const [moduleIndex, setModuleIndex] = useState(0)
   const [tiltAngle, setTiltAngle] = useState(33)
   const [spacingValue, setSpacingValue] = useState(1.2)
+  const [panelOrientation, setPanelOrientation] = useState<'portrait' | 'landscape'>('portrait')
+  const [rowStack, setRowStack] = useState<1 | 2 | 3>(1)
   const [slopePercent, setSlopePercent] = useState(0)
   const [slopeAuto, setSlopeAuto] = useState(false)  // 자동측정 여부
   const [slopeFetching, setSlopeFetching] = useState(false)
@@ -318,18 +314,12 @@ export default function MapTab() {
   // SVG 정밀 배치 분석 상태
   const [svgAnalysisResult, setSvgAnalysisResult] = useState<FullAnalysisResult | MultiZoneResult | null>(null)
   const [svgAnalyzing, setSvgAnalyzing] = useState(false)
-  const [svgPanelType, setSvgPanelType] = useState<string>('TYPE_A')
+  const [svgPanelType, setSvgPanelType] = useState<string>('GS710wp')
   const [svgPlotType, setSvgPlotType] = useState<PlotType>('land')
   const [showSvgCanvas, setShowSvgCanvas] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
-  // v5.2 추가 입력
+  // v5.2 SVG 배치 입력 (간소화)
   const [svgAzimuthDeg, setSvgAzimuthDeg] = useState(180)
-  const [svgHasSlope, setSvgHasSlope] = useState(false)
-  const [svgSlopeAngle, setSvgSlopeAngle] = useState(5)
-  const [svgSlopeAzimuth, setSvgSlopeAzimuth] = useState(180)
-  const [svgHasRiver, setSvgHasRiver] = useState(false)
-  const [svgHasRoad, setSvgHasRoad] = useState(false)
-  const [svgJimokChangePlanned, setSvgJimokChangePlanned] = useState(false)
   const [svgZoneMode, setSvgZoneMode] = useState<'single' | 'multi'>('single')
 
   // 이론 이격 거리 — 현장 위도 기반 (hardcode 37.5665° → 동적 위도)
@@ -857,8 +847,10 @@ export default function MapTab() {
         const isBuilding = installType === '건물지붕형'
         const slopeFactor = Math.cos(Math.atan(slopePercent / 100))
         const ltr = (tiltAngle * Math.PI) / 180
-        const panelPxW = module.w / scale
-        const panelPxH = (module.h * Math.cos(ltr)) / scale
+        const panelW = panelOrientation === 'landscape' ? module.h : module.w
+        const panelH = panelOrientation === 'landscape' ? module.w : module.h
+        const panelPxW = panelW / scale
+        const panelPxH = (panelH * Math.cos(ltr) * rowStack) / scale
         const rowPitch = panelPxH + spacingValue / scale
         const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
         const marginPx = marginM / scale
@@ -892,7 +884,7 @@ export default function MapTab() {
           return sum + Math.sqrt((pts[j].x - p.x) ** 2 + (pts[j].y - p.y) ** 2)
         }, 0)
         const effectiveArea = Math.max(0, parcel.areaSqm - perimeterPx * scale * marginM)
-        const footprintPerPanel = module.w * (module.h * Math.cos(ltr) + spacingValue)
+        const footprintPerPanel = panelW * (panelH * Math.cos(ltr) * rowStack + spacingValue)
         const coverageRatio = isBuilding ? 0.70 : 0.85
         const cnt = parcel.areaSqm > 10
           ? Math.floor(effectiveArea * slopeFactor * coverageRatio / footprintPerPanel)
@@ -1257,20 +1249,50 @@ export default function MapTab() {
                 <span>0°</span><span>서울최적 33°</span><span>60°</span>
               </div>
             </div>
+            {/* 설치 방향 (Item 3) */}
             <div>
-              <label className="text-xs text-gray-500 font-medium">이격 거리</label>
+              <label className="text-xs text-gray-500 font-medium">설치 방향</label>
               <div className="flex gap-1.5 mt-1">
-                {SPACING_OPTIONS.map(opt => (
-                  <button key={opt.value} onClick={() => setSpacingValue(opt.value)}
-                    className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                      spacingValue === opt.value ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'}`}>
-                    {opt.label}
+                <button onClick={() => setPanelOrientation('portrait')}
+                  className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    panelOrientation === 'portrait' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'}`}>
+                  세로형
+                </button>
+                <button onClick={() => setPanelOrientation('landscape')}
+                  className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    panelOrientation === 'landscape' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'}`}>
+                  가로형
+                </button>
+              </div>
+            </div>
+
+            {/* 배열 방법 + 이격거리 직접 입력 (Item 4) */}
+            <div>
+              <label className="text-xs text-gray-500 font-medium">배열 방법 (단수)</label>
+              <div className="flex gap-1.5 mt-1">
+                {([1, 2, 3] as const).map(n => (
+                  <button key={n} onClick={() => setRowStack(n)}
+                    className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                      rowStack === n ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-300'}`}>
+                    {n}단
                   </button>
                 ))}
               </div>
-              <div className="mt-1 text-xs text-gray-400">
-                이론값 (동지기준): <span className="font-medium text-gray-600">{theoreticalSpacing}m</span>
+            </div>
+            <div>
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-gray-500 font-medium">이격 거리 (m)</label>
+                <span className="text-xs text-gray-400">이론값: {theoreticalSpacing}m</span>
               </div>
+              <input
+                type="number"
+                min={0.5}
+                max={5}
+                step={0.1}
+                value={spacingValue}
+                onChange={e => setSpacingValue(Number(e.target.value))}
+                className="mt-1 w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
             <div>
               <div className="flex justify-between items-center">
@@ -1389,7 +1411,7 @@ export default function MapTab() {
         <div className="bg-amber-50 rounded-xl border border-amber-200 p-3">
           <div className="text-xs font-semibold text-amber-800 mb-1">📌 실제 현장 기준값</div>
           <div className="space-y-0.5 text-xs text-amber-700">
-            <div>TOPCon GS710W · 경사각 15° · 이격 1.2m</div>
+            <div>GS710wp · 경사각 15° · 이격 1.2m</div>
             <div className="font-bold">524.85 m² → 38장 · 26.98 kWp</div>
           </div>
         </div>
@@ -1496,7 +1518,7 @@ export default function MapTab() {
                 </select>
               </div>
 
-              {/* 부지 용도 */}
+              {/* 부지 용도 (Item 6: land/roof 2가지로 고정) */}
               <div>
                 <label className="text-xs text-gray-500 font-medium">부지 용도</label>
                 <select
@@ -1505,9 +1527,6 @@ export default function MapTab() {
                   className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5">
                   <option value="land">토지 (마진 2m)</option>
                   <option value="roof">지붕 (마진 0.5m)</option>
-                  <option value="farmland">농지 (마진 2m)</option>
-                  <option value="forest">임야 (마진 2m)</option>
-                  <option value="land_change_planned">지목변경 예정 (마진 1.5m)</option>
                 </select>
               </div>
 
@@ -1532,60 +1551,6 @@ export default function MapTab() {
                     ⚠ 편차 {Math.abs(svgAzimuthDeg - 180)}° — 발전량 약 {(100 - Math.cos((svgAzimuthDeg - 180) * Math.PI / 180) * 100).toFixed(1)}% 감소 (실증 Case 3 기준)
                   </div>
                 )}
-              </div>
-
-              {/* 경사지 보정 */}
-              <div className="col-span-2">
-                <label className="flex items-center gap-2 cursor-pointer mb-2">
-                  <input type="checkbox" checked={svgHasSlope}
-                    onChange={e => setSvgHasSlope(e.target.checked)}
-                    className="accent-indigo-500" />
-                  <span className="text-xs text-gray-700 font-medium">경사지 보정 적용</span>
-                </label>
-                {svgHasSlope && (
-                  <div className="grid grid-cols-2 gap-2 bg-indigo-50 rounded p-2">
-                    <div>
-                      <label className="text-xs text-gray-500">경사각 (°)</label>
-                      <input type="number" min={1} max={45} value={svgSlopeAngle}
-                        onChange={e => setSvgSlopeAngle(Number(e.target.value))}
-                        className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1" />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-500">경사 방위각 (°)</label>
-                      <input type="number" min={0} max={360} value={svgSlopeAzimuth}
-                        onChange={e => setSvgSlopeAzimuth(Number(e.target.value))}
-                        className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1" />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 특수 경계 체크박스 */}
-              <div>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" checked={svgHasRiver}
-                    onChange={e => setSvgHasRiver(e.target.checked)}
-                    className="accent-blue-500" />
-                  <span className="text-xs text-gray-700">하천 인접 (마진 +5m)</span>
-                </label>
-              </div>
-              <div>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" checked={svgHasRoad}
-                    onChange={e => setSvgHasRoad(e.target.checked)}
-                    className="accent-orange-500" />
-                  <span className="text-xs text-gray-700">도로 인접 (마진 +3m)</span>
-                </label>
-              </div>
-
-              {/* 지목변경 예정 */}
-              <div className="col-span-2">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" checked={svgJimokChangePlanned}
-                    onChange={e => setSvgJimokChangePlanned(e.target.checked)}
-                    className="accent-purple-500" />
-                  <span className="text-xs text-gray-700">지목변경 예정 (마진 1.5m 자동 적용)</span>
-                </label>
               </div>
 
               {/* 구역 모드 */}
@@ -1614,42 +1579,57 @@ export default function MapTab() {
                   if (!apiCoords || parcels.length === 0) return
                   setSvgAnalyzing(true)
                   try {
-                    const panelSpec = PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.TYPE_A
+                    const panelSpec = PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.GS710wp
                     const lat = effectiveLatitude
 
-                    // API 모드: VWorld 필지 경계 → 미터 변환
-                    const polygon = convertGeoRingToLocalPolygon(
-                      parcels[0].ring,
-                      apiCoords.lat,
-                      apiCoords.lon
-                    )
+                    // 모든 필지 → 로컬 좌표계 변환 (Item 13: 복수 필지 버그 수정)
+                    const allPolygons = parcels
+                      .map(p => convertGeoRingToLocalPolygon(p.ring, apiCoords.lat, apiCoords.lon))
+                      .filter(p => p.length >= 3)
 
-                    if (polygon.length < 3) return
+                    if (allPolygons.length === 0) return
 
                     const commonOpts = {
                       azimuthDeg: svgAzimuthDeg,
-                      slopeAngleDeg: svgHasSlope ? svgSlopeAngle : 0,
-                      slopeAzimuthDeg: svgHasSlope ? svgSlopeAzimuth : 180,
-                      isJimokChangePlanned: svgJimokChangePlanned,
+                      slopeAngleDeg: 0,
+                      slopeAzimuthDeg: 180,
+                      isJimokChangePlanned: false,
                     }
 
-                    if (svgZoneMode === 'multi') {
-                      const mzResult = runMultiZoneAnalysis(autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat)
+                    if (allPolygons.length > 1) {
+                      // 복수 필지: 각 필지를 별도 구역으로 분석
+                      const zones: ZoneConfig[] = allPolygons.map((poly, i) => ({
+                        label: `필지${i + 1}`,
+                        polygon: poly,
+                        plotType: svgPlotType,
+                        panelSpec,
+                        panelType: svgPanelType,
+                        ...commonOpts,
+                      }))
+                      const mzResult = runMultiZoneAnalysis(zones, lat)
                       setSvgAnalysisResult(mzResult)
                       setLastFullAnalysisJson(JSON.stringify(mzResult))
                       setIsEditing(false)
                     } else {
-                      const faResult = runFullAnalysis({
-                        cadastrePolygon: polygon,
-                        plotType: svgPlotType,
-                        panelSpec,
-                        panelType: svgPanelType,
-                        latitude: lat,
-                        ...commonOpts,
-                      })
-                      setSvgAnalysisResult(faResult)
-                      setLastFullAnalysisJson(JSON.stringify(faResult))
-                      setIsEditing(true)
+                      const polygon = allPolygons[0]
+                      if (svgZoneMode === 'multi') {
+                        const mzResult = runMultiZoneAnalysis(autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat)
+                        setSvgAnalysisResult(mzResult)
+                        setLastFullAnalysisJson(JSON.stringify(mzResult))
+                        setIsEditing(false)
+                      } else {
+                        const faResult = runFullAnalysis({
+                          cadastrePolygon: polygon,
+                          plotType: svgPlotType,
+                          panelSpec,
+                          panelType: svgPanelType,
+                          latitude: lat,
+                          ...commonOpts,
+                        })
+                        setSvgAnalysisResult(faResult)
+                        setLastFullAnalysisJson(JSON.stringify(faResult))
+                        setIsEditing(true)
+                      }
                     }
                     setShowSvgCanvas(true)
                   } catch (err) {
