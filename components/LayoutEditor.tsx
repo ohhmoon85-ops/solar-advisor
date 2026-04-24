@@ -110,6 +110,8 @@ interface Props {
   /** 편집 완료 시 콜백: 편집된 배치 + 새 용량 */
   onComplete?: (placements: PanelPlacement[], totalKwp: number) => void
   onCancel?: () => void
+  /** 패널 수 실시간 변경 콜백 */
+  onCountChange?: (count: number) => void
 }
 
 export default function LayoutEditor({
@@ -118,6 +120,7 @@ export default function LayoutEditor({
   height = 520,
   onComplete,
   onCancel,
+  onCountChange,
 }: Props) {
   // ── 편집 상태 ─────────────────────────────────────────────────────
   const [state, dispatch] = useReducer(
@@ -194,6 +197,11 @@ export default function LayoutEditor({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // ── 패널 수 실시간 콜백 ─────────────────────────────────────────
+  useEffect(() => {
+    onCountChange?.(state.placements.length)
+  }, [state.placements.length, onCountChange])
 
   // ── 드래그 중 SVG 밖에서 마우스 버튼을 놓았을 때 정리 ────────────
   useEffect(() => {

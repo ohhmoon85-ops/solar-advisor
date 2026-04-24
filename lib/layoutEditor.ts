@@ -254,10 +254,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const basePanelCount = Math.max(1, Math.round(rowPanels.length / currentStack))
       const sortedByY = [...rowPanels].sort((a, b) => a.centerY - b.centerY)
       const basePanels = sortedByY.slice(0, basePanelCount)
-      // 남쪽 방향 이동 벡터: corners[0](SW) - corners[3](NW)
+      // 북쪽 방향 이동 벡터: corners[3](NW) - corners[0](SW) → 패널을 북쪽으로 쌓음
       const ref = basePanels[0]
-      const svx = ref.corners[0].x - ref.corners[3].x
-      const svy = ref.corners[0].y - ref.corners[3].y
+      const svx = ref.corners[3].x - ref.corners[0].x
+      const svy = ref.corners[3].y - ref.corners[0].y
       const svLen = Math.sqrt(svx * svx + svy * svy)
       const GAP = 0.05
       const sx = svLen >= 0.01 ? svx * (1 + GAP / svLen) : 0

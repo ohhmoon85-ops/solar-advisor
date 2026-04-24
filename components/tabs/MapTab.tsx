@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 // VWorld는 Vercel/Cloudflare 서버 IP를 모두 차단함
 // → 브라우저(한국 사용자 IP)에서 직접 호출하는 방식으로 전환
@@ -318,6 +318,7 @@ export default function MapTab() {
   const [svgPlotType, setSvgPlotType] = useState<PlotType>('land')
   const [showSvgCanvas, setShowSvgCanvas] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const [editingCount, setEditingCount] = useState<number | null>(null)
   // v5.2 SVG 배치 입력 (간소화)
   const [svgAzimuthDeg, setSvgAzimuthDeg] = useState(180)
   const [svgZoneMode, setSvgZoneMode] = useState<'single' | 'multi'>('single')
@@ -1405,7 +1406,7 @@ export default function MapTab() {
                   <button onClick={() => handleSendToRevenue('precision')}
                     className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-xs font-semibold transition-colors">
                     <div className="text-[10px] text-blue-200 mb-0.5">정밀분석 ★권장</div>
-                    {svgAnalysisResult.layout.totalCount.toLocaleString()}장 · {svgAnalysisResult.layout.totalKwp}kWp
+                    {(editingCount !== null ? editingCount : svgAnalysisResult.layout.totalCount).toLocaleString()}장 · {isEditing && editingCount !== null ? ((editingCount * (svgAnalysisResult.layout.totalKwp / Math.max(1, svgAnalysisResult.layout.totalCount))).toFixed(2)) : svgAnalysisResult.layout.totalKwp}kWp
                   </button>
                 </div>
               </div>
@@ -1705,8 +1706,10 @@ export default function MapTab() {
                     result={svgAnalysisResult as FullAnalysisResult}
                     width={920}
                     height={520}
+                    onCountChange={(count) => setEditingCount(count)}
                     onComplete={(placements, totalKwp) => {
                       setIsEditing(false)
+                      setEditingCount(null)
                       // 편집 완료: 패널 수/용량 반영 (분석 결과에 통합)
                       setSvgAnalysisResult(prev => {
                         if (!prev || isMultiZoneResult(prev)) return prev
@@ -1724,7 +1727,7 @@ export default function MapTab() {
                         }
                       })
                     }}
-                    onCancel={() => setIsEditing(false)}
+                    onCancel={() => { setIsEditing(false); setEditingCount(null) }}
                   />
                 ) : (
                   <div>
