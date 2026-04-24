@@ -346,13 +346,41 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         }
 
         case 'stack3': {
-          // 전체 3단: 3행씩 그룹화 표시 (수량 변화 없음)
+          // 전체 3단: 각 행을 패널 높이+0.05m 간격으로 2회 복제 → 수량 3배
+          const GAP = 0.05  // 단 내 패널 간격 (m)
+          const newPlacements = [...saved.placements]
+          let nextId = newPlacements.length > 0
+            ? Math.max(...newPlacements.map(p => p.id)) + 1 : 0
+
+          for (const rowIdx of rows) {
+            const rowPanels = saved.placements.filter(p => p.row === rowIdx)
+            if (rowPanels.length === 0) continue
+            // 첫 패널 corners[0](SW) - corners[3](NW) = 남쪽 방향 벡터
+            const ref = rowPanels[0]
+            const svx = ref.corners[0].x - ref.corners[3].x
+            const svy = ref.corners[0].y - ref.corners[3].y
+            const svLen = Math.sqrt(svx * svx + svy * svy)
+            if (svLen < 0.01) continue
+            // 1단 간격 = 패널 투영 높이 + GAP
+            const sx = svx * (1 + GAP / svLen)
+            const sy = svy * (1 + GAP / svLen)
+            for (let k = 1; k <= 2; k++) {
+              for (const p of rowPanels) {
+                newPlacements.push({
+                  id: nextId++, row: p.row, col: p.col,
+                  centerX: p.centerX + sx * k,
+                  centerY: p.centerY + sy * k,
+                  corners: p.corners.map(c => ({
+                    x: c.x + sx * k, y: c.y + sy * k,
+                  })) as typeof p.corners,
+                })
+              }
+            }
+          }
           const rowConfigs = rows.map(rowIdx => ({
-            rowIndex: rowIdx,
-            stackCount: 3 as const,
-            hasCorridorAfter: false,
+            rowIndex: rowIdx, stackCount: 3 as const, hasCorridorAfter: false,
           }))
-          return { ...saved, rowConfigs, isDirty: true }
+          return { ...saved, placements: newPlacements, rowConfigs, isDirty: true }
         }
 
         default:
