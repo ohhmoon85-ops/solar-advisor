@@ -588,6 +588,72 @@ export default function MapTab() {
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
+  // ── 패널 배치 계산 (필지·설정 변경 시 자동 재계산) ──────────────
+  const recalculatePanels = useCallback((currentParcels: ParcelInfo[], scale: number) => {
+    if (currentParcels.length === 0) return
+    let totalPanelRects: PanelRect[] = []
+    let totalCount = 0
+    for (const parcel of currentParcels) {
+      const module = MODULES[moduleIndex]
+      const isBuilding = installType === '건물지붕형'
+      const slopeFactor = Math.cos(Math.atan(slopePercent / 100))
+      const ltr = (tiltAngle * Math.PI) / 180
+      const panelW = panelOrientation === 'landscape' ? module.h : module.w
+      const panelH = panelOrientation === 'landscape' ? module.w : module.h
+      const panelPxW = panelW / scale
+      const panelPxH = (panelH * Math.cos(ltr) * rowStack) / scale
+      const rowPitch = panelPxH + spacingValue / scale
+      const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
+      const marginPx = marginM / scale
+      const pts = parcel.canvasPoints
+      if (pts.length < 3) continue
+      const minX = Math.min(...pts.map(p => p.x))
+      const maxX = Math.max(...pts.map(p => p.x))
+      const minY = Math.min(...pts.map(p => p.y))
+      const maxY = Math.max(...pts.map(p => p.y))
+      const rects: PanelRect[] = []
+      for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
+        for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
+          if (panelCrossesBoundary(x, y, panelPxW, panelPxH, pts)) continue
+          const checkPts = [
+            { x, y }, { x: x + panelPxW, y },
+            { x, y: y + panelPxH }, { x: x + panelPxW, y: y + panelPxH },
+            { x: x + panelPxW / 2, y }, { x: x + panelPxW / 2, y: y + panelPxH },
+            { x, y: y + panelPxH / 2 }, { x: x + panelPxW, y: y + panelPxH / 2 },
+          ]
+          if (checkPts.every(c =>
+                isPointInPolygon(c.x, c.y, pts) &&
+                minDistToPolygonEdge(c.x, c.y, pts) >= marginPx))
+            rects.push({ x, y, w: panelPxW, h: panelPxH })
+        }
+      }
+      totalPanelRects = [...totalPanelRects, ...rects]
+      const perimeterPx = pts.reduce((sum, p, i) => {
+        const j = (i + 1) % pts.length
+        return sum + Math.sqrt((pts[j].x - p.x) ** 2 + (pts[j].y - p.y) ** 2)
+      }, 0)
+      const effectiveArea = Math.max(0, parcel.areaSqm - perimeterPx * scale * marginM)
+      const footprintPerPanel = panelW * (panelH * Math.cos(ltr) * rowStack + spacingValue)
+      const coverageRatio = isBuilding ? 0.70 : 0.85
+      const cnt = parcel.areaSqm > 10
+        ? Math.floor(effectiveArea * slopeFactor * coverageRatio / footprintPerPanel)
+        : rects.length
+      totalCount += cnt
+    }
+    setPanelRects(totalPanelRects)
+    setPanelCount(totalCount)
+    const cap = (totalCount * MODULES[moduleIndex].watt) / 1000
+    setCapacityKwp(Math.round(cap * 100) / 100)
+    setAnnualKwh(Math.round(cap * GENERATION_HOURS * 365))
+  }, [installType, moduleIndex, tiltAngle, spacingValue, panelOrientation, rowStack, slopePercent])
+
+  // 설정 변경 시 자동 재계산 (검색 후 유형·모듈 등을 바꾸면 즉시 반영)
+  useEffect(() => {
+    if (parcels.length > 0 && pixelScale > 0) {
+      recalculatePanels(parcels, pixelScale)
+    }
+  }, [recalculatePanels, parcels, pixelScale])
+
   // KIER 실측 발전시간 도착 시 연간발전량(annualKwh) 갱신 (STEP 5 결과카드)
   useEffect(() => {
     if (capacityKwp === 0) return
@@ -840,63 +906,7 @@ export default function MapTab() {
       setApiCoords({ lat: first.lat, lon: first.lon })
       setParcelLabel(converted.map(p => p.label).join(' · '))
 
-      // 각 필지별 패널 계산 후 합산
-      let totalPanelRects: PanelRect[] = []
-      let totalCount = 0
-      for (const parcel of converted) {
-        const module = MODULES[moduleIndex]
-        const isBuilding = installType === '건물지붕형'
-        const slopeFactor = Math.cos(Math.atan(slopePercent / 100))
-        const ltr = (tiltAngle * Math.PI) / 180
-        const panelW = panelOrientation === 'landscape' ? module.h : module.w
-        const panelH = panelOrientation === 'landscape' ? module.w : module.h
-        const panelPxW = panelW / scale
-        const panelPxH = (panelH * Math.cos(ltr) * rowStack) / scale
-        const rowPitch = panelPxH + spacingValue / scale
-        const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
-        const marginPx = marginM / scale
-        const pts = parcel.canvasPoints
-        const minX = Math.min(...pts.map(p => p.x))
-        const maxX = Math.max(...pts.map(p => p.x))
-        const minY = Math.min(...pts.map(p => p.y))
-        const maxY = Math.max(...pts.map(p => p.y))
-        const rects: PanelRect[] = []
-        for (let y = minY + marginPx; y + panelPxH <= maxY - marginPx; y += rowPitch) {
-          for (let x = minX + marginPx; x + panelPxW <= maxX - marginPx; x += panelPxW + 2) {
-            // ① 선분 교차 체크 (오목 폴리곤 대응)
-            if (panelCrossesBoundary(x, y, panelPxW, panelPxH, pts)) continue
-            // ② 4 꼭짓점 + 4변 중점 모두 경계 안쪽 & marginPx 이상
-            const checkPts = [
-              { x, y }, { x: x + panelPxW, y },
-              { x, y: y + panelPxH }, { x: x + panelPxW, y: y + panelPxH },
-              { x: x + panelPxW / 2, y }, { x: x + panelPxW / 2, y: y + panelPxH },
-              { x, y: y + panelPxH / 2 }, { x: x + panelPxW, y: y + panelPxH / 2 },
-            ]
-            if (checkPts.every(c =>
-                  isPointInPolygon(c.x, c.y, pts) &&
-                  minDistToPolygonEdge(c.x, c.y, pts) >= marginPx))
-              rects.push({ x, y, w: panelPxW, h: panelPxH })
-          }
-        }
-        totalPanelRects = [...totalPanelRects, ...rects]
-        // 면적 기반 카운트
-        const perimeterPx = pts.reduce((sum, p, i) => {
-          const j = (i + 1) % pts.length
-          return sum + Math.sqrt((pts[j].x - p.x) ** 2 + (pts[j].y - p.y) ** 2)
-        }, 0)
-        const effectiveArea = Math.max(0, parcel.areaSqm - perimeterPx * scale * marginM)
-        const footprintPerPanel = panelW * (panelH * Math.cos(ltr) * rowStack + spacingValue)
-        const coverageRatio = isBuilding ? 0.70 : 0.85
-        const cnt = parcel.areaSqm > 10
-          ? Math.floor(effectiveArea * slopeFactor * coverageRatio / footprintPerPanel)
-          : rects.length
-        totalCount += cnt
-      }
-      setPanelRects(totalPanelRects)
-      setPanelCount(totalCount)
-      const cap = (totalCount * MODULES[moduleIndex].watt) / 1000
-      setCapacityKwp(Math.round(cap * 100) / 100)
-      setAnnualKwh(Math.round(cap * GENERATION_HOURS * 365))
+      // 패널 계산은 recalculatePanels useEffect가 parcels/pixelScale 변경 시 자동 처리
 
       loadTiles(cLon, cLat, z, scale, mapMode)
       fetchKierData(first.lat, first.lon, tiltAngle)
