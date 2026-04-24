@@ -26,6 +26,8 @@ export interface ZoneConfig {
   slopeAzimuthDeg?: number
   /** 지목변경 예정 여부 */
   isJimokChangePlanned?: boolean
+  /** 패널 방향 */
+  panelOrientation?: 'portrait' | 'landscape'
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -221,6 +223,7 @@ export function runMultiZoneAnalysis(
       slopeAngleDeg: zone.slopeAngleDeg ?? 0,
       slopeAzimuthDeg: zone.slopeAzimuthDeg ?? 180,
       isJimokChangePlanned: zone.isJimokChangePlanned ?? false,
+      panelOrientation: zone.panelOrientation ?? 'portrait',
     })
     return {
       ...result,

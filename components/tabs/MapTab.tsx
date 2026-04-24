@@ -321,6 +321,7 @@ export default function MapTab() {
   // v5.2 SVG 배치 입력 (간소화)
   const [svgAzimuthDeg, setSvgAzimuthDeg] = useState(180)
   const [svgZoneMode, setSvgZoneMode] = useState<'single' | 'multi'>('single')
+  const [svgPanelOrientation, setSvgPanelOrientation] = useState<'portrait' | 'landscape'>('portrait')
 
   // 이론 이격 거리 — 현장 위도 기반 (hardcode 37.5665° → 동적 위도)
   const tiltRad = (tiltAngle * Math.PI) / 180
@@ -1530,6 +1531,22 @@ export default function MapTab() {
                 </select>
               </div>
 
+              {/* 패널 방향 (세로형/가로형) */}
+              <div className="col-span-2">
+                <label className="text-xs text-gray-500 font-medium block mb-1">패널 방향</label>
+                <div className="flex gap-1.5">
+                  {(['portrait', 'landscape'] as const).map(ori => (
+                    <button key={ori} onClick={() => setSvgPanelOrientation(ori)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                        svgPanelOrientation === ori
+                          ? 'bg-indigo-500 text-white border-indigo-500'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-300'}`}>
+                      {ori === 'portrait' ? '세로형 (기본)' : '가로형'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* 방위각 슬라이더 */}
               <div className="col-span-2">
                 <div className="flex justify-between items-center">
@@ -1594,6 +1611,7 @@ export default function MapTab() {
                       slopeAngleDeg: 0,
                       slopeAzimuthDeg: 180,
                       isJimokChangePlanned: false,
+                      panelOrientation: svgPanelOrientation,
                     }
 
                     if (allPolygons.length > 1) {

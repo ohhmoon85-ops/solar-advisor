@@ -75,6 +75,8 @@ export interface FullAnalysisResult {
   panelType: string
   /** 적용된 방위각 (°), 기본 180 */
   azimuthDeg: number
+  /** 패널 방향 */
+  panelOrientation: 'portrait' | 'landscape'
   /** 실증 크로스체크 결과 (선택) */
   validation?: ValidationReport
 }
@@ -189,13 +191,16 @@ export function rotatePanelCorners(
   cy: number,
   panelSpec: PanelSpec,
   tiltAngle: number,
-  azimuthDeg: number
+  azimuthDeg: number,
+  panelOrientation: 'portrait' | 'landscape' = 'portrait'
 ): [Point, Point, Point, Point] {
-  const projLen = panelSpec.lengthM * Math.cos(tiltAngle * DEG2RAD)
-  const w = panelSpec.widthM
-  const hw = w / 2
+  // 가로형: N-S = widthM, E-W = lengthM
+  const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
+  const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
+  const projLen = effNS * Math.cos(tiltAngle * DEG2RAD)
+  const hw = effEW / 2
   const hl = projLen / 2
-  const offset = azimuthDeg - 180  // 정남향 기준 편차
+  const offset = azimuthDeg - 180
 
   const raw: [Point, Point, Point, Point] = [
     { x: cx - hw, y: cy - hl },  // TL
@@ -224,6 +229,8 @@ export function generateLayout(params: {
   excludeZones?: Polygon[]
   /** 이용률 목표 (0~1), 미설정 시 100% 시도 */
   utilizationTarget?: number
+  /** 패널 방향 — 'landscape': 패널을 90° 눕혀서 widthM을 N-S로 사용 */
+  panelOrientation?: 'portrait' | 'landscape'
 }): LayoutResult {
   const {
     safeZonePolygon,
@@ -232,14 +239,16 @@ export function generateLayout(params: {
     tiltAngle,
     azimuthDeg = 180,
     excludeZones = [],
+    panelOrientation = 'portrait',
   } = params
 
-  const offset = azimuthDeg - 180  // 정남향 기준 편차
+  // 가로형: N-S = widthM(짧은 변), E-W = lengthM(긴 변)
+  const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
+  const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
 
-  // 폴리곤 무게중심 (회전 기준점)
+  const offset = azimuthDeg - 180
+
   const centroid = polygonCentroid(safeZonePolygon)
-
-  // 방위각 회전: 폴리곤을 -offset 회전 (정방향 그리드 배치를 위해)
   const rotatedPoly = safeZonePolygon.map(p => rotatePoint(p, centroid.x, centroid.y, -offset))
 
   const xs = rotatedPoly.map(p => p.x)
@@ -249,9 +258,9 @@ export function generateLayout(params: {
   const minY = Math.min(...ys)
   const maxY = Math.max(...ys)
 
-  const projLen = panelSpec.lengthM * Math.cos(tiltAngle * DEG2RAD)
+  const projLen = effNS * Math.cos(tiltAngle * DEG2RAD)
   const rowPitch = projLen + rowSpacing
-  const colPitch = panelSpec.widthM + 0.02
+  const colPitch = effEW + 0.02
 
   const placements: PanelPlacement[] = []
   let id = 0
@@ -259,33 +268,29 @@ export function generateLayout(params: {
 
   for (let y = minY; y + projLen <= maxY; y += rowPitch, row++) {
     let col = 0
-    for (let x = minX; x + panelSpec.widthM <= maxX; x += colPitch, col++) {
-      // 회전된 좌표계에서 임시 꼭짓점 계산
+    for (let x = minX; x + effEW <= maxX; x += colPitch, col++) {
       const rotatedCorners: [Point, Point, Point, Point] = [
-        { x,                      y },
-        { x: x + panelSpec.widthM, y },
-        { x: x + panelSpec.widthM, y: y + projLen },
-        { x,                       y: y + projLen },
+        { x,           y },
+        { x: x + effEW, y },
+        { x: x + effEW, y: y + projLen },
+        { x,            y: y + projLen },
       ]
 
-      // 회전된 폴리곤 기준으로 내부 확인
       if (!isPanelInsidePolygon(rotatedCorners, rotatedPoly)) continue
 
-      // 실제 배치 좌표로 역회전 (+offset)
       const actualCorners = rotatedCorners.map(
         p => rotatePoint(p, centroid.x, centroid.y, offset)
       ) as [Point, Point, Point, Point]
 
       const centerX = rotatePoint(
-        { x: x + panelSpec.widthM / 2, y: y + projLen / 2 },
+        { x: x + effEW / 2, y: y + projLen / 2 },
         centroid.x, centroid.y, offset
       ).x
       const centerY = rotatePoint(
-        { x: x + panelSpec.widthM / 2, y: y + projLen / 2 },
+        { x: x + effEW / 2, y: y + projLen / 2 },
         centroid.x, centroid.y, offset
       ).y
 
-      // 제외 구역 중심점 확인
       const centerPt = { x: centerX, y: centerY }
       if (excludeZones.some(zone => isPointInPolygon(centerPt, zone))) continue
 
@@ -390,6 +395,8 @@ export function runFullAnalysis(params: {
   boundaries?: BoundarySegment[]
   /** 지목변경 예정 여부 */
   isJimokChangePlanned?: boolean
+  /** 패널 방향 — 기본 'portrait' */
+  panelOrientation?: 'portrait' | 'landscape'
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -402,6 +409,7 @@ export function runFullAnalysis(params: {
     slopeAzimuthDeg = 180,
     boundaries,
     isJimokChangePlanned,
+    panelOrientation = 'portrait',
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -426,18 +434,21 @@ export function runFullAnalysis(params: {
       region: getRegionByLatitude(effectiveLatitude),
       panelType,
       azimuthDeg,
+      panelOrientation,
     }
   }
 
-  // Step 2: 최적 경사각 (경사지 보정 위도 사용)
+  // Step 2: 최적 경사각 (지붕형은 별도 로직)
   const optResult = optimizeTiltAngle({
     panelSpec,
     latitude: effectiveLatitude,
     safeZoneAreaM2: safeZone.safeAreaM2,
     azimuthDeg,
+    isRoof: plotType === 'roof',
+    panelOrientation,
   })
 
-  // Step 3: 패널 배치 (방위각 회전)
+  // Step 3: 패널 배치 (방위각 회전 + 방향)
   const layout = generateLayout({
     safeZonePolygon: safeZone.safeZonePolygon,
     panelSpec,
@@ -445,6 +456,7 @@ export function runFullAnalysis(params: {
     tiltAngle: optResult.optimalTilt,
     azimuthDeg,
     excludeZones,
+    panelOrientation,
   })
 
   // Step 4: 실증 크로스체크
@@ -463,6 +475,7 @@ export function runFullAnalysis(params: {
     region: optResult.region,
     panelType,
     azimuthDeg,
+    panelOrientation,
     validation,
   }
 }

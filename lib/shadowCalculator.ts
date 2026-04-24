@@ -122,26 +122,39 @@ export function optimizeTiltAngle(params: {
   /** Safe Zone 면적 (m²) */
   safeZoneAreaM2: number
   azimuthDeg?: number
+  /** 지붕형 여부 — true이면 경사각 5~20°, 행간격 0.3m 고정 */
+  isRoof?: boolean
+  /** 패널 방향 — 'landscape'이면 widthM/lengthM 교환 */
+  panelOrientation?: 'portrait' | 'landscape'
 }): OptimizationResult {
-  const { panelSpec, latitude, safeZoneAreaM2, azimuthDeg } = params
-  const SYSTEM_EFFICIENCY = 0.8    // 시스템 효율 (인버터·배선 손실 포함)
-  const ANNUAL_PEAK_HOURS = 1400   // 연간 피크 일사 시간 (h/y)
+  const { panelSpec, latitude, safeZoneAreaM2, azimuthDeg, isRoof = false, panelOrientation = 'portrait' } = params
+  const SYSTEM_EFFICIENCY = 0.8
+  const ANNUAL_PEAK_HOURS = 1400
+  // 지붕형: 행간격 0.3m(유지보수 통로) + 경사각 5~20°
+  const ROOF_ROW_SPACING = 0.3
+  const tiltMin = isRoof ? 5 : 15
+  const tiltMax = isRoof ? 20 : 40
 
-  let bestTilt = 30
+  // 가로형: 패널 N-S방향 치수 = widthM, E-W방향 = lengthM
+  const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
+  const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
+
+  let bestTilt = isRoof ? 10 : 30
   let bestKwh = 0
-  let bestSpacing = 0
+  let bestSpacing = isRoof ? ROOF_ROW_SPACING : 0
   let bestPanels = 0
 
-  for (let tilt = 15; tilt <= 40; tilt++) {   // v5.2: 하한 20° → 15°
-    const spacing = getRowSpacing({ panelSpec, tiltAngle: tilt, latitude, azimuthDeg })
-    const projLen = panelSpec.lengthM * Math.cos(tilt * DEG2RAD)
-    const rowPitch = projLen + spacing           // 행간 중심 거리
-    const colPitch = panelSpec.widthM + 0.02    // 열간 간격 (20mm 시공 여유)
+  for (let tilt = tiltMin; tilt <= tiltMax; tilt++) {
+    const spacing = isRoof
+      ? ROOF_ROW_SPACING
+      : getRowSpacing({ panelSpec, tiltAngle: tilt, latitude, azimuthDeg })
+    const projLen = effNS * Math.cos(tilt * DEG2RAD)
+    const rowPitch = projLen + spacing
+    const colPitch = effEW + 0.02
 
-    // 정사각형 부지 근사로 최대 패널 수 추정
     const sideLen = Math.sqrt(safeZoneAreaM2)
-    const rows = Math.max(0, Math.floor((sideLen - projLen) / rowPitch))
-    const cols = Math.max(0, Math.floor((sideLen - panelSpec.widthM) / colPitch))
+    const rows = Math.max(0, Math.floor((sideLen - projLen) / rowPitch) + 1)
+    const cols = Math.max(0, Math.floor((sideLen - effEW) / colPitch) + 1)
     const panels = rows * cols
 
     const kwp = (panels * panelSpec.wattNominal) / 1000
