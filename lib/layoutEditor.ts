@@ -113,6 +113,35 @@ function upsertRowConfig(state: EditorState, config: RowConfig): EditorState {
 let _corridorIdSeq = 1
 function nextCorridorId(): number { return _corridorIdSeq++ }
 
+// 통로 위 행들을 북쪽으로 이동 (통로 삽입 시 실제 패널 위치 갱신)
+function shiftRowsAboveCorridors(
+  placements: PanelPlacement[],
+  corridors: Corridor[],
+  rowAvgY: Map<number, number>
+): PanelPlacement[] {
+  if (corridors.length === 0) return placements
+  const rows = [...new Set(placements.map(p => p.row))]
+  const shiftMap = new Map<number, number>()
+  for (const r of rows) {
+    const rY = rowAvgY.get(r) ?? 0
+    let total = 0
+    for (const c of corridors) {
+      const cY = rowAvgY.get(c.afterRowIndex) ?? 0
+      if (cY < rY) total += c.widthM
+    }
+    shiftMap.set(r, total)
+  }
+  return placements.map(p => {
+    const dy = shiftMap.get(p.row) ?? 0
+    if (dy === 0) return p
+    return {
+      ...p,
+      centerY: p.centerY + dy,
+      corners: p.corners.map(c => ({ x: c.x, y: c.y + dy })) as typeof p.corners,
+    }
+  })
+}
+
 // ── Reducer ────────────────────────────────────────────────────────
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
@@ -323,66 +352,68 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           }
 
         case 'standard': {
-          // 표준 배치: 10행마다 1.0m 점검통로 + 통로만큼 끝 행 제거
-          const stdCorridors: Corridor[] = rows
-            .filter((_, i) => (i + 1) % 10 === 0 && i < rows.length - 1)
-            .map(rowIdx => ({
-              id: nextCorridorId(),
-              type: 'inspection' as const,
-              afterRowIndex: rowIdx,
-              widthM: 1.0,
-            }))
-          const stdRowConfigs = stdCorridors.map(c => ({
-            rowIndex: c.afterRowIndex,
-            stackCount: 1 as const,
-            hasCorridorAfter: true,
-            corridorWidthM: c.widthM,
-          }))
-          let stdPlacements = saved.placements
-          if (stdCorridors.length > 0 && rows.length > 1) {
-            const rowCenterY = (rowIdx: number) => {
-              const rp = saved.placements.filter(p => p.row === rowIdx)
-              return rp.reduce((s, p) => s + p.centerY, 0) / (rp.length || 1)
-            }
-            const avgPitch = Math.abs(rowCenterY(rows[rows.length - 1]) - rowCenterY(rows[0])) / (rows.length - 1)
-            const rowsToRemove = Math.max(1, Math.round((1.0 / (avgPitch || 2.5)) * stdCorridors.length))
-            const keepRows = new Set(rows.slice(0, rows.length - rowsToRemove))
-            stdPlacements = saved.placements.filter(p => keepRows.has(p.row))
+          // 표준 배치: originalPlacements 기반, 행 수에 맞는 통로 삽입 + 패널 실제 이동
+          const stdBase = deepCopyPlacements(saved.originalPlacements)
+          const stdAllRows = getUniqueRows(stdBase)
+          const stdRowAvgY = new Map<number, number>()
+          for (const r of stdAllRows) {
+            const rp = stdBase.filter(p => p.row === r)
+            stdRowAvgY.set(r, rp.reduce((s, p) => s + p.centerY, 0) / rp.length)
           }
-          return { ...saved, placements: stdPlacements, corridors: stdCorridors, rowConfigs: stdRowConfigs, isDirty: true }
+          const stdThreshold = stdAllRows.length <= 8 ? 4 : 10
+          const stdCorrWidth = 1.0
+          const stdNumCorr = stdAllRows.filter((_, i) => (i + 1) % stdThreshold === 0 && i < stdAllRows.length - 1).length
+          let stdPlacements = stdBase
+          if (stdNumCorr > 0 && stdAllRows.length > 1) {
+            const avgPitch = Math.abs(
+              (stdRowAvgY.get(stdAllRows[stdAllRows.length - 1]) ?? 0) - (stdRowAvgY.get(stdAllRows[0]) ?? 0)
+            ) / (stdAllRows.length - 1)
+            const toRemove = Math.max(1, Math.round((stdCorrWidth / Math.max(avgPitch, 0.5)) * stdNumCorr))
+            const keepRows = new Set(stdAllRows.slice(0, stdAllRows.length - toRemove))
+            stdPlacements = stdBase.filter(p => keepRows.has(p.row))
+          }
+          const stdKeptRows = getUniqueRows(stdPlacements)
+          const stdCorridors: Corridor[] = stdKeptRows
+            .filter((_, i) => (i + 1) % stdThreshold === 0 && i < stdKeptRows.length - 1)
+            .map(rowIdx => ({ id: nextCorridorId(), type: 'inspection' as const, afterRowIndex: rowIdx, widthM: stdCorrWidth }))
+          const stdRowCfgs = stdCorridors.map(c => ({
+            rowIndex: c.afterRowIndex, stackCount: 1 as const, hasCorridorAfter: true, corridorWidthM: c.widthM,
+          }))
+          stdPlacements = shiftRowsAboveCorridors(stdPlacements, stdCorridors, stdRowAvgY)
+          return { ...saved, placements: stdPlacements, corridors: stdCorridors, rowConfigs: stdRowCfgs, isDirty: true }
         }
 
+
         case 'corridors': {
-          // 5행마다 점검통로 삽입 + 통로 공간만큼 끝 행 제거
-          const newCorridors: Corridor[] = rows
-            .filter((_, i) => (i + 1) % 5 === 0 && i < rows.length - 1)
-            .map(rowIdx => ({
-              id: nextCorridorId(),
-              type: 'inspection' as const,
-              afterRowIndex: rowIdx,
-              widthM: 1.2,
-            }))
-          const rowConfigs = newCorridors.map(c => ({
-            rowIndex: c.afterRowIndex,
-            stackCount: 1 as const,
-            hasCorridorAfter: true,
-            corridorWidthM: c.widthM,
-          }))
-
-          // 통로당 차지하는 행 수 추정 (행 간 평균 피치 기준)
-          let placements = saved.placements
-          if (newCorridors.length > 0 && rows.length > 1) {
-            const rowCenterY = (rowIdx: number) => {
-              const rp = saved.placements.filter(p => p.row === rowIdx)
-              return rp.reduce((s, p) => s + p.centerY, 0) / (rp.length || 1)
-            }
-            const avgPitch = Math.abs(rowCenterY(rows[rows.length - 1]) - rowCenterY(rows[0])) / (rows.length - 1)
-            const rowsToRemove = Math.max(1, Math.round((1.2 / (avgPitch || 2.5)) * newCorridors.length))
-            const keepRows = new Set(rows.slice(0, rows.length - rowsToRemove))
-            placements = saved.placements.filter(p => keepRows.has(p.row))
+          // 점검통로 삽입: originalPlacements 기반, 행 수에 맞는 다수 통로 + 패널 실제 이동
+          const corrBase = deepCopyPlacements(saved.originalPlacements)
+          const corrAllRows = getUniqueRows(corrBase)
+          const corrRowAvgY = new Map<number, number>()
+          for (const r of corrAllRows) {
+            const rp = corrBase.filter(p => p.row === r)
+            corrRowAvgY.set(r, rp.reduce((s, p) => s + p.centerY, 0) / rp.length)
           }
-
-          return { ...saved, placements, corridors: newCorridors, rowConfigs, isDirty: true }
+          const corrThreshold = corrAllRows.length <= 8 ? 2 : 5
+          const corrWidth = 1.2
+          const corrNumCorr = corrAllRows.filter((_, i) => (i + 1) % corrThreshold === 0 && i < corrAllRows.length - 1).length
+          let corrPlacements = corrBase
+          if (corrNumCorr > 0 && corrAllRows.length > 1) {
+            const avgPitch = Math.abs(
+              (corrRowAvgY.get(corrAllRows[corrAllRows.length - 1]) ?? 0) - (corrRowAvgY.get(corrAllRows[0]) ?? 0)
+            ) / (corrAllRows.length - 1)
+            const toRemove = Math.max(1, Math.round((corrWidth / Math.max(avgPitch, 0.5)) * corrNumCorr))
+            const keepRows = new Set(corrAllRows.slice(0, corrAllRows.length - toRemove))
+            corrPlacements = corrBase.filter(p => keepRows.has(p.row))
+          }
+          const corrKeptRows = getUniqueRows(corrPlacements)
+          const newCorridors: Corridor[] = corrKeptRows
+            .filter((_, i) => (i + 1) % corrThreshold === 0 && i < corrKeptRows.length - 1)
+            .map(rowIdx => ({ id: nextCorridorId(), type: 'inspection' as const, afterRowIndex: rowIdx, widthM: corrWidth }))
+          const rowConfigs = newCorridors.map(c => ({
+            rowIndex: c.afterRowIndex, stackCount: 1 as const, hasCorridorAfter: true, corridorWidthM: c.widthM,
+          }))
+          corrPlacements = shiftRowsAboveCorridors(corrPlacements, newCorridors, corrRowAvgY)
+          return { ...saved, placements: corrPlacements, corridors: newCorridors, rowConfigs, isDirty: true }
         }
 
         case 'stack3': {

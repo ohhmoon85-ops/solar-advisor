@@ -852,7 +852,7 @@ export default function LayoutEditor({
             <div className="space-y-1">
               <QuickBtn
                 label="최밀집"
-                desc="통로·다단 제거"
+                desc="자동배치 복원, 통로·다단 제거"
                 onClick={() => dispatch({
                   type: 'APPLY_QUICK', preset: 'dense',
                   baseSpacing: result.rowSpacing,
@@ -860,7 +860,7 @@ export default function LayoutEditor({
               />
               <QuickBtn
                 label="표준 배치"
-                desc="10행마다 1.0m 통로"
+                desc="4행마다 1.0m 통로 (실제 간격 확보)"
                 onClick={() => dispatch({
                   type: 'APPLY_QUICK', preset: 'standard',
                   baseSpacing: result.rowSpacing,
@@ -868,7 +868,7 @@ export default function LayoutEditor({
               />
               <QuickBtn
                 label="점검통로 삽입"
-                desc="5행마다 1.2m 통로"
+                desc="2행마다 1.2m 통로 (다수 통로)"
                 onClick={() => dispatch({
                   type: 'APPLY_QUICK', preset: 'corridors',
                   baseSpacing: result.rowSpacing,
@@ -876,7 +876,7 @@ export default function LayoutEditor({
               />
               <QuickBtn
                 label="전체 3단"
-                desc="3행씩 그룹화 표시"
+                desc="각 행을 3배 복제 (수량 3배)"
                 onClick={() => dispatch({
                   type: 'APPLY_QUICK', preset: 'stack3',
                   baseSpacing: result.rowSpacing,
