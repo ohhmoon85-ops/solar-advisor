@@ -1,4 +1,4 @@
-// lib/layoutEngine.ts — 지리 미터 좌표 기반 패널 배치 레이아웃 엔진 (v5.2)
+﻿// lib/layoutEngine.ts — 지리 미터 좌표 기반 패널 배치 레이아웃 엔진 (v5.2)
 // MapTab의 캔버스 픽셀 기반 배치와 달리, 순수 지리 미터 좌표로 동작하는 독립 모듈
 // React 상태와 완전히 분리된 순수 함수(Pure Function)로 구성
 // v5.2: 방위각 그리드 회전, 하천/도로 마진, 지목변경 예정, 이용률 검증
@@ -146,20 +146,62 @@ export function polygonCentroid(polygon: Polygon): Point {
 
 /**
  * 폴리곤 안쪽으로 marginM만큼 축소
- * 중심점 기반 균등 축소 (Shapely buffer(-d) 근사)
+ * 각 변을 내부 방향으로 평행이동 후 Sutherland-Hodgman 교점 재계산
+ * 중심점 기반 균등 축소보다 정확 (모든 변에서 균일한 이격 거리 보장)
  */
 export function applyInsetMargin(polygon: Polygon, marginM: number): Polygon {
-  const cx = polygon.reduce((s, p) => s + p.x, 0) / polygon.length
-  const cy = polygon.reduce((s, p) => s + p.y, 0) / polygon.length
+  if (polygon.length < 3) return polygon
+  const n = polygon.length
 
-  return polygon.map(p => {
-    const dx = p.x - cx
-    const dy = p.y - cy
-    const dist = Math.sqrt(dx * dx + dy * dy)
-    if (dist <= marginM) return { x: cx, y: cy }
-    const ratio = (dist - marginM) / dist
-    return { x: cx + dx * ratio, y: cy + dy * ratio }
-  })
+  // 각 변을 안쪽으로 marginM만큼 평행이동한 직선의 계수 (ax + by = c) 계산
+  // 안쪽 방향: 폴리곤의 중심 방향 (법선 벡터를 중심 방향으로 부호 결정)
+  const cx = polygon.reduce((s, p) => s + p.x, 0) / n
+  const cy = polygon.reduce((s, p) => s + p.y, 0) / n
+
+  const lines: Array<{ a: number; b: number; c: number }> = []
+  for (let i = 0; i < n; i++) {
+    const p1 = polygon[i]
+    const p2 = polygon[(i + 1) % n]
+    const dx = p2.x - p1.x
+    const dy = p2.y - p1.y
+    const len = Math.sqrt(dx * dx + dy * dy)
+    if (len < 1e-9) continue
+    // 법선 벡터 (단위)
+    let nx = -dy / len
+    let ny =  dx / len
+    // 중심이 법선 방향에 있으면 부호 유지, 아니면 반전 (항상 안쪽)
+    const dot = nx * (cx - p1.x) + ny * (cy - p1.y)
+    if (dot < 0) { nx = -nx; ny = -ny }
+    // 변을 안쪽으로 marginM만큼 이동: 새 직선의 점 = p1 + normal * marginM
+    const ox = p1.x + nx * marginM
+    const oy = p1.y + ny * marginM
+    // 직선 방정식: (p2-p1) 방향 벡터와의 외적 = 0  →  dy*x - dx*y = dy*ox - dx*oy
+    lines.push({ a: dy, b: -dx, c: dy * ox - dx * oy })
+  }
+
+  if (lines.length < 3) return polygon
+
+  // 인접한 두 직선의 교점 계산
+  const result: Point[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const l1 = lines[i]
+    const l2 = lines[(i + 1) % lines.length]
+    const det = l1.a * l2.b - l2.a * l1.b
+    if (Math.abs(det) < 1e-9) continue  // 평행선: 스킵
+    result.push({
+      x: (l1.c * l2.b - l2.c * l1.b) / det,
+      y: (l1.a * l2.c - l2.a * l1.c) / det,
+    })
+  }
+
+  if (result.length < 3) return polygon
+
+  // 축소된 폴리곤이 원본보다 커지지 않았는지 확인 (음수 마진 방지)
+  const newArea = polygonAreaM2(result)
+  const origArea = polygonAreaM2(polygon)
+  if (newArea >= origArea) return polygon
+
+  return result
 }
 
 /**
@@ -214,9 +256,70 @@ export function rotatePanelCorners(
 // ── 핵심 배치 함수 ─────────────────────────────────────────────────
 
 /**
+ * 주어진 그리드 각도로 패널 배치 시도 (내부 헬퍼)
+ * @param gridAngle 그리드 회전 각도 (°) — 폴리곤을 이 각도로 정렬 후 수평 격자 배치
+ */
+function placeGridAtAngle(
+  safeZonePolygon: Polygon,
+  panelSpec: PanelSpec,
+  rowSpacing: number,
+  tiltAngle: number,
+  panelOrientation: 'portrait' | 'landscape',
+  excludeZones: Polygon[],
+  gridAngle: number,
+): PanelPlacement[] {
+  const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
+  const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
+  const projLen = effNS * Math.cos(tiltAngle * DEG2RAD)
+  const rowPitch = projLen + rowSpacing
+  const colPitch = effEW + 0.02
+
+  const centroid = polygonCentroid(safeZonePolygon)
+  const rotatedPoly = safeZonePolygon.map(p => rotatePoint(p, centroid.x, centroid.y, -gridAngle))
+
+  const xs = rotatedPoly.map(p => p.x)
+  const ys = rotatedPoly.map(p => p.y)
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+
+  const placements: PanelPlacement[] = []
+  let id = 0
+  let row = 0
+
+  for (let y = minY; y + projLen <= maxY; y += rowPitch, row++) {
+    let col = 0
+    for (let x = minX; x + effEW <= maxX; x += colPitch, col++) {
+      const rotatedCorners: [Point, Point, Point, Point] = [
+        { x,            y },
+        { x: x + effEW, y },
+        { x: x + effEW, y: y + projLen },
+        { x,            y: y + projLen },
+      ]
+      if (!isPanelInsidePolygon(rotatedCorners, rotatedPoly)) continue
+
+      const actualCorners = rotatedCorners.map(
+        p => rotatePoint(p, centroid.x, centroid.y, gridAngle)
+      ) as [Point, Point, Point, Point]
+
+      const center = rotatePoint(
+        { x: x + effEW / 2, y: y + projLen / 2 },
+        centroid.x, centroid.y, gridAngle
+      )
+
+      if (excludeZones.some(zone => isPointInPolygon(center, zone))) continue
+
+      placements.push({ id: id++, corners: actualCorners, centerX: center.x, centerY: center.y, row, col })
+    }
+  }
+  return placements
+}
+
+/**
  * Safe Zone 폴리곤 내부에 패널을 격자 배치
- * v5.2: 방위각 회전 그리드 지원
- * - 방위각 offset만큼 폴리곤을 반대로 회전 → 정방향 그리드 배치 → 다시 회전
+ * v5.3: 폴리곤 형태에 최적화된 그리드 각도 자동 탐색 (0°~175°, 5° 단위)
+ * 기울어진·불규칙 폴리곤에서 최대 패널 수를 배치하는 각도를 자동 선택
  */
 export function generateLayout(params: {
   safeZonePolygon: Polygon
@@ -242,74 +345,24 @@ export function generateLayout(params: {
     panelOrientation = 'portrait',
   } = params
 
-  // 가로형: N-S = widthM(짧은 변), E-W = lengthM(긴 변)
-  const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
-  const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
-
-  const offset = azimuthDeg - 180
-
-  const centroid = polygonCentroid(safeZonePolygon)
-  const rotatedPoly = safeZonePolygon.map(p => rotatePoint(p, centroid.x, centroid.y, -offset))
-
-  const xs = rotatedPoly.map(p => p.x)
-  const ys = rotatedPoly.map(p => p.y)
-  const minX = Math.min(...xs)
-  const maxX = Math.max(...xs)
-  const minY = Math.min(...ys)
-  const maxY = Math.max(...ys)
-
-  const projLen = effNS * Math.cos(tiltAngle * DEG2RAD)
-  const rowPitch = projLen + rowSpacing
-  const colPitch = effEW + 0.02
-
-  const placements: PanelPlacement[] = []
-  let id = 0
-  let row = 0
-
-  for (let y = minY; y + projLen <= maxY; y += rowPitch, row++) {
-    let col = 0
-    for (let x = minX; x + effEW <= maxX; x += colPitch, col++) {
-      const rotatedCorners: [Point, Point, Point, Point] = [
-        { x,           y },
-        { x: x + effEW, y },
-        { x: x + effEW, y: y + projLen },
-        { x,            y: y + projLen },
-      ]
-
-      if (!isPanelInsidePolygon(rotatedCorners, rotatedPoly)) continue
-
-      const actualCorners = rotatedCorners.map(
-        p => rotatePoint(p, centroid.x, centroid.y, offset)
-      ) as [Point, Point, Point, Point]
-
-      const centerX = rotatePoint(
-        { x: x + effEW / 2, y: y + projLen / 2 },
-        centroid.x, centroid.y, offset
-      ).x
-      const centerY = rotatePoint(
-        { x: x + effEW / 2, y: y + projLen / 2 },
-        centroid.x, centroid.y, offset
-      ).y
-
-      const centerPt = { x: centerX, y: centerY }
-      if (excludeZones.some(zone => isPointInPolygon(centerPt, zone))) continue
-
-      placements.push({
-        id: id++,
-        corners: actualCorners,
-        centerX,
-        centerY,
-        row,
-        col,
-      })
-    }
+  // 0°~175° 범위에서 5° 단위로 탐색하여 가장 많은 패널이 배치되는 그리드 각도 선택
+  // 방위각 오프셋(azimuthDeg-180)을 기준으로 탐색
+  const azBase = azimuthDeg - 180
+  let bestPlacements: PanelPlacement[] = []
+  for (let sweep = 0; sweep < 180; sweep += 5) {
+    const candidate = placeGridAtAngle(
+      safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
+      panelOrientation, excludeZones, azBase + sweep,
+    )
+    if (candidate.length > bestPlacements.length) bestPlacements = candidate
   }
+
+  const placements = bestPlacements
 
   const safeAreaM2 = polygonAreaM2(safeZonePolygon)
   const panelAreaM2 = placements.length * panelSpec.lengthM * panelSpec.widthM
   const totalKwp = (placements.length * panelSpec.wattNominal) / 1000
 
-  // 이론 최대 패널 수 (간격 없이 채울 때)
   const panelFootprint = panelSpec.lengthM * panelSpec.widthM
   const theoreticalMax = panelFootprint > 0 ? Math.floor(safeAreaM2 / panelFootprint) : 0
   const utilizationRate = theoreticalMax > 0 ? placements.length / theoreticalMax : 0
