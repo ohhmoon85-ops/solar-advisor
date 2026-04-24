@@ -1,4 +1,4 @@
-// lib/layoutEditor.ts — 배치 편집 상태 관리 (v5.2)
+﻿// lib/layoutEditor.ts — 배치 편집 상태 관리 (v5.2)
 // SolarLayoutCanvas 위에서 동작하는 인터랙티브 편집 상태/로직
 
 import type { PanelPlacement } from './layoutEngine'
@@ -54,6 +54,8 @@ export type EditorAction =
   | { type: 'UNDO' }
   | { type: 'RESET' }
   | { type: 'APPLY_QUICK'; preset: 'dense' | 'standard' | 'corridors' | 'stack3'; baseSpacing: number }
+  | { type: 'SELECT_ROWS'; rowIndices: number[]; additive?: boolean }
+  | { type: 'SPREAD_ROWS'; deltaM: number; rowIndices?: number[] }
 
 // ── 초기화 ─────────────────────────────────────────────────────────
 
@@ -164,6 +166,16 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case 'SELECT_RECT':
       return { ...state, selectedIds: new Set(action.ids) }
 
+    case 'SELECT_ROWS': {
+      const ids = state.placements
+        .filter(p => action.rowIndices.includes(p.row))
+        .map(p => p.id)
+      const newSelected = action.additive
+        ? new Set([...state.selectedIds, ...ids])
+        : new Set(ids)
+      return { ...state, selectedIds: newSelected }
+    }
+
     case 'ADD_CORRIDOR': {
       const saved = pushHistory(state)
       const corridor: Corridor = { ...action.corridor, id: nextCorridorId() }
@@ -250,6 +262,34 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...saved, placements, isDirty: true }
     }
 
+    case 'SPREAD_ROWS': {
+      const allRowIds = new Set(state.placements.map(p => p.row))
+      const targetRows = action.rowIndices?.filter(r => allRowIds.has(r)) ?? [...allRowIds]
+      if (targetRows.length < 2) return state
+      const saved = pushHistory(state)
+      const rowPanelMap = new Map<number, typeof saved.placements>()
+      for (const p of saved.placements) {
+        if (!rowPanelMap.has(p.row)) rowPanelMap.set(p.row, [])
+        rowPanelMap.get(p.row)!.push(p)
+      }
+      const avgY = (r: number) => {
+        const ps = rowPanelMap.get(r)!
+        return ps.reduce((s, p) => s + p.centerY, 0) / ps.length
+      }
+      const sortedRows = targetRows.slice().sort((a, b) => avgY(a) - avgY(b))
+      const dyMap = new Map<number, number>()
+      sortedRows.forEach((r, i) => dyMap.set(r, action.deltaM * i))
+      const placements = saved.placements.map(p => {
+        const dy = dyMap.get(p.row)
+        if (dy === undefined) return p
+        return {
+          ...p,
+          centerY: p.centerY + dy,
+          corners: p.corners.map(c => ({ x: c.x, y: c.y + dy })) as typeof p.corners,
+        }
+      })
+      return { ...saved, placements, isDirty: true }
+    }
     case 'UNDO': {
       if (state.editHistory.length === 0) return state
       const history = [...state.editHistory]

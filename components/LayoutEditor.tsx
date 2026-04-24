@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 // components/LayoutEditor.tsx — 인터랙티브 패널 배치 편집기 (v5.2)
 // SolarLayoutCanvas 위에 올라가는 편집 레이어
@@ -128,6 +128,7 @@ export default function LayoutEditor({
   const [tool, setTool] = useState<Tool>('select')
   const [stackTarget, setStackTarget] = useState<1 | 2 | 3>(1)
   const [spacingInput, setSpacingInput] = useState('')
+  const [rowSelectMode, setRowSelectMode] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
 
@@ -278,10 +279,19 @@ export default function LayoutEditor({
       addPanelAt({ x: wx0, y: wy0 })
     } else if (dist >= 4 && tool === 'select' && dragRectRef.current) {
       // ref에서 최신 dragRect 읽기 (stale closure 방지)
-      const ids = state.placements
-        .filter(p => panelInRect(p, dragRectRef.current!))
-        .map(p => p.id)
-      dispatch({ type: 'SELECT_RECT', ids })
+      if (rowSelectMode) {
+        const rowIndices = [...new Set(
+          state.placements
+            .filter(p => panelInRect(p, dragRectRef.current!))
+            .map(p => p.row)
+        )]
+        dispatch({ type: 'SELECT_ROWS', rowIndices, additive: e.shiftKey || e.ctrlKey || e.metaKey })
+      } else {
+        const ids = state.placements
+          .filter(p => panelInRect(p, dragRectRef.current!))
+          .map(p => p.id)
+        dispatch({ type: 'SELECT_RECT', ids })
+      }
     }
 
     dragStart.current = null
@@ -564,18 +574,38 @@ export default function LayoutEditor({
           </div>
         )}
 
+        {tool === 'select' && (
+          <button
+            onClick={() => setRowSelectMode(v => !v)}
+            className={[
+              'px-2.5 py-1 rounded text-xs font-medium transition-colors',
+              rowSelectMode ? 'bg-sky-500 text-white ring-1 ring-sky-300' : 'bg-slate-700 text-slate-400 hover:bg-slate-600',
+            ].join(' ')}
+            title="행 단위 드래그 선택: 드래그 시 걸친 행 전체를 선택"
+          >
+            ≡ 행선택
+          </button>
+        )}
+
         {tool === 'spacing' && (
-          <label className="flex items-center gap-1 text-xs text-slate-300">
-            이격(m)
-            <input
-              type="number"
-              className="w-16 bg-slate-700 border border-slate-600 rounded px-1.5 py-0.5 text-white text-xs"
-              value={spacingInput}
-              onChange={e => setSpacingInput(e.target.value)}
-              placeholder="자동"
-              min="0" step="0.1"
-            />
-          </label>
+          <div className="flex items-center gap-1 text-xs text-slate-300">
+            <span className="text-slate-400">이격 조정</span>
+            {([-0.3, -0.1, 0.1, 0.3] as const).map(d => (
+              <button
+                key={d}
+                onClick={() => {
+                  const rowIndices = state.selectedIds.size > 0
+                    ? [...new Set(state.placements.filter(p => state.selectedIds.has(p.id)).map(p => p.row))]
+                    : undefined
+                  dispatch({ type: 'SPREAD_ROWS', deltaM: d, rowIndices })
+                }}
+                className="px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-green-300 hover:bg-green-900/50"
+              >
+                {d > 0 ? `+${d}m` : `${d}m`}
+              </button>
+            ))}
+            <span className="text-[10px] text-slate-500">선택행/전체</span>
+          </div>
         )}
 
         <div className="flex-1" />
@@ -678,7 +708,7 @@ export default function LayoutEditor({
             {/* 툴 힌트 오버레이 */}
             {tool === 'select' && (
               <text x="8" y="16" fontSize="10" fill="#94a3b8">
-                클릭: 단일선택 | Ctrl+클릭: 복수선택 | 드래그: 범위선택 | 더블클릭: 행 전체선택 | [ ]: 회전 | 화살표: 이동
+                클릭: 단일선택 | Ctrl+클릭: 복수선택 | 드래그: {rowSelectMode ? '행 전체 선택' : '범위선택'} | 더블클릭: 행 선택 | [ ]: 회전 | ↑↓: 이격
               </text>
             )}
             {tool === 'add' && (
@@ -693,7 +723,7 @@ export default function LayoutEditor({
             )}
             {tool === 'spacing' && (
               <text x="8" y="16" fontSize="10" fill="#86efac">
-                패널 클릭: 해당 행 이격거리 수동 설정
+                버튼으로 선택 행(또는 전체 행) 간격 ±0.1/0.3m 조정 | 먼저 행을 선택하면 선택 행에만 적용
               </text>
             )}
           </svg>
@@ -724,6 +754,27 @@ export default function LayoutEditor({
                   >
                     +90°
                   </button>
+                </div>
+              </div>
+
+              {/* 이격 조정 */}
+              <div className="bg-slate-800/95 border border-slate-600 rounded px-2 py-1.5">
+                <div className="text-[10px] text-slate-400 mb-1">이격 ↕ (선택 행 기준)</div>
+                <div className="flex gap-1">
+                  {([-0.3, -0.1, 0.1, 0.3] as const).map(d => (
+                    <button key={d}
+                      onClick={() => {
+                        const rowIndices = [...new Set(
+                          state.placements.filter(p => state.selectedIds.has(p.id)).map(p => p.row)
+                        )]
+                        dispatch({ type: 'SPREAD_ROWS', deltaM: d, rowIndices })
+                      }}
+                      className="flex-1 py-0.5 rounded text-xs bg-slate-700 text-green-300 hover:bg-green-900/50 font-mono"
+                    >
+                      {d > 0 ? `+${d}` : `${d}`}
+                    </button>
+                  ))}
+                  <span className="text-[10px] text-slate-500 self-center">m</span>
                 </div>
               </div>
 
