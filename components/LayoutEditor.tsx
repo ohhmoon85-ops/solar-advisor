@@ -195,6 +195,18 @@ export default function LayoutEditor({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // ── 드래그 중 SVG 밖에서 마우스 버튼을 놓았을 때 정리 ────────────
+  useEffect(() => {
+    function onWindowMouseUp() {
+      if (!dragStart.current) return
+      dragStart.current = null
+      dragRectRef.current = null
+      setDragRect(null)
+    }
+    window.addEventListener('mouseup', onWindowMouseUp)
+    return () => window.removeEventListener('mouseup', onWindowMouseUp)
+  }, [])
+
   // ── SVG 마우스 이벤트 ─────────────────────────────────────────────
 
   const getSvgCoord = useCallback((e: React.MouseEvent): { sx: number; sy: number } => {
@@ -261,11 +273,10 @@ export default function LayoutEditor({
     if (!dragStart.current || tool !== 'select') return
     const { sx, sy } = getSvgCoord(e)
     const worldPt = fromSvg(sx, sy, vb, SVG_W, SVG_H)
-    setDragRect(r => {
-      const next = r ? { ...r, x2: worldPt.x, y2: worldPt.y } : null
-      dragRectRef.current = next
-      return next
-    })
+    const prev = dragRectRef.current
+    const next = prev ? { ...prev, x2: worldPt.x, y2: worldPt.y } : null
+    dragRectRef.current = next
+    setDragRect(next)
   }, [tool, getSvgCoord, vb, SVG_W, SVG_H])
 
   const handleSvgMouseUp = useCallback((e: React.MouseEvent) => {
@@ -277,7 +288,7 @@ export default function LayoutEditor({
     if (tool === 'add' && dist < 6) {
       // 클릭 위치(mouseDown 기준)에 패널 추가 — mouseDown/Up은 stopPropagation 영향 없음
       addPanelAt({ x: wx0, y: wy0 })
-    } else if (dist >= 4 && tool === 'select' && dragRectRef.current) {
+    } else if (dist >= 3 && tool === 'select' && dragRectRef.current) {
       // ref에서 최신 dragRect 읽기 (stale closure 방지)
       if (rowSelectMode) {
         const rowIndices = [...new Set(
@@ -297,7 +308,7 @@ export default function LayoutEditor({
     dragStart.current = null
     dragRectRef.current = null
     setDragRect(null)
-  }, [tool, getSvgCoord, state.placements, addPanelAt])
+  }, [tool, getSvgCoord, state.placements, addPanelAt, rowSelectMode])
 
   // ── 행 전체 선택 헬퍼 ────────────────────────────────────────────
 
