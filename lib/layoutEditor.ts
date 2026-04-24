@@ -242,10 +242,43 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     }
 
     case 'SET_ROW_STACK': {
+      const rowCfg = getRowConfigOrDefault(state, action.rowIndex)
+      const currentStack = rowCfg.stackCount || 1
+      if (currentStack === action.stackCount) return state
       const saved = pushHistory(state)
-      const rowCfg = getRowConfigOrDefault(saved, action.rowIndex)
+      const rowPanels = saved.placements.filter(p => p.row === action.rowIndex)
+      if (rowPanels.length === 0) {
+        return upsertRowConfig({ ...saved, isDirty: true }, { ...rowCfg, stackCount: action.stackCount })
+      }
+      // 기준 패널: Y 오름차순(남→북) 정렬 후 1/currentStack 만큼이 원본 1단
+      const basePanelCount = Math.max(1, Math.round(rowPanels.length / currentStack))
+      const sortedByY = [...rowPanels].sort((a, b) => a.centerY - b.centerY)
+      const basePanels = sortedByY.slice(0, basePanelCount)
+      // 남쪽 방향 이동 벡터: corners[0](SW) - corners[3](NW)
+      const ref = basePanels[0]
+      const svx = ref.corners[0].x - ref.corners[3].x
+      const svy = ref.corners[0].y - ref.corners[3].y
+      const svLen = Math.sqrt(svx * svx + svy * svy)
+      const GAP = 0.05
+      const sx = svLen >= 0.01 ? svx * (1 + GAP / svLen) : 0
+      const sy = svLen >= 0.01 ? svy * (1 + GAP / svLen) : 0
+      // 해당 행 패널 전체 제거 후 재구성
+      let newPlacements = saved.placements.filter(p => p.row !== action.rowIndex)
+      newPlacements = [...newPlacements, ...basePanels]
+      let nextId = saved.placements.length > 0
+        ? Math.max(...saved.placements.map(p => p.id)) + 1 : 0
+      for (let k = 1; k < action.stackCount; k++) {
+        for (const p of basePanels) {
+          newPlacements.push({
+            id: nextId++, row: p.row, col: p.col,
+            centerX: p.centerX + sx * k,
+            centerY: p.centerY + sy * k,
+            corners: p.corners.map(c => ({ x: c.x + sx * k, y: c.y + sy * k })) as typeof p.corners,
+          })
+        }
+      }
       return upsertRowConfig(
-        { ...saved, isDirty: true },
+        { ...saved, placements: newPlacements, isDirty: true },
         { ...rowCfg, stackCount: action.stackCount }
       )
     }
