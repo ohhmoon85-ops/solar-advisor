@@ -19,6 +19,8 @@ export interface RowSpacingParams {
    *  실증: 최대 ±35° 편차까지 실용적 (Case 3)
    */
   azimuthDeg?: number
+  /** 패널 방향 — landscape 시 N-S 치수로 widthM 사용 */
+  panelOrientation?: 'portrait' | 'landscape'
 }
 
 export interface OptimizationResult {
@@ -63,13 +65,15 @@ export function getSolarElevation(latitude: number, declination: number = -23.45
  * @returns 이격 거리 D (m), 소수점 3자리
  */
 export function getRowSpacing(params: RowSpacingParams): number {
-  const { panelSpec, tiltAngle, latitude, declination = -23.45, azimuthDeg } = params
+  const { panelSpec, tiltAngle, latitude, declination = -23.45, azimuthDeg, panelOrientation = 'portrait' } = params
   const beta = getSolarElevation(latitude, declination) * DEG2RAD   // 태양 고도각 (rad)
   const alpha = tiltAngle * DEG2RAD                                   // 경사각 (rad)
 
+  // 가로형(landscape): 패널의 N-S 방향 치수 = widthM (짧은 변)
+  const nsLength = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
   // 방위각 보정: 정남향(180°) 편차에 따라 유효 길이 감소
   const azOffset = azimuthDeg !== undefined ? Math.abs(azimuthDeg - 180) : 0
-  const L = panelSpec.lengthM * Math.cos(azOffset * DEG2RAD)
+  const L = nsLength * Math.cos(azOffset * DEG2RAD)
 
   const sinBeta = Math.sin(beta)
   // 엣지 케이스: 태양 고도각이 0에 가까우면 (극지방 등) 매우 큰 값 반환
@@ -147,7 +151,7 @@ export function optimizeTiltAngle(params: {
   for (let tilt = tiltMin; tilt <= tiltMax; tilt++) {
     const spacing = isRoof
       ? ROOF_ROW_SPACING
-      : getRowSpacing({ panelSpec, tiltAngle: tilt, latitude, azimuthDeg })
+      : getRowSpacing({ panelSpec, tiltAngle: tilt, latitude, azimuthDeg, panelOrientation })
     const projLen = effNS * Math.cos(tilt * DEG2RAD)
     const rowPitch = projLen + spacing
     const colPitch = effEW + 0.02

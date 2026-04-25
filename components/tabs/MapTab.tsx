@@ -323,6 +323,8 @@ export default function MapTab() {
   const [svgAzimuthDeg, setSvgAzimuthDeg] = useState(180)
   const [svgZoneMode, setSvgZoneMode] = useState<'single' | 'multi'>('single')
   const [svgPanelOrientation, setSvgPanelOrientation] = useState<'portrait' | 'landscape'>('portrait')
+  // 분석 실행마다 증가 → LayoutEditor key로 사용해 이전 편집 상태 완전 초기화
+  const [analysisKey, setAnalysisKey] = useState(0)
 
   // 이론 이격 거리 — 현장 위도 기반 (hardcode 37.5665° → 동적 위도)
   const tiltRad = (tiltAngle * Math.PI) / 180
@@ -636,10 +638,7 @@ export default function MapTab() {
       const effectiveArea = Math.max(0, parcel.areaSqm - perimeterPx * scale * marginM)
       const footprintPerPanel = panelW * (panelH * Math.cos(ltr) * rowStack + spacingValue)
       const coverageRatio = isBuilding ? 0.70 : 0.85
-      const cnt = parcel.areaSqm > 10
-        ? Math.floor(effectiveArea * slopeFactor * coverageRatio / footprintPerPanel)
-        : rects.length
-      totalCount += cnt
+      totalCount += rects.length
     }
     setPanelRects(totalPanelRects)
     setPanelCount(totalCount)
@@ -1639,6 +1638,7 @@ export default function MapTab() {
                       setSvgAnalysisResult(mzResult)
                       setLastFullAnalysisJson(JSON.stringify(mzResult))
                       setIsEditing(false)
+                      setAnalysisKey(k => k + 1)
                     } else {
                       const polygon = allPolygons[0]
                       if (svgZoneMode === 'multi') {
@@ -1646,6 +1646,7 @@ export default function MapTab() {
                         setSvgAnalysisResult(mzResult)
                         setLastFullAnalysisJson(JSON.stringify(mzResult))
                         setIsEditing(false)
+                        setAnalysisKey(k => k + 1)
                       } else {
                         const faResult = runFullAnalysis({
                           cadastrePolygon: polygon,
@@ -1658,6 +1659,7 @@ export default function MapTab() {
                         setSvgAnalysisResult(faResult)
                         setLastFullAnalysisJson(JSON.stringify(faResult))
                         setIsEditing(true)
+                        setAnalysisKey(k => k + 1)
                       }
                     }
                     setShowSvgCanvas(true)
@@ -1703,6 +1705,7 @@ export default function MapTab() {
                 {/* 편집 모드 */}
                 {isEditing && !isMultiZoneResult(svgAnalysisResult) ? (
                   <LayoutEditor
+                    key={analysisKey}
                     result={svgAnalysisResult as FullAnalysisResult}
                     width={920}
                     height={520}

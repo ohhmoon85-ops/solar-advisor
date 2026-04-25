@@ -143,6 +143,7 @@ export default function LayoutEditor({
   // ref로 최신 dragRect 추적 (stale closure 방지)
   const dragRectRef = useRef<typeof dragRect>(null)
   const dragStart = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null)
+  const didDragSelectRef = useRef(false)
 
   // ── ViewBox ────────────────────────────────────────────────────────
   const SVG_H = height - 90  // 하단 패널 공간
@@ -274,7 +275,13 @@ export default function LayoutEditor({
   // panel onClick의 stopPropagation() 덕분에 패널 클릭 시엔 발화 안 함
   const handleSvgClick = useCallback((e: React.MouseEvent) => {
     if (e.target !== e.currentTarget) return
-    if (tool === 'select') dispatch({ type: 'DESELECT_ALL' })
+    if (tool === 'select') {
+      if (didDragSelectRef.current) {
+        didDragSelectRef.current = false
+        return
+      }
+      dispatch({ type: 'DESELECT_ALL' })
+    }
   }, [tool])
 
   const handleSvgMouseMove = useCallback((e: React.MouseEvent) => {
@@ -298,6 +305,7 @@ export default function LayoutEditor({
       addPanelAt({ x: wx0, y: wy0 })
     } else if (dist >= 3 && tool === 'select' && dragRectRef.current) {
       // ref에서 최신 dragRect 읽기 (stale closure 방지)
+      didDragSelectRef.current = true
       if (rowSelectMode) {
         const rowIndices = [...new Set(
           state.placements
@@ -579,13 +587,27 @@ export default function LayoutEditor({
             {([1, 2, 3] as const).map(n => (
               <button
                 key={n}
-                onClick={() => setStackTarget(n)}
+                onClick={() => {
+                  setStackTarget(n)
+                  // 선택된 패널이 있으면 해당 행에 즉시 단수 적용
+                  if (state.selectedIds.size > 0) {
+                    const rowIndices = [...new Set(
+                      state.placements
+                        .filter(p => state.selectedIds.has(p.id))
+                        .map(p => p.row)
+                    )]
+                    rowIndices.forEach(rowIndex => {
+                      dispatch({ type: 'SET_ROW_STACK', rowIndex, stackCount: n })
+                    })
+                  }
+                }}
                 className={[
                   'w-8 py-1 rounded text-xs font-bold',
                   stackTarget === n
                     ? 'bg-violet-500 text-white'
                     : 'bg-slate-700 text-slate-300 hover:bg-slate-600',
                 ].join(' ')}
+                title={state.selectedIds.size > 0 ? `선택 행을 ${n}단으로 즉시 적용` : `다음 패널 클릭 시 ${n}단 적용`}
               >
                 {n}단
               </button>
