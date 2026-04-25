@@ -10,7 +10,7 @@ import dynamic from 'next/dynamic'
 import { useSolarStore } from '@/store/useStore'
 import { MODULES, GENERATION_HOURS } from '@/lib/constants'
 import { getSolarElevation } from '@/lib/shadowCalculator'
-import { runFullAnalysis, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
+import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
 import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
@@ -1040,6 +1040,66 @@ export default function MapTab() {
     }
   }
 
+  const runSVGAnalysis = useCallback(async (overrides?: {
+    panelOrientation?: 'portrait' | 'landscape'
+    rowStack?: 1 | 2 | 3
+  }) => {
+    if (!apiCoords || parcels.length === 0) return
+    setSvgAnalyzing(true)
+    try {
+      const panelSpec = PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.GS710wp
+      const lat = effectiveLatitude
+      const orientation = overrides?.panelOrientation ?? svgPanelOrientation
+      const stack = overrides?.rowStack ?? rowStack
+      const allPolygons = parcels
+        .map(p => convertGeoRingToLocalPolygon(p.ring, apiCoords.lat, apiCoords.lon))
+        .filter(p => p.length >= 3)
+      if (allPolygons.length === 0) return
+      const commonOpts = {
+        azimuthDeg: svgAzimuthDeg,
+        slopeAngleDeg: 0,
+        slopeAzimuthDeg: 180,
+        isJimokChangePlanned: false,
+        panelOrientation: orientation,
+        rowStack: stack,
+      }
+      const polygon = allPolygons.length > 1
+        ? mergePolygonsToHull(allPolygons)
+        : allPolygons[0]
+      const validPolygons = allPolygons.length > 1
+        ? allPolygons
+            .map(poly => createSafeZone({ cadastrePolygon: poly, plotType: svgPlotType }).safeZonePolygon)
+            .filter(poly => poly.length >= 3)
+        : undefined
+      if (svgZoneMode === 'multi') {
+        const mzResult = runMultiZoneAnalysis(autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat)
+        setSvgAnalysisResult(mzResult)
+        setLastFullAnalysisJson(JSON.stringify(mzResult))
+        setIsEditing(false)
+        setAnalysisKey(k => k + 1)
+      } else {
+        const faResult = runFullAnalysis({
+          cadastrePolygon: polygon,
+          plotType: svgPlotType,
+          panelSpec,
+          panelType: svgPanelType,
+          latitude: lat,
+          validPolygons,
+          ...commonOpts,
+        })
+        setSvgAnalysisResult(faResult)
+        setLastFullAnalysisJson(JSON.stringify(faResult))
+        setIsEditing(true)
+        setAnalysisKey(k => k + 1)
+      }
+      setShowSvgCanvas(true)
+    } catch (err) {
+      console.error('SVG 분석 오류:', err)
+    } finally {
+      setSvgAnalyzing(false)
+    }
+  }, [apiCoords, parcels, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude])
+
   const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
   const step5Done = panelCount > 0
@@ -1282,7 +1342,7 @@ export default function MapTab() {
               <label className="text-xs text-gray-500 font-medium">배열 방법 (단수)</label>
               <div className="flex gap-1.5 mt-1">
                 {([1, 2, 3] as const).map(n => (
-                  <button key={n} onClick={() => setRowStack(n)}
+                  <button key={n} onClick={() => { setRowStack(n); if (showSvgCanvas) runSVGAnalysis({ rowStack: n }) }}
                     className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors ${
                       rowStack === n ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-300'}`}>
                     {n}단
@@ -1546,7 +1606,7 @@ export default function MapTab() {
                 <label className="text-xs text-gray-500 font-medium block mb-1">패널 방향</label>
                 <div className="flex gap-1.5">
                   {(['portrait', 'landscape'] as const).map(ori => (
-                    <button key={ori} onClick={() => setSvgPanelOrientation(ori)}
+                    <button key={ori} onClick={() => { setSvgPanelOrientation(ori); if (showSvgCanvas) runSVGAnalysis({ panelOrientation: ori }) }}
                       className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                         svgPanelOrientation === ori
                           ? 'bg-indigo-500 text-white border-indigo-500'
@@ -1602,62 +1662,7 @@ export default function MapTab() {
             {/* 실행 버튼 */}
             <div className="flex gap-2">
               <button
-                onClick={async () => {
-                  if (!apiCoords || parcels.length === 0) return
-                  setSvgAnalyzing(true)
-                  try {
-                    const panelSpec = PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.GS710wp
-                    const lat = effectiveLatitude
-
-                    // 모든 필지 → 로컬 좌표계 변환 (Item 13: 복수 필지 버그 수정)
-                    const allPolygons = parcels
-                      .map(p => convertGeoRingToLocalPolygon(p.ring, apiCoords.lat, apiCoords.lon))
-                      .filter(p => p.length >= 3)
-
-                    if (allPolygons.length === 0) return
-
-                    const commonOpts = {
-                      azimuthDeg: svgAzimuthDeg,
-                      slopeAngleDeg: 0,
-                      slopeAzimuthDeg: 180,
-                      isJimokChangePlanned: false,
-                      panelOrientation: svgPanelOrientation,
-                      rowStack,
-                    }
-
-                    // 복수 필지를 볼록 껍질로 합병 → 마진 1회만 적용 (Bug 7)
-                    // 인접 필지 공유 경계의 중복 마진(2m×2)을 제거해 배치 면적 최대화
-                    const polygon = allPolygons.length > 1
-                      ? mergePolygonsToHull(allPolygons)
-                      : allPolygons[0]
-
-                    if (svgZoneMode === 'multi') {
-                      const mzResult = runMultiZoneAnalysis(autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat)
-                      setSvgAnalysisResult(mzResult)
-                      setLastFullAnalysisJson(JSON.stringify(mzResult))
-                      setIsEditing(false)
-                      setAnalysisKey(k => k + 1)
-                    } else {
-                      const faResult = runFullAnalysis({
-                        cadastrePolygon: polygon,
-                        plotType: svgPlotType,
-                        panelSpec,
-                        panelType: svgPanelType,
-                        latitude: lat,
-                        ...commonOpts,
-                      })
-                      setSvgAnalysisResult(faResult)
-                      setLastFullAnalysisJson(JSON.stringify(faResult))
-                      setIsEditing(true)
-                      setAnalysisKey(k => k + 1)
-                    }
-                    setShowSvgCanvas(true)
-                  } catch (err) {
-                    console.error('SVG 분석 오류:', err)
-                  } finally {
-                    setSvgAnalyzing(false)
-                  }
-                }}
+                onClick={() => runSVGAnalysis()}
                 disabled={svgAnalyzing}
                 className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors">
                 {svgAnalyzing ? '분석 중...' : '정밀 분석 실행'}

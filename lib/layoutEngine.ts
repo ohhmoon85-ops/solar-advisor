@@ -271,6 +271,7 @@ function placeGridAtAngle(
   excludeZones: Polygon[],
   gridAngle: number,
   rowStack: number = 1,
+  validPolygons?: Polygon[],
 ): PanelPlacement[] {
   const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
   const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
@@ -285,6 +286,9 @@ function placeGridAtAngle(
 
   const centroid = polygonCentroid(safeZonePolygon)
   const rotatedPoly = safeZonePolygon.map(p => rotatePoint(p, centroid.x, centroid.y, -gridAngle))
+  const rotatedValidPolys = validPolygons?.map(poly =>
+    poly.map(p => rotatePoint(p, centroid.x, centroid.y, -gridAngle))
+  )
 
   const xs = rotatedPoly.map(p => p.x)
   const ys = rotatedPoly.map(p => p.y)
@@ -309,7 +313,11 @@ function placeGridAtAngle(
           { x: x + effEW, y: y + projLen },
           { x,            y: y + projLen },
         ]
-        if (!isPanelInsidePolygon(rotatedCorners, rotatedPoly)) continue
+        const centerRotated = { x: x + effEW / 2, y: y + projLen / 2 }
+        const passes = rotatedValidPolys
+          ? rotatedValidPolys.some(poly => isPointInPolygon(centerRotated, poly))
+          : isPointInPolygon(centerRotated, rotatedPoly)
+        if (!passes) continue
 
         const actualCorners = rotatedCorners.map(
           p => rotatePoint(p, centroid.x, centroid.y, gridAngle)
@@ -349,6 +357,8 @@ export function generateLayout(params: {
   panelOrientation?: 'portrait' | 'landscape'
   /** 단수 (1~3) — 음영 이격 간격 없이 묶는 행 수, 기본 1 */
   rowStack?: number
+  /** 복수 필지 PIP용: 중심점이 이 중 하나 이상 안에 있어야 배치 */
+  validPolygons?: Polygon[]
 }): LayoutResult {
   const {
     safeZonePolygon,
@@ -359,6 +369,7 @@ export function generateLayout(params: {
     excludeZones = [],
     panelOrientation = 'portrait',
     rowStack = 1,
+    validPolygons,
   } = params
 
   // 0°~175° 범위에서 5° 단위로 탐색하여 가장 많은 패널이 배치되는 그리드 각도 선택
@@ -468,6 +479,8 @@ export function runFullAnalysis(params: {
   panelOrientation?: 'portrait' | 'landscape'
   /** 단수 (1~3) — 기본 1 */
   rowStack?: number
+  /** 복수 필지 PIP용 유효 폴리곤 목록 */
+  validPolygons?: Polygon[]
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -482,6 +495,7 @@ export function runFullAnalysis(params: {
     isJimokChangePlanned,
     panelOrientation = 'portrait',
     rowStack = 1,
+    validPolygons,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
