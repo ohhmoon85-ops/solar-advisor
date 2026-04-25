@@ -258,6 +258,7 @@ export function rotatePanelCorners(
 /**
  * 주어진 그리드 각도로 패널 배치 시도 (내부 헬퍼)
  * @param gridAngle 그리드 회전 각도 (°) — 폴리곤을 이 각도로 정렬 후 수평 격자 배치
+ * @param rowStack 단수 (1단/2단/3단) — 그룹 내 행 수. 그룹 내 행 간격 2cm, 그룹 간격 = rowSpacing
  */
 function placeGridAtAngle(
   safeZonePolygon: Polygon,
@@ -267,12 +268,18 @@ function placeGridAtAngle(
   panelOrientation: 'portrait' | 'landscape',
   excludeZones: Polygon[],
   gridAngle: number,
+  rowStack: number = 1,
 ): PanelPlacement[] {
   const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
   const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
   const projLen = effNS * Math.cos(tiltAngle * DEG2RAD)
-  const rowPitch = projLen + rowSpacing
   const colPitch = effEW + 0.02
+  const stack = Math.max(1, Math.round(rowStack))
+  const intraGap = 0.02  // 단 내 행간 간격 (2cm)
+  // 단 높이: stack개의 패널 + (stack-1)개의 intraGap
+  const groupHeight = stack * projLen + (stack - 1) * intraGap
+  // 단 간격: 단 시작점 기준 = 단 높이 + 음영 이격거리
+  const groupPitch = groupHeight + rowSpacing
 
   const centroid = polygonCentroid(safeZonePolygon)
   const rotatedPoly = safeZonePolygon.map(p => rotatePoint(p, centroid.x, centroid.y, -gridAngle))
@@ -286,31 +293,35 @@ function placeGridAtAngle(
 
   const placements: PanelPlacement[] = []
   let id = 0
-  let row = 0
+  let groupIdx = 0
 
-  for (let y = minY; y + projLen <= maxY; y += rowPitch, row++) {
-    let col = 0
-    for (let x = minX; x + effEW <= maxX; x += colPitch, col++) {
-      const rotatedCorners: [Point, Point, Point, Point] = [
-        { x,            y },
-        { x: x + effEW, y },
-        { x: x + effEW, y: y + projLen },
-        { x,            y: y + projLen },
-      ]
-      if (!isPanelInsidePolygon(rotatedCorners, rotatedPoly)) continue
+  for (let yGroup = minY; yGroup + groupHeight <= maxY; yGroup += groupPitch, groupIdx++) {
+    for (let si = 0; si < stack; si++) {
+      const y = yGroup + si * (projLen + intraGap)
+      const row = groupIdx * stack + si
+      let col = 0
+      for (let x = minX; x + effEW <= maxX; x += colPitch, col++) {
+        const rotatedCorners: [Point, Point, Point, Point] = [
+          { x,            y },
+          { x: x + effEW, y },
+          { x: x + effEW, y: y + projLen },
+          { x,            y: y + projLen },
+        ]
+        if (!isPanelInsidePolygon(rotatedCorners, rotatedPoly)) continue
 
-      const actualCorners = rotatedCorners.map(
-        p => rotatePoint(p, centroid.x, centroid.y, gridAngle)
-      ) as [Point, Point, Point, Point]
+        const actualCorners = rotatedCorners.map(
+          p => rotatePoint(p, centroid.x, centroid.y, gridAngle)
+        ) as [Point, Point, Point, Point]
 
-      const center = rotatePoint(
-        { x: x + effEW / 2, y: y + projLen / 2 },
-        centroid.x, centroid.y, gridAngle
-      )
+        const center = rotatePoint(
+          { x: x + effEW / 2, y: y + projLen / 2 },
+          centroid.x, centroid.y, gridAngle
+        )
 
-      if (excludeZones.some(zone => isPointInPolygon(center, zone))) continue
+        if (excludeZones.some(zone => isPointInPolygon(center, zone))) continue
 
-      placements.push({ id: id++, corners: actualCorners, centerX: center.x, centerY: center.y, row, col })
+        placements.push({ id: id++, corners: actualCorners, centerX: center.x, centerY: center.y, row, col })
+      }
     }
   }
   return placements
@@ -334,6 +345,8 @@ export function generateLayout(params: {
   utilizationTarget?: number
   /** 패널 방향 — 'landscape': 패널을 90° 눕혀서 widthM을 N-S로 사용 */
   panelOrientation?: 'portrait' | 'landscape'
+  /** 단수 (1~3) — 음영 이격 간격 없이 묶는 행 수, 기본 1 */
+  rowStack?: number
 }): LayoutResult {
   const {
     safeZonePolygon,
@@ -343,6 +356,7 @@ export function generateLayout(params: {
     azimuthDeg = 180,
     excludeZones = [],
     panelOrientation = 'portrait',
+    rowStack = 1,
   } = params
 
   // 0°~175° 범위에서 5° 단위로 탐색하여 가장 많은 패널이 배치되는 그리드 각도 선택
@@ -352,7 +366,7 @@ export function generateLayout(params: {
   for (let sweep = 0; sweep < 180; sweep += 5) {
     const candidate = placeGridAtAngle(
       safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
-      panelOrientation, excludeZones, azBase + sweep,
+      panelOrientation, excludeZones, azBase + sweep, rowStack,
     )
     if (candidate.length > bestPlacements.length) bestPlacements = candidate
   }
@@ -450,6 +464,8 @@ export function runFullAnalysis(params: {
   isJimokChangePlanned?: boolean
   /** 패널 방향 — 기본 'portrait' */
   panelOrientation?: 'portrait' | 'landscape'
+  /** 단수 (1~3) — 기본 1 */
+  rowStack?: number
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -463,6 +479,7 @@ export function runFullAnalysis(params: {
     boundaries,
     isJimokChangePlanned,
     panelOrientation = 'portrait',
+    rowStack = 1,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -501,7 +518,7 @@ export function runFullAnalysis(params: {
     panelOrientation,
   })
 
-  // Step 3: 패널 배치 (방위각 회전 + 방향)
+  // Step 3: 패널 배치 (방위각 회전 + 방향 + 단수)
   const layout = generateLayout({
     safeZonePolygon: safeZone.safeZonePolygon,
     panelSpec,
@@ -510,6 +527,7 @@ export function runFullAnalysis(params: {
     azimuthDeg,
     excludeZones,
     panelOrientation,
+    rowStack,
   })
 
   // Step 4: 실증 크로스체크

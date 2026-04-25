@@ -1622,6 +1622,7 @@ export default function MapTab() {
                       slopeAzimuthDeg: 180,
                       isJimokChangePlanned: false,
                       panelOrientation: svgPanelOrientation,
+                      rowStack,
                     }
 
                     if (allPolygons.length > 1) {

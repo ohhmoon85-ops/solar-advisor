@@ -28,6 +28,8 @@ export interface ZoneConfig {
   isJimokChangePlanned?: boolean
   /** 패널 방향 */
   panelOrientation?: 'portrait' | 'landscape'
+  /** 단수 (1~3) */
+  rowStack?: number
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -171,6 +173,8 @@ export function autoSplitPolygon(
     slopeAngleDeg?: number
     slopeAzimuthDeg?: number
     isJimokChangePlanned?: boolean
+    panelOrientation?: 'portrait' | 'landscape'
+    rowStack?: number
   }
 ): ZoneConfig[] {
   const count = estimateZoneCount(polygon)
@@ -183,6 +187,8 @@ export function autoSplitPolygon(
     slopeAngleDeg: options?.slopeAngleDeg ?? 0,
     slopeAzimuthDeg: options?.slopeAzimuthDeg ?? 180,
     isJimokChangePlanned: options?.isJimokChangePlanned ?? false,
+    panelOrientation: options?.panelOrientation ?? 'portrait',
+    rowStack: options?.rowStack ?? 1,
   }
 
   if (count === 1) {
@@ -224,6 +230,7 @@ export function runMultiZoneAnalysis(
       slopeAzimuthDeg: zone.slopeAzimuthDeg ?? 180,
       isJimokChangePlanned: zone.isJimokChangePlanned ?? false,
       panelOrientation: zone.panelOrientation ?? 'portrait',
+      rowStack: zone.rowStack ?? 1,
     })
     return {
       ...result,

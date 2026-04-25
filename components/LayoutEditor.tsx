@@ -32,14 +32,20 @@ interface ViewBox {
   minX: number; minY: number; rangeX: number; rangeY: number
 }
 
-function buildViewBox(pts: Point[], pad = 0.08): ViewBox {
+function buildViewBox(pts: Point[], svgW: number, svgH: number, pad = 0.08): ViewBox {
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
   const minX = Math.min(...xs), maxX = Math.max(...xs)
   const minY = Math.min(...ys), maxY = Math.max(...ys)
-  const rX = maxX - minX || 1, rY = maxY - minY || 1
+  const dataRangeX = maxX - minX || 1
+  const dataRangeY = maxY - minY || 1
+  const scale = Math.min(svgW / (dataRangeX * (1 + pad * 2)), svgH / (dataRangeY * (1 + pad * 2)))
+  const rangeX = svgW / scale
+  const rangeY = svgH / scale
+  const centerX = (minX + maxX) / 2
+  const centerY = (minY + maxY) / 2
   return {
-    minX: minX - rX * pad, minY: minY - rY * pad,
-    rangeX: rX + rX * pad * 2, rangeY: rY + rY * pad * 2,
+    minX: centerX - rangeX / 2, minY: centerY - rangeY / 2,
+    rangeX, rangeY,
   }
 }
 
@@ -157,7 +163,7 @@ export default function LayoutEditor({
     return pts
   }, [result])
 
-  const vb = useMemo(() => buildViewBox(allPoints), [allPoints])
+  const vb = useMemo(() => buildViewBox(allPoints, SVG_W, SVG_H), [allPoints, SVG_W, SVG_H])
 
   const uniqueRows = useMemo(
     () => getUniqueRows(state.placements),

@@ -32,22 +32,28 @@ interface ViewBox {
   minX: number; minY: number; rangeX: number; rangeY: number
 }
 
-function buildViewBox(points: Point[], paddingPct = 0.08): ViewBox {
+function buildViewBox(points: Point[], svgW: number, svgH: number, paddingPct = 0.08): ViewBox {
   const xs = points.map(p => p.x)
   const ys = points.map(p => p.y)
   const minX = Math.min(...xs)
   const maxX = Math.max(...xs)
   const minY = Math.min(...ys)
   const maxY = Math.max(...ys)
-  const rangeX = maxX - minX || 1
-  const rangeY = maxY - minY || 1
-  const padX = rangeX * paddingPct
-  const padY = rangeY * paddingPct
+  const dataRangeX = maxX - minX || 1
+  const dataRangeY = maxY - minY || 1
+  // Equal aspect ratio: choose scale so both axes fit within SVG with padding
+  const scaleX = svgW / (dataRangeX * (1 + paddingPct * 2))
+  const scaleY = svgH / (dataRangeY * (1 + paddingPct * 2))
+  const scale = Math.min(scaleX, scaleY)
+  const rangeX = svgW / scale
+  const rangeY = svgH / scale
+  const centerX = (minX + maxX) / 2
+  const centerY = (minY + maxY) / 2
   return {
-    minX: minX - padX,
-    minY: minY - padY,
-    rangeX: rangeX + padX * 2,
-    rangeY: rangeY + padY * 2,
+    minX: centerX - rangeX / 2,
+    minY: centerY - rangeY / 2,
+    rangeX,
+    rangeY,
   }
 }
 
@@ -138,25 +144,33 @@ function ZoneLayer({
 
   return (
     <g>
-      {/* 원본 필지 경계 */}
+      {/* Layer 1: 원본 필지 — 파란 테두리 + 붉은 채움 (이격 마진 구역 표시) */}
       {showOriginal && originalPolygon.length > 2 && (
         <polygon
           points={polygonToSvgPoints(originalPolygon, vb, svgW, svgH)}
-          fill="rgba(255,255,255,0.04)"
-          stroke="#94a3b8"
-          strokeWidth="1.5"
-          strokeDasharray="5,3"
+          fill="rgba(211,47,47,0.18)"
+          stroke="#1565C0"
+          strokeWidth="2"
         />
       )}
 
-      {/* Safe Zone */}
+      {/* Layer 2a: Safe Zone 흰색 덮개 — 마진 붉은 영역을 Safe Zone 내부에서 지움 */}
+      {showOriginal && safeZonePolygon.length > 2 && (
+        <polygon
+          points={polygonToSvgPoints(safeZonePolygon, vb, svgW, svgH)}
+          fill="rgba(240,253,244,0.92)"
+          stroke="none"
+        />
+      )}
+
+      {/* Layer 2b: Safe Zone — 초록 점선 테두리 + 연초록 채움 */}
       {safeZonePolygon.length > 2 && (
         <polygon
           points={polygonToSvgPoints(safeZonePolygon, vb, svgW, svgH)}
-          fill={`${panelColor}10`}
-          stroke="#22c55e"
-          strokeWidth="1"
-          strokeDasharray="3,2"
+          fill="rgba(46,125,50,0.08)"
+          stroke="#2E7D32"
+          strokeWidth="1.5"
+          strokeDasharray="8,4"
         />
       )}
 
@@ -245,6 +259,11 @@ export default function SolarLayoutCanvas({
   const validation = !isMulti ? (result as FullAnalysisResult).validation : undefined
   const hasWarning = validation && !validation.isValid
 
+  const LEGEND_H = 80
+  const svgW = width
+  const svgH = height - LEGEND_H
+  const drawH = svgH
+
   // ViewBox: 모든 구역의 좌표 통합
   const allPoints = useMemo<Point[]>(() => {
     const pts: Point[] = []
@@ -255,12 +274,7 @@ export default function SolarLayoutCanvas({
     return pts
   }, [analysisItems])
 
-  const vb = useMemo(() => buildViewBox(allPoints), [allPoints])
-
-  const LEGEND_H = 80
-  const svgW = width
-  const svgH = height - LEGEND_H
-  const drawH = svgH
+  const vb = useMemo(() => buildViewBox(allPoints, svgW, drawH), [allPoints, svgW, drawH])
 
   // ── 줌/팬 핸들러 ─────────────────────────────────────────────────
 
@@ -547,13 +561,13 @@ export default function SolarLayoutCanvas({
       )}
 
       {/* 범례 */}
-      <div className="flex items-center gap-4 px-2 pt-2 pb-1 text-xs text-slate-400 flex-wrap">
+      <div className="flex items-center gap-3 px-2 pt-2 pb-1 text-xs text-slate-400 flex-wrap">
         <span className="flex items-center gap-1">
-          <span className="inline-block w-4 h-0.5 border border-dashed border-slate-400" />
+          <span className="inline-block w-4 h-3 rounded-sm border-2 border-blue-700" style={{ background: 'rgba(211,47,47,0.18)' }} />
           원본 필지
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-4 h-0.5 border border-green-500 border-dashed" />
+          <span className="inline-block w-4 h-3 rounded-sm border border-dashed" style={{ borderColor: '#2E7D32', background: 'rgba(46,125,50,0.15)' }} />
           Safe Zone
         </span>
         {isMulti
