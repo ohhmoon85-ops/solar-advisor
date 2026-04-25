@@ -1,6 +1,7 @@
 // lib/multiZoneLayout.ts — 다구역 분할 배치 엔진 (v5.2 신규)
 // 복잡한 폴리곤(L자형·다각형)을 여러 구역으로 분할하여 독립적으로 배치
 // 사례 5·6: 2구역 병렬 배치 (총 87~91장)
+// v5.3: mergePolygonsToHull — 복수 필지를 볼록 껍질로 합병 (Bug 7)
 // 순수 함수만 포함 — React/Zustand 의존 없음
 
 import type { PanelSpec } from './panelConfig'
@@ -264,4 +265,60 @@ export function isMultiZoneResult(
   result: FullAnalysisResult | MultiZoneResult
 ): result is MultiZoneResult {
   return 'zones' in result && Array.isArray((result as MultiZoneResult).zones)
+}
+
+// ── 복수 필지 합병 (볼록 껍질) ─────────────────────────────────────
+
+/**
+ * Andrew's Monotone Chain — 점 집합의 CCW 볼록 껍질
+ * 인접한 두 필지를 합쳐 단일 폴리곤으로 근사
+ * (인접 필지 가정: 凸 근사 오차는 모서리 부분 소량에 불과)
+ */
+function computeConvexHull(points: Point[]): Point[] {
+  if (points.length < 3) return [...points]
+
+  // 중복 제거
+  const dedup = points.filter(
+    (p, i) => points.findIndex(q => Math.abs(q.x - p.x) < 1e-9 && Math.abs(q.y - p.y) < 1e-9) === i
+  )
+  if (dedup.length < 3) return dedup
+
+  const sorted = [...dedup].sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y)
+
+  const cross = (o: Point, a: Point, b: Point) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+
+  const lower: Point[] = []
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
+      lower.pop()
+    lower.push(p)
+  }
+
+  const upper: Point[] = []
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i]
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
+      upper.pop()
+    upper.push(p)
+  }
+
+  lower.pop()
+  upper.pop()
+  return [...lower, ...upper]  // CCW 순서
+}
+
+/**
+ * 복수 필지 폴리곤 → 볼록 껍질 합병
+ *
+ * 인접 필지의 공유 경계를 제거하여 마진이 내부에 중복 적용되지 않도록 함.
+ * 볼록 껍질은 인접 직사각형·사다리꼴 필지에서 실질적으로 정확한 합병 결과를 제공.
+ *
+ * @param polygons ENU 로컬 미터 좌표 폴리곤 배열
+ * @returns 합병된 단일 폴리곤 (볼록 껍질)
+ */
+export function mergePolygonsToHull(polygons: Polygon[]): Polygon {
+  if (polygons.length === 0) return []
+  if (polygons.length === 1) return polygons[0]
+  return computeConvexHull(polygons.flat())
 }

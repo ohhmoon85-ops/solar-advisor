@@ -13,7 +13,7 @@ import { getSolarElevation } from '@/lib/shadowCalculator'
 import { runFullAnalysis, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
-import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult } from '@/lib/multiZoneLayout'
+import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
 
 // SVG 캔버스는 클라이언트 전용
 const SolarLayoutCanvas = dynamic(
@@ -1625,43 +1625,31 @@ export default function MapTab() {
                       rowStack,
                     }
 
-                    if (allPolygons.length > 1) {
-                      // 복수 필지: 각 필지를 별도 구역으로 분석
-                      const zones: ZoneConfig[] = allPolygons.map((poly, i) => ({
-                        label: `필지${i + 1}`,
-                        polygon: poly,
-                        plotType: svgPlotType,
-                        panelSpec,
-                        panelType: svgPanelType,
-                        ...commonOpts,
-                      }))
-                      const mzResult = runMultiZoneAnalysis(zones, lat)
+                    // 복수 필지를 볼록 껍질로 합병 → 마진 1회만 적용 (Bug 7)
+                    // 인접 필지 공유 경계의 중복 마진(2m×2)을 제거해 배치 면적 최대화
+                    const polygon = allPolygons.length > 1
+                      ? mergePolygonsToHull(allPolygons)
+                      : allPolygons[0]
+
+                    if (svgZoneMode === 'multi') {
+                      const mzResult = runMultiZoneAnalysis(autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat)
                       setSvgAnalysisResult(mzResult)
                       setLastFullAnalysisJson(JSON.stringify(mzResult))
                       setIsEditing(false)
                       setAnalysisKey(k => k + 1)
                     } else {
-                      const polygon = allPolygons[0]
-                      if (svgZoneMode === 'multi') {
-                        const mzResult = runMultiZoneAnalysis(autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat)
-                        setSvgAnalysisResult(mzResult)
-                        setLastFullAnalysisJson(JSON.stringify(mzResult))
-                        setIsEditing(false)
-                        setAnalysisKey(k => k + 1)
-                      } else {
-                        const faResult = runFullAnalysis({
-                          cadastrePolygon: polygon,
-                          plotType: svgPlotType,
-                          panelSpec,
-                          panelType: svgPanelType,
-                          latitude: lat,
-                          ...commonOpts,
-                        })
-                        setSvgAnalysisResult(faResult)
-                        setLastFullAnalysisJson(JSON.stringify(faResult))
-                        setIsEditing(true)
-                        setAnalysisKey(k => k + 1)
-                      }
+                      const faResult = runFullAnalysis({
+                        cadastrePolygon: polygon,
+                        plotType: svgPlotType,
+                        panelSpec,
+                        panelType: svgPanelType,
+                        latitude: lat,
+                        ...commonOpts,
+                      })
+                      setSvgAnalysisResult(faResult)
+                      setLastFullAnalysisJson(JSON.stringify(faResult))
+                      setIsEditing(true)
+                      setAnalysisKey(k => k + 1)
                     }
                     setShowSvgCanvas(true)
                   } catch (err) {

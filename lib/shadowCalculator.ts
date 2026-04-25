@@ -136,7 +136,8 @@ export function optimizeTiltAngle(params: {
   const ANNUAL_PEAK_HOURS = 1400
   // 지붕형: 행간격 0.3m(유지보수 통로) + 경사각 5~20°
   const ROOF_ROW_SPACING = 0.3
-  const tiltMin = isRoof ? 5 : 15
+  // 토지형 최소 경사각을 5°로 낮춰 배치 밀도 최적화 (이격 1.5m 이상 유효 조건 충족)
+  const tiltMin = isRoof ? 5 : 5
   const tiltMax = isRoof ? 20 : 40
 
   // 가로형: 패널 N-S방향 치수 = widthM, E-W방향 = lengthM
