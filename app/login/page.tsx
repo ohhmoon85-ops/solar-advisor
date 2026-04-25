@@ -6,12 +6,6 @@ import { useRouter } from 'next/navigation'
 const SAVED_ID_KEY = 'solar_saved_id'
 const AUTH_COOKIE = 'solar_auth'
 
-// 승인된 계정
-const ACCOUNTS: Record<string, string> = {
-  choyd6448: 'leesh7221!',
-  admin: 'admin1234',
-}
-
 function setAuthCookie() {
   const expires = new Date()
   expires.setDate(expires.getDate() + 30) // 30일 유지
@@ -36,14 +30,19 @@ export default function LoginPage() {
     }
   }, [])
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
 
-    setTimeout(() => {
-      if (ACCOUNTS[id] === pw) {
-        // ID 저장 처리
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, pw }),
+      })
+
+      if (res.ok) {
         if (saveId) {
           localStorage.setItem(SAVED_ID_KEY, id)
         } else {
@@ -53,9 +52,12 @@ export default function LoginPage() {
         router.replace('/')
       } else {
         setError('아이디 또는 비밀번호가 올바르지 않습니다.')
-        setLoading(false)
       }
-    }, 400)
+    } catch {
+      setError('서버 연결 오류가 발생했습니다.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
