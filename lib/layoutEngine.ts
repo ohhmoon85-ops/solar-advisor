@@ -153,10 +153,15 @@ export function applyInsetMargin(polygon: Polygon, marginM: number): Polygon {
   if (polygon.length < 3) return polygon
   const n = polygon.length
 
-  // 각 변을 안쪽으로 marginM만큼 평행이동한 직선의 계수 (ax + by = c) 계산
-  // 안쪽 방향: 폴리곤의 중심 방향 (법선 벡터를 중심 방향으로 부호 결정)
-  const cx = polygon.reduce((s, p) => s + p.x, 0) / n
-  const cy = polygon.reduce((s, p) => s + p.y, 0) / n
+  // 슈 공식으로 부호 있는 면적 계산 → 권선 방향 결정
+  // CCW(양수) = 왼손 법선(-dy, dx)이 안쪽, CW(음수) = 오른손 법선(dy, -dx)이 안쪽
+  // 무게중심 기반 체크는 오목(L자형) 폴리곤에서 무게중심이 폴리곤 밖으로 나가 오작동
+  let signedArea2 = 0
+  for (let i = 0; i < n; i++) {
+    const p1 = polygon[i], p2 = polygon[(i + 1) % n]
+    signedArea2 += p1.x * p2.y - p2.x * p1.y
+  }
+  const isCCW = signedArea2 > 0  // CCW: 안쪽 법선 = 왼손(-dy, dx)
 
   const lines: Array<{ a: number; b: number; c: number }> = []
   for (let i = 0; i < n; i++) {
@@ -166,16 +171,13 @@ export function applyInsetMargin(polygon: Polygon, marginM: number): Polygon {
     const dy = p2.y - p1.y
     const len = Math.sqrt(dx * dx + dy * dy)
     if (len < 1e-9) continue
-    // 법선 벡터 (단위)
-    let nx = -dy / len
-    let ny =  dx / len
-    // 중심이 법선 방향에 있으면 부호 유지, 아니면 반전 (항상 안쪽)
-    const dot = nx * (cx - p1.x) + ny * (cy - p1.y)
-    if (dot < 0) { nx = -nx; ny = -ny }
+    // CCW: 안쪽 법선 = (-dy, dx),  CW: 안쪽 법선 = (dy, -dx)
+    const nx = isCCW ? -dy / len :  dy / len
+    const ny = isCCW ?  dx / len : -dx / len
     // 변을 안쪽으로 marginM만큼 이동: 새 직선의 점 = p1 + normal * marginM
     const ox = p1.x + nx * marginM
     const oy = p1.y + ny * marginM
-    // 직선 방정식: (p2-p1) 방향 벡터와의 외적 = 0  →  dy*x - dx*y = dy*ox - dx*oy
+    // 직선 방정식: dy*x - dx*y = dy*ox - dx*oy
     lines.push({ a: dy, b: -dx, c: dy * ox - dx * oy })
   }
 

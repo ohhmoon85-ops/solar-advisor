@@ -595,17 +595,17 @@ export default function LayoutEditor({
                 key={n}
                 onClick={() => {
                   setStackTarget(n)
-                  // 선택된 패널이 있으면 해당 행에 즉시 단수 적용
-                  if (state.selectedIds.size > 0) {
-                    const rowIndices = [...new Set(
-                      state.placements
-                        .filter(p => state.selectedIds.has(p.id))
-                        .map(p => p.row)
-                    )]
-                    rowIndices.forEach(rowIndex => {
-                      dispatch({ type: 'SET_ROW_STACK', rowIndex, stackCount: n })
-                    })
-                  }
+                  // 선택된 패널이 있으면 해당 행, 없으면 전체 행에 즉시 단수 적용
+                  const rowIndices = state.selectedIds.size > 0
+                    ? [...new Set(
+                        state.placements
+                          .filter(p => state.selectedIds.has(p.id))
+                          .map(p => p.row)
+                      )]
+                    : [...new Set(state.placements.map(p => p.row))]
+                  rowIndices.forEach(rowIndex => {
+                    dispatch({ type: 'SET_ROW_STACK', rowIndex, stackCount: n })
+                  })
                 }}
                 className={[
                   'w-8 py-1 rounded text-xs font-bold',
@@ -613,7 +613,7 @@ export default function LayoutEditor({
                     ? 'bg-violet-500 text-white'
                     : 'bg-slate-700 text-slate-300 hover:bg-slate-600',
                 ].join(' ')}
-                title={state.selectedIds.size > 0 ? `선택 행을 ${n}단으로 즉시 적용` : `다음 패널 클릭 시 ${n}단 적용`}
+                title={state.selectedIds.size > 0 ? `선택 행을 ${n}단으로 즉시 적용` : `전체 행을 ${n}단으로 즉시 적용`}
               >
                 {n}단
               </button>
@@ -691,26 +691,35 @@ export default function LayoutEditor({
             onMouseMove={handleSvgMouseMove}
             onMouseUp={handleSvgMouseUp}
           >
-            {/* 원본 필지 경계 */}
+            {/* Layer 1: 원본 필지 — 파란 테두리 + 빨간 채움 (마진 구간 표시) */}
             {result.safeZone.originalPolygon.length > 2 && (
               <polygon
                 points={polyToPoints(result.safeZone.originalPolygon, vb, SVG_W, SVG_H)}
-                fill="rgba(255,255,255,0.03)"
-                stroke="#94a3b8"
-                strokeWidth="1.5"
-                strokeDasharray="5,3"
+                fill="rgba(211,47,47,0.18)"
+                stroke="#1565C0"
+                strokeWidth="2"
                 pointerEvents="none"
               />
             )}
 
-            {/* Safe Zone */}
+            {/* Layer 2a: Safe Zone 흰색 덮개 — 마진 붉은 영역을 Safe Zone 내부에서 지움 */}
             {result.safeZone.safeZonePolygon.length > 2 && (
               <polygon
                 points={polyToPoints(result.safeZone.safeZonePolygon, vb, SVG_W, SVG_H)}
-                fill="rgba(34,197,94,0.05)"
-                stroke="#22c55e"
-                strokeWidth="1"
-                strokeDasharray="3,2"
+                fill="rgba(240,253,244,0.92)"
+                stroke="none"
+                pointerEvents="none"
+              />
+            )}
+
+            {/* Layer 2b: Safe Zone — 초록 점선 테두리 */}
+            {result.safeZone.safeZonePolygon.length > 2 && (
+              <polygon
+                points={polyToPoints(result.safeZone.safeZonePolygon, vb, SVG_W, SVG_H)}
+                fill="rgba(46,125,50,0.06)"
+                stroke="#2E7D32"
+                strokeWidth="1.5"
+                strokeDasharray="8,4"
                 pointerEvents="none"
               />
             )}
