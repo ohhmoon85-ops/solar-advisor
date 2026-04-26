@@ -56,6 +56,7 @@ export type EditorAction =
   | { type: 'APPLY_QUICK'; preset: 'dense' | 'standard' | 'corridors' | 'stack3'; baseSpacing: number }
   | { type: 'SELECT_ROWS'; rowIndices: number[]; additive?: boolean }
   | { type: 'SPREAD_ROWS'; deltaM: number; rowIndices?: number[] }
+  | { type: 'REINIT'; placements: PanelPlacement[] }
 
 // ── 초기화 ─────────────────────────────────────────────────────────
 
@@ -368,6 +369,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
     case 'RESET':
       return initEditorState(state.originalPlacements)
+
+    case 'REINIT':
+      return initEditorState(action.placements)
 
     case 'APPLY_QUICK': {
       const saved = pushHistory(state)

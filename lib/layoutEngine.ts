@@ -359,6 +359,8 @@ export function generateLayout(params: {
   rowStack?: number
   /** 복수 필지 PIP용: 중심점이 이 중 하나 이상 안에 있어야 배치 */
   validPolygons?: Polygon[]
+  /** true이면 0°~175° 탐색을 건너뛰고 azimuthDeg 그대로 배치 */
+  fixedGridAngle?: boolean
 }): LayoutResult {
   const {
     safeZonePolygon,
@@ -370,18 +372,26 @@ export function generateLayout(params: {
     panelOrientation = 'portrait',
     rowStack = 1,
     validPolygons,
+    fixedGridAngle = false,
   } = params
 
   // 0°~175° 범위에서 5° 단위로 탐색하여 가장 많은 패널이 배치되는 그리드 각도 선택
   // 방위각 오프셋(azimuthDeg-180)을 기준으로 탐색
   const azBase = azimuthDeg - 180
   let bestPlacements: PanelPlacement[] = []
-  for (let sweep = 0; sweep < 180; sweep += 5) {
-    const candidate = placeGridAtAngle(
+  if (fixedGridAngle) {
+    bestPlacements = placeGridAtAngle(
       safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
-      panelOrientation, excludeZones, azBase + sweep, rowStack,
+      panelOrientation, excludeZones, azBase, rowStack,
     )
-    if (candidate.length > bestPlacements.length) bestPlacements = candidate
+  } else {
+    for (let sweep = 0; sweep < 180; sweep += 5) {
+      const candidate = placeGridAtAngle(
+        safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
+        panelOrientation, excludeZones, azBase + sweep, rowStack,
+      )
+      if (candidate.length > bestPlacements.length) bestPlacements = candidate
+    }
   }
 
   const placements = bestPlacements

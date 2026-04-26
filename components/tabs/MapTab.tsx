@@ -1919,6 +1919,10 @@ export default function MapTab() {
                       }
                       setEditingCount(null)
                     }}
+                    reanalysisOptions={{
+                      panelSpec: PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.GS710wp,
+                      rowStack,
+                    }}
                     onCancel={() => { setIsEditing(false); setEditingCount(null) }}
                   />
                 ) : (

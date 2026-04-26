@@ -5,7 +5,9 @@
 // lib/layoutEditor.ts의 reducer 기반 상태 관리
 
 import { useReducer, useCallback, useRef, useState, useEffect, useMemo } from 'react'
-import type { FullAnalysisResult, Point, PanelPlacement } from '@/lib/layoutEngine'
+import type { FullAnalysisResult, Point, PanelPlacement, Polygon } from '@/lib/layoutEngine'
+import { generateLayout } from '@/lib/layoutEngine'
+import type { PanelSpec } from '@/lib/panelConfig'
 import type { ZoneLayoutResult } from '@/lib/multiZoneLayout'
 import {
   initEditorState,
@@ -123,6 +125,8 @@ interface Props {
   onCancel?: () => void
   /** 패널 수 실시간 변경 콜백 */
   onCountChange?: (count: number) => void
+  /** 방위각 기반 그리드 재배치 옵션 — 없으면 회전 버튼 비활성 */
+  reanalysisOptions?: { panelSpec: PanelSpec; rowStack?: number; validPolygons?: Polygon[] }
 }
 
 export default function LayoutEditor({
@@ -130,10 +134,11 @@ export default function LayoutEditor({
   width = 700,
   height = 520,
   backgroundZones,
-    zoneLabel,
+  zoneLabel,
   onComplete,
   onCancel,
   onCountChange,
+  reanalysisOptions,
 }: Props) {
   // ── 편집 상태 ─────────────────────────────────────────────────────
   const [state, dispatch] = useReducer(
@@ -147,6 +152,25 @@ export default function LayoutEditor({
   const [rowSelectMode, setRowSelectMode] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
+  const [gridAzimuth, setGridAzimuth] = useState(result.azimuthDeg ?? 180)
+
+  const handleRotateGrid = useCallback((deltaDeg: number) => {
+    if (!reanalysisOptions) return
+    const newAzimuth = gridAzimuth + deltaDeg
+    setGridAzimuth(newAzimuth)
+    const newLayout = generateLayout({
+      safeZonePolygon: result.safeZone.safeZonePolygon,
+      panelSpec: reanalysisOptions.panelSpec,
+      rowSpacing: result.rowSpacing,
+      tiltAngle: result.optimalTilt,
+      azimuthDeg: newAzimuth,
+      panelOrientation: result.panelOrientation,
+      rowStack: reanalysisOptions.rowStack ?? 1,
+      validPolygons: reanalysisOptions.validPolygons,
+      fixedGridAngle: true,
+    })
+    dispatch({ type: 'REINIT', placements: newLayout.placements })
+  }, [reanalysisOptions, gridAzimuth, result, dispatch])
 
   // ── 드래그 선택 ────────────────────────────────────────────────────
   const svgRef = useRef<SVGSVGElement>(null)
@@ -668,6 +692,25 @@ export default function LayoutEditor({
             ))}
             <span className="text-[10px] text-slate-500">선택행/전체</span>
           </div>
+        )}
+
+        {/* 그리드 방위각 회전 */}
+        {reanalysisOptions && (
+          <>
+            <div className="w-px h-5 bg-slate-600 mx-1" />
+            <div className="flex items-center gap-1 text-xs text-slate-300">
+              <span className="text-slate-400 text-[10px]">그리드 방위각</span>
+              <span className="font-mono text-amber-300 min-w-[38px] text-center">{gridAzimuth}°</span>
+              {([-15, -5, 5, 15] as const).map(deg => (
+                <button key={deg}
+                  onClick={() => handleRotateGrid(deg)}
+                  className="px-2 py-0.5 rounded text-xs bg-slate-700 text-amber-300 hover:bg-amber-900/50 font-mono"
+                >
+                  {deg > 0 ? `+${deg}°` : `${deg}°`}
+                </button>
+              ))}
+            </div>
+          </>
         )}
 
         <div className="flex-1" />
