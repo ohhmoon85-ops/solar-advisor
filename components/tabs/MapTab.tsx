@@ -633,10 +633,9 @@ export default function MapTab() {
 
     let totalPanelRects: PanelRect[] = []
     let totalCount = 0
-    const perRingCounts: number[] = []
     for (const ring of unionRings) {
       const pts = ring.map(([lon, lat]) => geoToCanvas(lon, lat, cLon, cLat, scale))
-      if (pts.length < 3) { perRingCounts.push(0); continue }
+      if (pts.length < 3) continue
       const minX = Math.min(...pts.map(p => p.x))
       const maxX = Math.max(...pts.map(p => p.x))
       const minY = Math.min(...pts.map(p => p.y))
@@ -657,13 +656,20 @@ export default function MapTab() {
             rects.push({ x, y, w: panelPxW, h: panelPxH })
         }
       }
-      perRingCounts.push(rects.length)
       totalPanelRects = [...totalPanelRects, ...rects]
       totalCount += rects.length
     }
+    // 필지별 패널 수 — union 합병 여부와 무관하게 각 필지 경계로 재카운트
+    const perParcelCounts = currentParcels.map(p => {
+      const pts = p.canvasPoints
+      if (pts.length < 3) return 0
+      return totalPanelRects.filter(rect =>
+        isPointInPolygon(rect.x + rect.w / 2, rect.y + rect.h / 2, pts)
+      ).length
+    })
     setPanelRects(totalPanelRects)
     setPanelCount(totalCount)
-    setRingPanelCounts(perRingCounts)
+    setRingPanelCounts(perParcelCounts)
     const cap = (totalCount * MODULES[moduleIndex].watt) / 1000
     setCapacityKwp(Math.round(cap * 100) / 100)
     setAnnualKwh(Math.round(cap * GENERATION_HOURS * 365))
@@ -857,7 +863,7 @@ export default function MapTab() {
       const ring = closed ? rawCoords.slice(0, -1) : rawCoords
       const attrs = features[0].properties ?? {}
       const label = [attrs.EMD_NM, attrs.RI_NM, attrs.JIBUN].filter(Boolean).join(' ')
-      return { ring, label: label || `${lat.toFixed(4)}, ${lon.toFixed(4)}` }
+      return { ring, label }
     } catch { return null }
   }
 
@@ -1666,7 +1672,7 @@ export default function MapTab() {
                 <div className="flex flex-wrap gap-1.5">
                   {parcels.map((p, i) => (
                     <span key={i} className="text-xs bg-slate-100 text-slate-700 rounded px-2 py-1">
-                      필지{i + 1} ({p.label}) {p.areaSqm.toFixed(0)}m² · {ringPanelCounts[i] ?? 0}장
+                      필지{i + 1}{p.label ? ` (${p.label})` : ''} {p.areaSqm.toFixed(0)}m² · {ringPanelCounts[i] ?? 0}장
                     </span>
                   ))}
                 </div>
