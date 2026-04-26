@@ -448,7 +448,7 @@ export default function SolarLayoutCanvas({
                 zoneIndex={idx}
                 hoveredPanel={hoveredPanel}
                 onHover={setHoveredPanel}
-                showOriginal={idx === 0}
+                showOriginal={true}
                 zoneLabel={zoneLabel}
               />
             )
