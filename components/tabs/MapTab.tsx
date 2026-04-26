@@ -14,6 +14,7 @@ import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
 import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
+import { union as turfUnion, polygon as turfPolygon, featureCollection as turfFeatureCollection } from '@turf/turf'
 
 // SVG 캔버스는 클라이언트 전용
 const SolarLayoutCanvas = dynamic(
@@ -1051,8 +1052,30 @@ export default function MapTab() {
       const lat = effectiveLatitude
       const orientation = overrides?.panelOrientation ?? svgPanelOrientation
       const stack = overrides?.rowStack ?? rowStack
-      const allPolygons = parcels
-        .map(p => convertGeoRingToLocalPolygon(p.ring, apiCoords.lat, apiCoords.lon))
+      // turf union: GeoJSON 레벨에서 복수 필지를 정확히 합산 (convex hull 대신)
+      const parcelFeatures = parcels
+        .filter(p => p.ring.length >= 3)
+        .map(p => {
+          const ring = p.ring
+          const closed = (ring.length > 0 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
+            ? ring : [...ring, ring[0]]
+          return turfPolygon([closed])
+        })
+      if (parcelFeatures.length === 0) return
+      let mergedFeature = parcelFeatures[0]
+      for (let i = 1; i < Math.min(parcelFeatures.length, 5); i++) {
+        const result = turfUnion(turfFeatureCollection([mergedFeature, parcelFeatures[i]]))
+        if (result) mergedFeature = result as ReturnType<typeof turfPolygon>
+      }
+      const mergedGeom = mergedFeature.geometry
+      const mergedRings: number[][][] = []
+      if (mergedGeom.type === 'Polygon') {
+        mergedRings.push(mergedGeom.coordinates[0] as number[][])
+      } else if (mergedGeom.type === 'MultiPolygon') {
+        for (const poly of mergedGeom.coordinates) mergedRings.push(poly[0] as unknown as number[][])
+      }
+      const allPolygons = mergedRings
+        .map(ring => convertGeoRingToLocalPolygon(ring, apiCoords.lat, apiCoords.lon))
         .filter(p => p.length >= 3)
       if (allPolygons.length === 0) return
       const commonOpts = {
