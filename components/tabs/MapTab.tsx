@@ -13,7 +13,7 @@ import { getSolarElevation } from '@/lib/shadowCalculator'
 import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
-import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
+import { type MultiZoneResult, type ZoneLayoutResult, type ZoneConfig, runMultiZoneAnalysis, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
 import { union as turfUnion, polygon as turfPolygon, featureCollection as turfFeatureCollection, booleanPointInPolygon as turfPIP, point as turfPoint, buffer as turfBuffer } from '@turf/turf'
 
 // SVG 캔버스는 클라이언트 전용
@@ -1866,6 +1866,13 @@ export default function MapTab() {
                         : svgAnalysisResult as FullAnalysisResult
                     }
                     zoneLabel={isMultiZoneResult(svgAnalysisResult) ? activeZoneId + '구역' : undefined}
+                    backgroundZones={
+                      isMultiZoneResult(svgAnalysisResult)
+                        ? (svgAnalysisResult as MultiZoneResult).zones.filter(
+                            (z): z is ZoneLayoutResult => z.zoneLabel !== activeZoneId + '구역'
+                          )
+                        : undefined
+                    }
                     width={svgContainerWidth}
                     height={Math.round(svgContainerWidth * 520 / 920)}
                     onCountChange={(count) => setEditingCount(count)}
@@ -1923,6 +1930,7 @@ export default function MapTab() {
                       width={svgContainerWidth}
                       height={Math.round(svgContainerWidth * 480 / 700)}
                       showLabels
+                      activeZoneId={isMultiZoneResult(svgAnalysisResult) ? activeZoneId : undefined}
                     />
                     {/* 단일 구역 — 검증 결과 */}
                     {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.validation && (

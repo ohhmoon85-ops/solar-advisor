@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 // components/LayoutEditor.tsx — 인터랙티브 패널 배치 편집기 (v5.2)
 // SolarLayoutCanvas 위에 올라가는 편집 레이어
@@ -6,6 +6,7 @@
 
 import { useReducer, useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import type { FullAnalysisResult, Point, PanelPlacement } from '@/lib/layoutEngine'
+import type { ZoneLayoutResult } from '@/lib/multiZoneLayout'
 import {
   initEditorState,
   editorReducer,
@@ -113,7 +114,9 @@ interface Props {
   result: FullAnalysisResult
   width?: number
   height?: number
-  /** 다구역 편집 시 표시할 구역 레이블 (예: "A구역") */
+  /** 비활성 구역 데이터 — 편집 불가 배경으로 표시 */
+  backgroundZones?: ZoneLayoutResult[]
+    /** 다구역 편집 시 표시할 구역 레이블 (예: "A구역") */
   zoneLabel?: string
   /** 편집 완료 시 콜백: 편집된 배치 + 새 용량 */
   onComplete?: (placements: PanelPlacement[], totalKwp: number) => void
@@ -126,7 +129,8 @@ export default function LayoutEditor({
   result,
   width = 700,
   height = 520,
-  zoneLabel,
+  backgroundZones,
+    zoneLabel,
   onComplete,
   onCancel,
   onCountChange,
@@ -157,14 +161,19 @@ export default function LayoutEditor({
   // ── ViewBox ────────────────────────────────────────────────────────
   const SVG_H = height - 90  // 하단 패널 공간
   const SVG_W = width - 220  // 오른쪽 사이드바
-
   const allPoints = useMemo<Point[]>(() => {
     const pts: Point[] = [
       ...result.safeZone.originalPolygon,
       ...result.safeZone.safeZonePolygon,
     ]
+    if (backgroundZones) {
+      for (const bz of backgroundZones) {
+        pts.push(...bz.safeZone.originalPolygon)
+        pts.push(...bz.safeZone.safeZonePolygon)
+      }
+    }
     return pts
-  }, [result])
+  }, [result, backgroundZones])
 
   const vb = useMemo(() => buildViewBox(allPoints, SVG_W, SVG_H), [allPoints, SVG_W, SVG_H])
 
@@ -697,6 +706,36 @@ export default function LayoutEditor({
             onMouseMove={handleSvgMouseMove}
             onMouseUp={handleSvgMouseUp}
           >
+            {/* 비활성 구역 배경 — 편집 불가, 흐리게 표시 */}
+            {backgroundZones && backgroundZones.map((bz, bgIdx) => {
+              const poly = bz.safeZone.safeZonePolygon
+              const cx = poly.length > 0 ? poly.reduce((s: number, q: Point) => s + q.x, 0) / poly.length : 0
+              const cy = poly.length > 0 ? poly.reduce((s: number, q: Point) => s + q.y, 0) / poly.length : 0
+              const lbl = toSvg({ x: cx, y: cy }, vb, SVG_W, SVG_H)
+              return (
+                <g key={`bg-${bgIdx}`} opacity={0.3} pointerEvents="none">
+                  {bz.safeZone.originalPolygon.length > 2 && (
+                    <polygon
+                      points={polyToPoints(bz.safeZone.originalPolygon, vb, SVG_W, SVG_H)}
+                      fill="rgba(21,101,192,0.08)" stroke="#1565C0" strokeWidth="1.5"
+                    />
+                  )}
+                  {bz.layout.placements.map(panel => (
+                    <polygon
+                      key={`bg${bgIdx}-p${panel.id}`}
+                      points={cornersToPoints(panel.corners, vb, SVG_W, SVG_H)}
+                      fill="rgba(230,81,0,0.5)" stroke="#E65100" strokeWidth="0.5"
+                    />
+                  ))}
+                  {poly.length > 0 && (
+                    <text x={lbl.sx} y={lbl.sy} textAnchor="middle" fontSize={10} fill="#94a3b8" fontWeight="bold">
+                      {bz.zoneLabel}
+                    </text>
+                  )}
+                </g>
+              )
+            })}
+
             {/* Layer 1: 원본 필지 — 파란 테두리 + 빨간 채움 (마진 구간 표시) */}
             {result.safeZone.originalPolygon.length > 2 && (
               <polygon

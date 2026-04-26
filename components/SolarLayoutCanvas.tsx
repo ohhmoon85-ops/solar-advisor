@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 // components/SolarLayoutCanvas.tsx — 지리 미터 좌표 기반 SVG 배치 시각화 (v5.2)
 // v5.2: FullAnalysisResult | MultiZoneResult 지원, 방위각 회전 패널(polygon), 검증 배지
@@ -24,6 +24,7 @@ interface Props {
   width?: number
   height?: number
   showLabels?: boolean
+  activeZoneId?: string
 }
 
 // ── 좌표 변환 헬퍼 ─────────────────────────────────────────────────
@@ -123,6 +124,7 @@ interface ZoneLayerProps {
   hoveredPanel: PanelPlacement | null
   onHover: (p: PanelPlacement | null) => void
   showOriginal: boolean
+  isActive: boolean
   zoneLabel?: string
 }
 
@@ -130,6 +132,7 @@ function ZoneLayer({
   result, vb, svgW, svgH,
   panelColor, panelStroke, zoneIndex,
   hoveredPanel, onHover, showOriginal, zoneLabel,
+  isActive,
 }: ZoneLayerProps) {
   const { safeZone, layout } = result
   const { originalPolygon, safeZonePolygon } = safeZone
@@ -191,7 +194,7 @@ function ZoneLayer({
           <polygon
             key={`z${zoneIndex}-p${panel.id}`}
             points={pts}
-            fill={isHovered ? '#ffffff' : panelColor}
+            fill={isHovered ? '#ffffff' : (isActive !== false ? panelColor : 'rgba(160,160,160,0.35)')}
             stroke={panelStroke}
             strokeWidth={isHovered ? 1.5 : 0.5}
             opacity={isHovered ? 1 : 0.85}
@@ -230,6 +233,7 @@ export default function SolarLayoutCanvas({
   width = 600,
   height = 460,
   showLabels = true,
+  activeZoneId,
 }: Props) {
   const [hoveredPanel, setHoveredPanel] = useState<PanelPlacement | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -449,6 +453,7 @@ export default function SolarLayoutCanvas({
                 hoveredPanel={hoveredPanel}
                 onHover={setHoveredPanel}
                 showOriginal={true}
+                isActive={!activeZoneId || zoneLabel === activeZoneId + '구역'}
                 zoneLabel={zoneLabel}
               />
             )
