@@ -13,7 +13,7 @@ import { getSolarElevation } from '@/lib/shadowCalculator'
 import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
-import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
+import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
 import { union as turfUnion, polygon as turfPolygon, featureCollection as turfFeatureCollection, booleanPointInPolygon as turfPIP, point as turfPoint, buffer as turfBuffer } from '@turf/turf'
 
 // SVG 캔버스는 클라이언트 전용
@@ -312,6 +312,11 @@ export default function MapTab() {
   const [panelCount, setPanelCount] = useState(0)
   const [capacityKwp, setCapacityKwp] = useState(0)
   const [annualKwh, setAnnualKwh] = useState(0)
+  // 필지별 패널 수 (union ring 단위, STEP 3)
+  const [ringPanelCounts, setRingPanelCounts] = useState<number[]>([])
+  // SVG 캔버스 동적 너비 (STEP 4)
+  const svgContainerRef = useRef<HTMLDivElement>(null)
+  const [svgContainerWidth, setSvgContainerWidth] = useState(900)
   // SVG 정밀 배치 분석 상태
   const [svgAnalysisResult, setSvgAnalysisResult] = useState<FullAnalysisResult | MultiZoneResult | null>(null)
   const [svgAnalyzing, setSvgAnalyzing] = useState(false)
@@ -628,9 +633,10 @@ export default function MapTab() {
 
     let totalPanelRects: PanelRect[] = []
     let totalCount = 0
+    const perRingCounts: number[] = []
     for (const ring of unionRings) {
       const pts = ring.map(([lon, lat]) => geoToCanvas(lon, lat, cLon, cLat, scale))
-      if (pts.length < 3) continue
+      if (pts.length < 3) { perRingCounts.push(0); continue }
       const minX = Math.min(...pts.map(p => p.x))
       const maxX = Math.max(...pts.map(p => p.x))
       const minY = Math.min(...pts.map(p => p.y))
@@ -651,11 +657,13 @@ export default function MapTab() {
             rects.push({ x, y, w: panelPxW, h: panelPxH })
         }
       }
+      perRingCounts.push(rects.length)
       totalPanelRects = [...totalPanelRects, ...rects]
       totalCount += rects.length
     }
     setPanelRects(totalPanelRects)
     setPanelCount(totalCount)
+    setRingPanelCounts(perRingCounts)
     const cap = (totalCount * MODULES[moduleIndex].watt) / 1000
     setCapacityKwp(Math.round(cap * 100) / 100)
     setAnnualKwh(Math.round(cap * GENERATION_HOURS * 365))
@@ -674,6 +682,18 @@ export default function MapTab() {
     const genHours = kierResult?.pvHours ?? GENERATION_HOURS
     setAnnualKwh(Math.round(capacityKwp * genHours * 365))
   }, [capacityKwp, kierResult])
+
+  // SVG 캔버스 컨테이너 너비 측정 — 창 크기 변경 시 갱신
+  useEffect(() => {
+    const measure = () => {
+      if (svgContainerRef.current) {
+        setSvgContainerWidth(svgContainerRef.current.clientWidth || 900)
+      }
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [])
 
   // ── KIER API ──
   const fetchKierData = useCallback(async (lat: number, lon: number, tilt: number) => {
@@ -1126,10 +1146,32 @@ export default function MapTab() {
         : mergePolygonsToHull(allPolygons)
 
       if (svgZoneMode === 'multi') {
-        // multi: cadastrePolygon(비버퍼) 기준 autoSplit → 내부에서 margin 적용
-        const mzResult = runMultiZoneAnalysis(
-          autoSplitPolygon(cadastrePolygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat
-        )
+        // multi: 각 필지를 개별 구역으로 처리 — 필지별 turfBuffer safe zone 사전계산
+        const zones: ZoneConfig[] = parcels
+          .filter(p => p.ring.length >= 3)
+          .map((parcel, idx) => {
+            const ring = parcel.ring
+            const closed = (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
+              ? ring : [...ring, ring[0]]
+            const geoJson = turfPolygon([closed])
+            const safeGeoJson = turfBuffer(geoJson, -margin, { units: 'meters' })
+            if (!safeGeoJson || safeGeoJson.geometry.type !== 'Polygon') return null
+            const safeRing = safeGeoJson.geometry.coordinates[0] as number[][]
+            const safePolygon = convertGeoRingToLocalPolygon(safeRing, apiCoords.lat, apiCoords.lon)
+            const cadastrePolyLocal = convertGeoRingToLocalPolygon(closed, apiCoords.lat, apiCoords.lon)
+            return {
+              label: `${String.fromCharCode(65 + idx)}구역`,
+              polygon: cadastrePolyLocal,
+              plotType: svgPlotType,
+              panelSpec,
+              panelType: svgPanelType,
+              precomputedSafeZonePolygon: safePolygon,
+              ...commonOpts,
+            } as ZoneConfig
+          })
+          .filter((z): z is ZoneConfig => z !== null)
+        if (zones.length === 0) return
+        const mzResult = runMultiZoneAnalysis(zones, lat)
         setSvgAnalysisResult(mzResult)
         setLastFullAnalysisJson(JSON.stringify(mzResult))
         setIsEditing(false)
@@ -1600,23 +1642,35 @@ export default function MapTab() {
           </div>
 
           {isComplete && area > 0 && (
-            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <div className="bg-gray-50 rounded-lg p-2 text-center">
-                <div className="text-xs text-gray-500">부지면적</div>
-                <div className="font-bold text-gray-800 text-sm">{area.toFixed(1)} m²</div>
+            <div className="mt-3 space-y-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="bg-gray-50 rounded-lg p-2 text-center">
+                  <div className="text-xs text-gray-500">부지면적</div>
+                  <div className="font-bold text-gray-800 text-sm">{area.toFixed(1)} m²</div>
+                </div>
+                <div className="bg-blue-50 rounded-lg p-2 text-center">
+                  <div className="text-xs text-gray-500">패널수</div>
+                  <div className="font-bold text-blue-700 text-sm">{panelCount}장</div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-2 text-center">
+                  <div className="text-xs text-gray-500">설비용량</div>
+                  <div className="font-bold text-green-700 text-sm">{capacityKwp} kWp</div>
+                </div>
+                <div className="bg-orange-50 rounded-lg p-2 text-center">
+                  <div className="text-xs text-gray-500">연간발전량</div>
+                  <div className="font-bold text-orange-700 text-sm">{(annualKwh / 1000).toFixed(1)} MWh</div>
+                </div>
               </div>
-              <div className="bg-blue-50 rounded-lg p-2 text-center">
-                <div className="text-xs text-gray-500">패널수</div>
-                <div className="font-bold text-blue-700 text-sm">{panelCount}장</div>
-              </div>
-              <div className="bg-green-50 rounded-lg p-2 text-center">
-                <div className="text-xs text-gray-500">설비용량</div>
-                <div className="font-bold text-green-700 text-sm">{capacityKwp} kWp</div>
-              </div>
-              <div className="bg-orange-50 rounded-lg p-2 text-center">
-                <div className="text-xs text-gray-500">연간발전량</div>
-                <div className="font-bold text-orange-700 text-sm">{(annualKwh / 1000).toFixed(1)} MWh</div>
-              </div>
+              {/* 필지별 면적·수량 상세 */}
+              {parcels.length > 1 && ringPanelCounts.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {parcels.map((p, i) => (
+                    <span key={i} className="text-xs bg-slate-100 text-slate-700 rounded px-2 py-1">
+                      필지{i + 1} ({p.label}) {p.areaSqm.toFixed(0)}m² · {ringPanelCounts[i] ?? 0}장
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1737,7 +1791,7 @@ export default function MapTab() {
 
             {/* 결과 표시 */}
             {showSvgCanvas && svgAnalysisResult && (
-              <div className="mt-3">
+              <div className="mt-3" ref={svgContainerRef}>
                 {/* 편집 토글 버튼 (단일 구역만) */}
                 {!isMultiZoneResult(svgAnalysisResult) && (
                   <div className="flex justify-end mb-2">
@@ -1760,8 +1814,8 @@ export default function MapTab() {
                   <LayoutEditor
                     key={analysisKey}
                     result={svgAnalysisResult as FullAnalysisResult}
-                    width={920}
-                    height={520}
+                    width={svgContainerWidth}
+                    height={Math.round(svgContainerWidth * 520 / 920)}
                     onCountChange={(count) => setEditingCount(count)}
                     onComplete={(placements, totalKwp) => {
                       setIsEditing(false)
@@ -1789,8 +1843,8 @@ export default function MapTab() {
                   <div>
                     <SolarLayoutCanvas
                       result={svgAnalysisResult}
-                      width={700}
-                      height={480}
+                      width={svgContainerWidth}
+                      height={Math.round(svgContainerWidth * 480 / 700)}
                       showLabels
                     />
                     {/* 단일 구역 — 검증 결과 */}

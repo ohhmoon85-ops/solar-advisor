@@ -31,6 +31,8 @@ export interface ZoneConfig {
   panelOrientation?: 'portrait' | 'landscape'
   /** 단수 (1~3) */
   rowStack?: number
+  /** 외부 사전계산 Safe Zone (제공 시 createSafeZone 스킵 — 이중 margin 방지) */
+  precomputedSafeZonePolygon?: Polygon
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -232,6 +234,7 @@ export function runMultiZoneAnalysis(
       isJimokChangePlanned: zone.isJimokChangePlanned ?? false,
       panelOrientation: zone.panelOrientation ?? 'portrait',
       rowStack: zone.rowStack ?? 1,
+      precomputedSafeZonePolygon: zone.precomputedSafeZonePolygon,
     })
     return {
       ...result,
