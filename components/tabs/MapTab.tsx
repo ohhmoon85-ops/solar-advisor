@@ -595,21 +595,41 @@ export default function MapTab() {
   // ── 패널 배치 계산 (필지·설정 변경 시 자동 재계산) ──────────────
   const recalculatePanels = useCallback((currentParcels: ParcelInfo[], scale: number) => {
     if (currentParcels.length === 0) return
+    const module = MODULES[moduleIndex]
+    const isBuilding = installType === '건물지붕형'
+    const ltr = (tiltAngle * Math.PI) / 180
+    const panelW = panelOrientation === 'landscape' ? module.h : module.w
+    const panelH = panelOrientation === 'landscape' ? module.w : module.h
+    const panelPxW = panelW / scale
+    const panelPxH = (panelH * Math.cos(ltr) * rowStack) / scale
+    const rowPitch = panelPxH + spacingValue / scale
+    const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
+    const marginPx = marginM / scale
+
+    // turf union으로 인접 필지 병합 → 내부 경계 마진 제거
+    const cLon = apiCoords?.lon ?? 0
+    const cLat = apiCoords?.lat ?? 0
+    const parcelFeats = currentParcels
+      .filter(p => p.ring.length >= 3)
+      .map(p => {
+        const r = p.ring
+        const closed = (r[0][0] === r[r.length-1][0] && r[0][1] === r[r.length-1][1]) ? r : [...r, r[0]]
+        return turfPolygon([closed])
+      })
+    let unionFeat = parcelFeats[0]
+    for (let i = 1; i < parcelFeats.length; i++) {
+      const res = turfUnion(turfFeatureCollection([unionFeat, parcelFeats[i]]))
+      if (res) unionFeat = res as ReturnType<typeof turfPolygon>
+    }
+    const ug = unionFeat.geometry
+    const unionRings: number[][][] = ug.type === 'Polygon'
+      ? [ug.coordinates[0] as number[][]]
+      : (ug.coordinates as unknown as number[][][][]).map(p => p[0])
+
     let totalPanelRects: PanelRect[] = []
     let totalCount = 0
-    for (const parcel of currentParcels) {
-      const module = MODULES[moduleIndex]
-      const isBuilding = installType === '건물지붕형'
-      const slopeFactor = Math.cos(Math.atan(slopePercent / 100))
-      const ltr = (tiltAngle * Math.PI) / 180
-      const panelW = panelOrientation === 'landscape' ? module.h : module.w
-      const panelH = panelOrientation === 'landscape' ? module.w : module.h
-      const panelPxW = panelW / scale
-      const panelPxH = (panelH * Math.cos(ltr) * rowStack) / scale
-      const rowPitch = panelPxH + spacingValue / scale
-      const marginM = BOUNDARY_MARGIN[installType] ?? 2.0
-      const marginPx = marginM / scale
-      const pts = parcel.canvasPoints
+    for (const ring of unionRings) {
+      const pts = ring.map(([lon, lat]) => geoToCanvas(lon, lat, cLon, cLat, scale))
       if (pts.length < 3) continue
       const minX = Math.min(...pts.map(p => p.x))
       const maxX = Math.max(...pts.map(p => p.x))
@@ -632,13 +652,6 @@ export default function MapTab() {
         }
       }
       totalPanelRects = [...totalPanelRects, ...rects]
-      const perimeterPx = pts.reduce((sum, p, i) => {
-        const j = (i + 1) % pts.length
-        return sum + Math.sqrt((pts[j].x - p.x) ** 2 + (pts[j].y - p.y) ** 2)
-      }, 0)
-      const effectiveArea = Math.max(0, parcel.areaSqm - perimeterPx * scale * marginM)
-      const footprintPerPanel = panelW * (panelH * Math.cos(ltr) * rowStack + spacingValue)
-      const coverageRatio = isBuilding ? 0.70 : 0.85
       totalCount += rects.length
     }
     setPanelRects(totalPanelRects)
@@ -1067,20 +1080,37 @@ export default function MapTab() {
         const result = turfUnion(turfFeatureCollection([mergedFeature, parcelFeatures[i]]))
         if (result) mergedFeature = result as ReturnType<typeof turfPolygon>
       }
-      const mergedGeom = mergedFeature.geometry
-      const mergedRings: number[][][] = []
-      if (mergedGeom.type === 'Polygon') {
-        mergedRings.push(mergedGeom.coordinates[0] as number[][])
-      } else if (mergedGeom.type === 'MultiPolygon') {
-        for (const poly of mergedGeom.coordinates) mergedRings.push(poly[0] as unknown as number[][])
+      // Polygon vs MultiPolygon 분기: union 결과에 따라 safe zone 계산
+      const margin = svgPlotType === 'roof' ? 0.5 : 2.0
+      const geomType = mergedFeature.geometry?.type
+      const allRings: number[][][] = []
+      let cadastreRing: number[][] = []
+
+      if (geomType === 'Polygon') {
+        // 인접 필지 → 단일 폴리곤, 내부 경계 마진 없음
+        cadastreRing = mergedFeature.geometry.coordinates[0] as number[][]
+        const safeZone = turfBuffer(mergedFeature, -margin, { units: 'meters' })
+        if (safeZone?.geometry?.type === 'Polygon') {
+          allRings.push(safeZone.geometry.coordinates[0] as number[][])
+        }
+      } else if (geomType === 'MultiPolygon') {
+        // 이격 필지 → 각각 개별 Safe Zone
+        const mpCoords = mergedFeature.geometry.coordinates as unknown as number[][][][]
+        if (mpCoords[0]) cadastreRing = mpCoords[0][0]
+        for (const polyCoords of mpCoords) {
+          const singlePoly = turfPolygon(polyCoords as number[][][])
+          const safeZone = turfBuffer(singlePoly, -margin, { units: 'meters' })
+          if (safeZone?.geometry?.type === 'Polygon') {
+            allRings.push(safeZone.geometry.coordinates[0] as number[][])
+          }
+        }
       }
-      const allPolygons = mergedRings
+
+      const allPolygons = allRings
         .map(ring => convertGeoRingToLocalPolygon(ring, apiCoords.lat, apiCoords.lon))
         .filter(p => p.length >= 3)
       if (allPolygons.length === 0) return
-      // turf buffer: 필지 union을 GeoJSON 레벨에서 수축 → 정확한 safe zone
-      const szMargin = svgPlotType === 'roof' ? 0.5 : 2.0
-      const safeZoneGeoJson = turfBuffer(mergedFeature, -szMargin, { units: 'meters' })
+      const cadastrePolygon = convertGeoRingToLocalPolygon(cadastreRing, apiCoords.lat, apiCoords.lon)
       const commonOpts = {
         azimuthDeg: svgAzimuthDeg,
         slopeAngleDeg: 0,
@@ -1089,48 +1119,35 @@ export default function MapTab() {
         panelOrientation: orientation,
         rowStack: stack,
       }
-      const polygon = allPolygons.length > 1
-        ? mergePolygonsToHull(allPolygons)
-        : allPolygons[0]
-      const validPolygons = allPolygons.length > 1
-        ? allPolygons
-            .map(poly => createSafeZone({ cadastrePolygon: poly, plotType: svgPlotType }).safeZonePolygon)
-            .filter(poly => poly.length >= 3)
-        : undefined
+      // 단일/다구역 공통: allPolygons = turf-buffered safe zones (이중 margin 없음)
+      const validPolygons = allPolygons.length > 1 ? allPolygons : undefined
+      const precomputedSafeZonePolygon = allPolygons.length === 1
+        ? allPolygons[0]
+        : mergePolygonsToHull(allPolygons)
+
       if (svgZoneMode === 'multi') {
-        const mzResult = runMultiZoneAnalysis(autoSplitPolygon(polygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat)
+        // multi: cadastrePolygon(비버퍼) 기준 autoSplit → 내부에서 margin 적용
+        const mzResult = runMultiZoneAnalysis(
+          autoSplitPolygon(cadastrePolygon, panelSpec, svgPlotType, svgPanelType, commonOpts), lat
+        )
         setSvgAnalysisResult(mzResult)
         setLastFullAnalysisJson(JSON.stringify(mzResult))
         setIsEditing(false)
         setAnalysisKey(k => k + 1)
       } else {
+        // single: precomputedSafeZonePolygon으로 이중 margin 방지
         const faResult = runFullAnalysis({
-          cadastrePolygon: polygon,
+          cadastrePolygon,
           plotType: svgPlotType,
           panelSpec,
           panelType: svgPanelType,
           latitude: lat,
+          precomputedSafeZonePolygon,
           validPolygons,
           ...commonOpts,
         })
-        // turf booleanPointInPolygon: GeoJSON 기반 정밀 PIP 재필터
-        let finalResult = faResult
-        if (safeZoneGeoJson) {
-          const refLat = apiCoords.lat
-          const refLon = apiCoords.lon
-          const MPD = 111319.9
-          const cosLat = Math.cos(refLat * Math.PI / 180)
-          const filtered = faResult.layout.placements.filter(p => {
-            const ptLon = refLon + p.centerX / (MPD * cosLat)
-            const ptLat = refLat + p.centerY / MPD
-            return turfPIP(turfPoint([ptLon, ptLat]), safeZoneGeoJson)
-          })
-          const totalCount = filtered.length
-          const totalKwp = parseFloat((totalCount * panelSpec.wattNominal / 1000).toFixed(1))
-          finalResult = { ...faResult, layout: { ...faResult.layout, placements: filtered, totalCount, totalKwp } }
-        }
-        setSvgAnalysisResult(finalResult)
-        setLastFullAnalysisJson(JSON.stringify(finalResult))
+        setSvgAnalysisResult(faResult)
+        setLastFullAnalysisJson(JSON.stringify(faResult))
         setIsEditing(true)
         setAnalysisKey(k => k + 1)
       }

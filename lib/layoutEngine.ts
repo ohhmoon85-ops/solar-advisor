@@ -481,6 +481,8 @@ export function runFullAnalysis(params: {
   rowStack?: number
   /** 복수 필지 PIP용 유효 폴리곤 목록 */
   validPolygons?: Polygon[]
+  /** 외부 사전계산 Safe Zone (제공 시 createSafeZone 스킵 — 이중 margin 방지) */
+  precomputedSafeZonePolygon?: Polygon
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -496,6 +498,7 @@ export function runFullAnalysis(params: {
     panelOrientation = 'portrait',
     rowStack = 1,
     validPolygons,
+    precomputedSafeZonePolygon,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -503,13 +506,17 @@ export function runFullAnalysis(params: {
     ? params.latitude - slopeAngleDeg * Math.cos((slopeAzimuthDeg - 180) * DEG2RAD)
     : params.latitude
 
-  // Step 1: Safe Zone
-  const safeZone = createSafeZone({
-    cadastrePolygon,
-    plotType,
-    boundaries,
-    isJimokChangePlanned,
-  })
+  // Step 1: Safe Zone (외부 사전계산 제공 시 createSafeZone 스킵)
+  const safeZone = precomputedSafeZonePolygon
+    ? {
+        safeZonePolygon: precomputedSafeZonePolygon,
+        originalPolygon: cadastrePolygon,
+        marginApplied: 0,
+        plotType,
+        originalAreaM2: polygonAreaM2(cadastrePolygon),
+        safeAreaM2: polygonAreaM2(precomputedSafeZonePolygon),
+      }
+    : createSafeZone({ cadastrePolygon, plotType, boundaries, isJimokChangePlanned })
 
   if (safeZone.error || safeZone.safeZonePolygon.length === 0) {
     return {
