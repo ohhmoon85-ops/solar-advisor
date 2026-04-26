@@ -11,8 +11,8 @@ import { type MultiZoneResult, type ZoneLayoutResult, isMultiZoneResult } from '
 // ── 상수 ───────────────────────────────────────────────────────────
 
 /** 구역별 색상 (최대 5구역) */
-const ZONE_COLORS = ['#f5a623', '#4ecdc4', '#bc8cff', '#3fb950', '#f85149']
-const ZONE_STROKES = ['#c47c00', '#2a9d8f', '#8b5cf6', '#2e7d32', '#c62828']
+const ZONE_COLORS = ['rgba(230,81,0,0.85)', 'rgba(0,137,123,0.85)', '#bc8cff', '#3fb950', '#f85149']
+const ZONE_STROKES = ['#BF360C', '#004D40', '#8b5cf6', '#2e7d32', '#c62828']
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 12
@@ -144,13 +144,12 @@ function ZoneLayer({
 
   return (
     <g>
-      {/* Layer 1: 원본 필지 — 파란 테두리 + 붉은 채움 (이격 마진 구역 표시) */}
+      {/* Layer 1: 마진 구간 — 원본 필지를 연한 빨간색으로 채움 (safe zone 밖만 보임) */}
       {showOriginal && originalPolygon.length > 2 && (
         <polygon
           points={polygonToSvgPoints(originalPolygon, vb, svgW, svgH)}
-          fill="rgba(211,47,47,0.18)"
-          stroke="#1565C0"
-          strokeWidth="2"
+          fill="rgba(211,47,47,0.15)"
+          stroke="none"
         />
       )}
 
@@ -167,10 +166,20 @@ function ZoneLayer({
       {safeZonePolygon.length > 2 && (
         <polygon
           points={polygonToSvgPoints(safeZonePolygon, vb, svgW, svgH)}
-          fill="rgba(46,125,50,0.08)"
+          fill="rgba(46,125,50,0.12)"
           stroke="#2E7D32"
-          strokeWidth="1.5"
+          strokeWidth="2.0"
           strokeDasharray="8,4"
+        />
+      )}
+
+      {/* Layer 2c: 원본 필지 경계선 — 파란 테두리 + 연한 파란 채움 */}
+      {showOriginal && originalPolygon.length > 2 && (
+        <polygon
+          points={polygonToSvgPoints(originalPolygon, vb, svgW, svgH)}
+          fill="rgba(21,101,192,0.08)"
+          stroke="#1565C0"
+          strokeWidth="2.5"
         />
       )}
 

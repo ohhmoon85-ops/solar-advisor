@@ -1159,36 +1159,54 @@ export default function MapTab() {
         : mergePolygonsToHull(allPolygons)
 
       if (svgZoneMode === 'multi') {
-        // multi: 각 필지를 개별 구역으로 처리 — 필지별 turfBuffer safe zone 사전계산
-        const zones: ZoneConfig[] = parcels
-          .filter(p => p.ring.length >= 3)
-          .map((parcel, idx) => {
-            const ring = parcel.ring
-            const closed = (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
-              ? ring : [...ring, ring[0]]
-            const geoJson = turfPolygon([closed])
-            const safeGeoJson = turfBuffer(geoJson, -margin, { units: 'meters' })
-            if (!safeGeoJson || safeGeoJson.geometry.type !== 'Polygon') return null
-            const safeRing = safeGeoJson.geometry.coordinates[0] as number[][]
-            const safePolygon = convertGeoRingToLocalPolygon(safeRing, apiCoords.lat, apiCoords.lon)
-            const cadastrePolyLocal = convertGeoRingToLocalPolygon(closed, apiCoords.lat, apiCoords.lon)
-            return {
-              label: `${String.fromCharCode(65 + idx)}구역`,
-              polygon: cadastrePolyLocal,
-              plotType: svgPlotType,
-              panelSpec,
-              panelType: svgPanelType,
-              precomputedSafeZonePolygon: safePolygon,
-              ...commonOpts,
-            } as ZoneConfig
+        if (geomType === 'Polygon') {
+          // 인접 필지 union → Polygon → 단일 Safe Zone으로 통합 배치 (single 경로와 동일)
+          const faResult = runFullAnalysis({
+            cadastrePolygon,
+            plotType: svgPlotType,
+            panelSpec,
+            panelType: svgPanelType,
+            latitude: lat,
+            precomputedSafeZonePolygon,
+            validPolygons,
+            ...commonOpts,
           })
-          .filter((z): z is ZoneConfig => z !== null)
-        if (zones.length === 0) return
-        const mzResult = runMultiZoneAnalysis(zones, lat)
-        setSvgAnalysisResult(mzResult)
-        setLastFullAnalysisJson(JSON.stringify(mzResult))
-        setIsEditing(false)
-        setAnalysisKey(k => k + 1)
+          setSvgAnalysisResult(faResult)
+          setLastFullAnalysisJson(JSON.stringify(faResult))
+          setIsEditing(true)
+          setAnalysisKey(k => k + 1)
+        } else {
+          // 이격 필지(MultiPolygon) → 필지별 개별 구역 처리
+          const zones: ZoneConfig[] = parcels
+            .filter(p => p.ring.length >= 3)
+            .map((parcel, idx) => {
+              const ring = parcel.ring
+              const closed = (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
+                ? ring : [...ring, ring[0]]
+              const geoJson = turfPolygon([closed])
+              const safeGeoJson = turfBuffer(geoJson, -margin, { units: 'meters' })
+              if (!safeGeoJson || safeGeoJson.geometry.type !== 'Polygon') return null
+              const safeRing = safeGeoJson.geometry.coordinates[0] as number[][]
+              const safePolygon = convertGeoRingToLocalPolygon(safeRing, apiCoords.lat, apiCoords.lon)
+              const cadastrePolyLocal = convertGeoRingToLocalPolygon(closed, apiCoords.lat, apiCoords.lon)
+              return {
+                label: `${String.fromCharCode(65 + idx)}구역`,
+                polygon: cadastrePolyLocal,
+                plotType: svgPlotType,
+                panelSpec,
+                panelType: svgPanelType,
+                precomputedSafeZonePolygon: safePolygon,
+                ...commonOpts,
+              } as ZoneConfig
+            })
+            .filter((z): z is ZoneConfig => z !== null)
+          if (zones.length === 0) return
+          const mzResult = runMultiZoneAnalysis(zones, lat)
+          setSvgAnalysisResult(mzResult)
+          setLastFullAnalysisJson(JSON.stringify(mzResult))
+          setIsEditing(false)
+          setAnalysisKey(k => k + 1)
+        }
       } else {
         // single: precomputedSafeZonePolygon으로 이중 margin 방지
         const faResult = runFullAnalysis({
