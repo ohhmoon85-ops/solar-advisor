@@ -1854,8 +1854,8 @@ export default function MapTab() {
                   </button>
                 </div>
 
-                {/* 편집 모드 */}
-                {isEditing ? (
+                {/* 편집 모드: 다구역은 항상 LayoutEditor 표시, 단일은 isEditing 시에만 */}
+                {(isEditing || isMultiZoneResult(svgAnalysisResult)) ? (
                   <LayoutEditor
                     key={`${analysisKey}-${isMultiZoneResult(svgAnalysisResult) ? activeZoneId : 'single'}`}
                     result={
@@ -1865,6 +1865,7 @@ export default function MapTab() {
                           ) as FullAnalysisResult
                         : svgAnalysisResult as FullAnalysisResult
                     }
+                    zoneLabel={isMultiZoneResult(svgAnalysisResult) ? activeZoneId + '구역' : undefined}
                     width={svgContainerWidth}
                     height={Math.round(svgContainerWidth * 520 / 920)}
                     onCountChange={(count) => setEditingCount(count)}

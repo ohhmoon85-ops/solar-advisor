@@ -113,6 +113,8 @@ interface Props {
   result: FullAnalysisResult
   width?: number
   height?: number
+  /** 다구역 편집 시 표시할 구역 레이블 (예: "A구역") */
+  zoneLabel?: string
   /** 편집 완료 시 콜백: 편집된 배치 + 새 용량 */
   onComplete?: (placements: PanelPlacement[], totalKwp: number) => void
   onCancel?: () => void
@@ -124,6 +126,7 @@ export default function LayoutEditor({
   result,
   width = 700,
   height = 520,
+  zoneLabel,
   onComplete,
   onCancel,
   onCountChange,
@@ -558,6 +561,9 @@ export default function LayoutEditor({
     <div className="flex flex-col" style={{ width, height }}>
       {/* ── 툴바 ── */}
       <div className="flex items-center gap-1 px-2 py-1.5 bg-slate-800 border-b border-slate-700 flex-wrap">
+        {zoneLabel && (
+          <span className="text-xs text-orange-400 mr-2 font-semibold">편집 대상: {zoneLabel}</span>
+        )}
         {toolButtons.map(tb => (
           <button
             key={tb.id}
