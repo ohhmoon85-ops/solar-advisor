@@ -57,6 +57,7 @@ export type EditorAction =
   | { type: 'SELECT_ROWS'; rowIndices: number[]; additive?: boolean }
   | { type: 'SPREAD_ROWS'; deltaM: number; rowIndices?: number[] }
   | { type: 'REINIT'; placements: PanelPlacement[] }
+  | { type: 'MARK_SAVED' }
 
 // ── 초기화 ─────────────────────────────────────────────────────────
 
@@ -372,6 +373,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
     case 'REINIT':
       return initEditorState(action.placements)
+
+    case 'MARK_SAVED':
+      return { ...state, isDirty: false, originalPlacements: deepCopyPlacements(state.placements) }
 
     case 'APPLY_QUICK': {
       const saved = pushHistory(state)

@@ -1094,6 +1094,54 @@ export default function MapTab() {
     }
   }
 
+  function handleLayoutDownloadPNG() {
+    const svgEl = document.getElementById('svg-layout-canvas') as SVGSVGElement | null
+    if (!svgEl) return
+    const svgData = new XMLSerializer().serializeToString(svgEl)
+    const vb = svgEl.viewBox.baseVal
+    const canvas = document.createElement('canvas')
+    const scale = 2
+    canvas.width = (vb.width || svgEl.clientWidth) * scale
+    canvas.height = (vb.height || svgEl.clientHeight) * scale
+    const ctx = canvas.getContext('2d')!
+    ctx.fillStyle = '#0f172a'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    const img = new Image()
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      const a = document.createElement('a')
+      a.download = `배치도_${new Date().toISOString().slice(0, 10)}.png`
+      a.href = canvas.toDataURL('image/png')
+      a.click()
+    }
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
+  }
+
+  async function handleLayoutDownloadPDF() {
+    const svgEl = document.getElementById('svg-layout-canvas') as SVGSVGElement | null
+    if (!svgEl) return
+    const svgData = new XMLSerializer().serializeToString(svgEl)
+    const vb = svgEl.viewBox.baseVal
+    const canvas = document.createElement('canvas')
+    const scale = 2
+    canvas.width = (vb.width || svgEl.clientWidth) * scale
+    canvas.height = (vb.height || svgEl.clientHeight) * scale
+    const ctx = canvas.getContext('2d')!
+    ctx.fillStyle = '#0f172a'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    await new Promise<void>(resolve => {
+      const img = new Image()
+      img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); resolve() }
+      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
+    })
+    const { jsPDF } = await import('jspdf')
+    const pdf = new jsPDF('l', 'mm', 'a4')
+    const pw = pdf.internal.pageSize.getWidth() - 16
+    const ph = (canvas.height / canvas.width) * pw
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 8, 8, pw, ph)
+    pdf.save(`배치도_${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
+
   const runSVGAnalysis = useCallback(async (overrides?: {
     panelOrientation?: 'portrait' | 'landscape'
     rowStack?: 1 | 2 | 3
@@ -1839,6 +1887,25 @@ export default function MapTab() {
                   ) : (
                     <div />
                   )}
+                  {/* 다운로드 버튼 — 편집 모드가 아닐 때만 */}
+                  {!isEditing && svgAnalysisResult && (
+                    <div className="flex gap-1">
+                      <button
+                        onClick={handleLayoutDownloadPNG}
+                        className="px-2.5 py-1.5 rounded text-xs font-semibold bg-slate-700 text-slate-200 hover:bg-slate-600 border border-slate-500 flex-shrink-0"
+                        title="배치도 PNG 저장"
+                      >
+                        ↓ PNG
+                      </button>
+                      <button
+                        onClick={handleLayoutDownloadPDF}
+                        className="px-2.5 py-1.5 rounded text-xs font-semibold bg-slate-700 text-slate-200 hover:bg-slate-600 border border-slate-500 flex-shrink-0"
+                        title="배치도 PDF 출력"
+                      >
+                        ↓ PDF
+                      </button>
+                    </div>
+                  )}
                   {/* 편집 버튼 — 단일/다구역 공통 */}
                   <button
                     onClick={() => setIsEditing(v => !v)}
@@ -1876,7 +1943,25 @@ export default function MapTab() {
                     }
                     width={svgContainerWidth}
                     height={Math.round(svgContainerWidth * 520 / 920)}
-                    onCountChange={(count) => setEditingCount(count)}
+                    onCountChange={(count) => {
+                      setEditingCount(count)
+                      if (isMultiZoneResult(svgAnalysisResult)) {
+                        setSvgAnalysisResult(prev => {
+                          if (!prev || !isMultiZoneResult(prev)) return prev
+                          const zoneLabel = activeZoneId + '구역'
+                          const updatedZones = (prev as MultiZoneResult).zones.map(z =>
+                            z.zoneLabel === zoneLabel
+                              ? { ...z, layout: { ...z.layout, totalCount: count } }
+                              : z
+                          )
+                          return {
+                            ...(prev as MultiZoneResult),
+                            zones: updatedZones,
+                            totalCount: updatedZones.reduce((s, z) => s + z.layout.totalCount, 0),
+                          }
+                        })
+                      }
+                    }}
                     onComplete={(placements, totalKwp) => {
                       if (isMultiZoneResult(svgAnalysisResult)) {
                         // 다구역: activeZoneId 구역만 직접 업데이트
@@ -1901,7 +1986,6 @@ export default function MapTab() {
                           updatedZones.reduce((s, z) => s + z.layout.totalKwp, 0).toFixed(2)
                         )
                         setSvgAnalysisResult({ ...mzResult, zones: updatedZones, totalCount: newTotalCount, totalKwp: newTotalKwp })
-                        setAnalysisKey(k => k + 1)  // LayoutEditor remount → isDirty 초기화
                       } else {
                         // 단일 구역
                         const faResult = svgAnalysisResult as FullAnalysisResult

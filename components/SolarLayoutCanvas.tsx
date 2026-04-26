@@ -194,7 +194,7 @@ function ZoneLayer({
           <polygon
             key={`z${zoneIndex}-p${panel.id}`}
             points={pts}
-            fill={isHovered ? '#ffffff' : (isActive !== false ? panelColor : 'rgba(230,81,0,0.25)')}
+            fill={isHovered ? '#ffffff' : (isActive !== false ? panelColor : 'rgba(230,81,0,0.45)')}
             stroke={panelStroke}
             strokeWidth={isHovered ? 1.5 : 0.5}
             opacity={isHovered ? 1 : 0.85}
@@ -416,6 +416,7 @@ export default function SolarLayoutCanvas({
   return (
     <div className="relative" style={{ width, height }}>
       <svg
+        id="svg-layout-canvas"
         viewBox={`0 0 ${svgW} ${drawH}`}
         width={svgW}
         height={drawH}

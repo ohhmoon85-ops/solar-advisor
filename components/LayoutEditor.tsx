@@ -153,6 +153,7 @@ export default function LayoutEditor({
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
   const [gridAzimuth, setGridAzimuth] = useState(result.azimuthDeg ?? 180)
+  const [savedMsg, setSavedMsg] = useState(false)
 
   const handleRotateGrid = useCallback((deltaDeg: number) => {
     if (!reanalysisOptions) return
@@ -170,7 +171,8 @@ export default function LayoutEditor({
       fixedGridAngle: true,
     })
     dispatch({ type: 'REINIT', placements: newLayout.placements })
-  }, [reanalysisOptions, gridAzimuth, result, dispatch])
+    onCountChange?.(newLayout.placements.length)
+  }, [reanalysisOptions, gridAzimuth, result, dispatch, onCountChange])
 
   // ── 드래그 선택 ────────────────────────────────────────────────────
   const svgRef = useRef<SVGSVGElement>(null)
@@ -527,6 +529,12 @@ export default function LayoutEditor({
 
   function handleComplete() {
     onComplete?.(state.placements, currentKwp)
+    if (zoneLabel) {
+      // 다구역: 편집 모드 유지 + 저장됨 표시
+      dispatch({ type: 'MARK_SAVED' })
+      setSavedMsg(true)
+      setTimeout(() => setSavedMsg(false), 2000)
+    }
   }
 
   // ── SVG → PNG 저장 ───────────────────────────────────────────────
@@ -756,7 +764,7 @@ export default function LayoutEditor({
               const cy = poly.length > 0 ? poly.reduce((s: number, q: Point) => s + q.y, 0) / poly.length : 0
               const lbl = toSvg({ x: cx, y: cy }, vb, SVG_W, SVG_H)
               return (
-                <g key={`bg-${bgIdx}`} opacity={0.45} pointerEvents="none">
+                <g key={`bg-${bgIdx}`} opacity={0.6} pointerEvents="none">
                   {bz.safeZone.originalPolygon.length > 2 && (
                     <polygon
                       points={polyToPoints(bz.safeZone.originalPolygon, vb, SVG_W, SVG_H)}
@@ -1135,11 +1143,15 @@ export default function LayoutEditor({
             >
               편집 완료
             </button>
-            {state.isDirty && (
+            {savedMsg ? (
+              <div className="text-center text-xs text-emerald-400 font-semibold">
+                저장됨 ✓
+              </div>
+            ) : state.isDirty ? (
               <div className="text-center text-xs text-amber-400">
                 미저장 변경 있음
               </div>
-            )}
+            ) : null}
             {onCancel && (
               <button
                 onClick={onCancel}
