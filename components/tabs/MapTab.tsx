@@ -331,6 +331,8 @@ export default function MapTab() {
   const [svgPanelOrientation, setSvgPanelOrientation] = useState<'portrait' | 'landscape'>('portrait')
   // 분석 실행마다 증가 → LayoutEditor key로 사용해 이전 편집 상태 완전 초기화
   const [analysisKey, setAnalysisKey] = useState(0)
+  // 다구역 편집 시 선택된 구역 ('A', 'B', ...)
+  const [activeZoneId, setActiveZoneId] = useState<string>('A')
 
   // 이론 이격 거리 — 현장 위도 기반 (hardcode 37.5665° → 동적 위도)
   const tiltRad = (tiltAngle * Math.PI) / 180
@@ -659,13 +661,18 @@ export default function MapTab() {
       totalPanelRects = [...totalPanelRects, ...rects]
       totalCount += rects.length
     }
-    // 필지별 패널 수 — union 합병 여부와 무관하게 각 필지 경계로 재카운트
+    // 필지별 패널 수 — recalculatePanels 로컬 cLon/cLat/scale로 재변환 (canvasPoints는 원점 다름)
     const perParcelCounts = currentParcels.map(p => {
-      const pts = p.canvasPoints
+      if (!p.ring || p.ring.length < 3) return 0
+      const pts = p.ring.map(([lon, lat]: number[]) =>
+        geoToCanvas(lon, lat, cLon, cLat, scale)
+      )
       if (pts.length < 3) return 0
-      return totalPanelRects.filter(rect =>
-        isPointInPolygon(rect.x + rect.w / 2, rect.y + rect.h / 2, pts)
-      ).length
+      return totalPanelRects.filter(rect => {
+        const cx = rect.x + rect.w / 2
+        const cy = rect.y + rect.h / 2
+        return isPointInPolygon(cx, cy, pts)
+      }).length
     })
     setPanelRects(totalPanelRects)
     setPanelCount(totalCount)
@@ -1798,50 +1805,106 @@ export default function MapTab() {
             {/* 결과 표시 */}
             {showSvgCanvas && svgAnalysisResult && (
               <div className="mt-3" ref={svgContainerRef}>
-                {/* 편집 토글 버튼 (단일 구역만) */}
-                {!isMultiZoneResult(svgAnalysisResult) && (
-                  <div className="flex justify-end mb-2">
-                    <button
-                      onClick={() => setIsEditing(v => !v)}
-                      className={[
-                        'px-3 py-1.5 rounded text-xs font-semibold transition-colors',
-                        isEditing
-                          ? 'bg-amber-500 text-slate-900 hover:bg-amber-400'
-                          : 'bg-slate-700 text-slate-200 hover:bg-slate-600 border border-slate-500',
-                      ].join(' ')}
-                    >
-                      {isEditing ? '✏ 편집 중' : '✏ 배치 편집'}
-                    </button>
-                  </div>
-                )}
+                {/* 툴바: 구역 탭(다구역) + 편집 버튼(단일/다구역 공통) */}
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  {/* 다구역 구역 선택 탭 */}
+                  {isMultiZoneResult(svgAnalysisResult) ? (
+                    <div className="flex gap-1 flex-wrap">
+                      {(svgAnalysisResult as MultiZoneResult).zones.map(z => {
+                        const zid = z.zoneLabel.replace('구역', '')
+                        return (
+                          <button
+                            key={z.zoneLabel}
+                            onClick={() => { setActiveZoneId(zid); setIsEditing(false); setEditingCount(null) }}
+                            className={[
+                              'px-2.5 py-1 rounded text-xs font-semibold transition-colors',
+                              activeZoneId === zid
+                                ? 'bg-indigo-500 text-white'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                            ].join(' ')}
+                          >
+                            {z.zoneLabel} {z.layout.totalCount}장
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div />
+                  )}
+                  {/* 편집 버튼 — 단일/다구역 공통 */}
+                  <button
+                    onClick={() => setIsEditing(v => !v)}
+                    className={[
+                      'px-3 py-1.5 rounded text-xs font-semibold transition-colors flex-shrink-0',
+                      isEditing
+                        ? 'bg-amber-500 text-slate-900 hover:bg-amber-400'
+                        : 'bg-slate-700 text-slate-200 hover:bg-slate-600 border border-slate-500',
+                    ].join(' ')}
+                  >
+                    {isEditing
+                      ? `✏ 편집 중${isMultiZoneResult(svgAnalysisResult) ? ` (${activeZoneId}구역)` : ''}`
+                      : `✏ 배치 편집${isMultiZoneResult(svgAnalysisResult) ? ` (${activeZoneId}구역)` : ''}`}
+                  </button>
+                </div>
 
                 {/* 편집 모드 */}
-                {isEditing && !isMultiZoneResult(svgAnalysisResult) ? (
+                {isEditing ? (
                   <LayoutEditor
-                    key={analysisKey}
-                    result={svgAnalysisResult as FullAnalysisResult}
+                    key={`${analysisKey}-${isMultiZoneResult(svgAnalysisResult) ? activeZoneId : 'single'}`}
+                    result={
+                      isMultiZoneResult(svgAnalysisResult)
+                        ? (svgAnalysisResult as MultiZoneResult).zones.find(
+                            z => z.zoneLabel === activeZoneId + '구역'
+                          ) as FullAnalysisResult
+                        : svgAnalysisResult as FullAnalysisResult
+                    }
                     width={svgContainerWidth}
                     height={Math.round(svgContainerWidth * 520 / 920)}
                     onCountChange={(count) => setEditingCount(count)}
                     onComplete={(placements, totalKwp) => {
                       setIsEditing(false)
                       setEditingCount(null)
-                      // 편집 완료: 패널 수/용량 반영 (분석 결과에 통합)
-                      setSvgAnalysisResult(prev => {
-                        if (!prev || isMultiZoneResult(prev)) return prev
-                        return {
-                          ...prev,
-                          layout: {
-                            ...prev.layout,
-                            placements,
-                            totalCount: placements.length,
-                            totalKwp,
-                            coverageRatio: prev.layout.coverageRatio,
-                            theoreticalMax: prev.layout.theoreticalMax,
-                            utilizationRate: placements.length / (prev.layout.theoreticalMax || 1),
-                          },
-                        }
-                      })
+                      if (isMultiZoneResult(svgAnalysisResult)) {
+                        // 다구역: activeZoneId 구역만 업데이트
+                        setSvgAnalysisResult(prev => {
+                          if (!prev || !isMultiZoneResult(prev)) return prev
+                          const zoneLabel = activeZoneId + '구역'
+                          const newZones = prev.zones.map(z =>
+                            z.zoneLabel === zoneLabel
+                              ? {
+                                  ...z,
+                                  layout: {
+                                    ...z.layout,
+                                    placements,
+                                    totalCount: placements.length,
+                                    totalKwp,
+                                    utilizationRate: placements.length / (z.layout.theoreticalMax || 1),
+                                  },
+                                }
+                              : z
+                          )
+                          const newTotalCount = newZones.reduce((s, z) => s + z.layout.totalCount, 0)
+                          const newTotalKwp = Math.round(newZones.reduce((s, z) => s + z.layout.totalKwp, 0) * 100) / 100
+                          return { ...prev, zones: newZones, totalCount: newTotalCount, totalKwp: newTotalKwp }
+                        })
+                      } else {
+                        // 단일 구역
+                        setSvgAnalysisResult(prev => {
+                          if (!prev || isMultiZoneResult(prev)) return prev
+                          return {
+                            ...prev,
+                            layout: {
+                              ...prev.layout,
+                              placements,
+                              totalCount: placements.length,
+                              totalKwp,
+                              coverageRatio: prev.layout.coverageRatio,
+                              theoreticalMax: prev.layout.theoreticalMax,
+                              utilizationRate: placements.length / (prev.layout.theoreticalMax || 1),
+                            },
+                          }
+                        })
+                      }
                     }}
                     onCancel={() => { setIsEditing(false); setEditingCount(null) }}
                   />
@@ -1864,11 +1927,19 @@ export default function MapTab() {
                         {svgAnalysisResult.validation.message}
                       </div>
                     )}
-                    {/* 다구역 — 요약 */}
+                    {/* 다구역 — 구역별 요약 */}
                     {isMultiZoneResult(svgAnalysisResult) && (
                       <div className="mt-2 grid grid-cols-3 gap-2">
                         {(svgAnalysisResult as MultiZoneResult).zones.map(z => (
-                          <div key={z.zoneLabel} className="bg-indigo-50 rounded p-2 text-xs">
+                          <div
+                            key={z.zoneLabel}
+                            className={`rounded p-2 text-xs cursor-pointer transition-colors ${
+                              activeZoneId === z.zoneLabel.replace('구역', '')
+                                ? 'bg-indigo-100 border border-indigo-300'
+                                : 'bg-indigo-50 border border-transparent hover:border-indigo-200'
+                            }`}
+                            onClick={() => { setActiveZoneId(z.zoneLabel.replace('구역', '')); setIsEditing(false) }}
+                          >
                             <div className="font-semibold text-indigo-700">{z.zoneLabel}</div>
                             <div className="text-gray-600">{z.layout.totalCount}장 · {z.layout.totalKwp}kWp</div>
                           </div>
