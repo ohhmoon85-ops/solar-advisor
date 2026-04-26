@@ -14,7 +14,7 @@ import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
 import { type MultiZoneResult, type ZoneConfig, runMultiZoneAnalysis, autoSplitPolygon, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
-import { union as turfUnion, polygon as turfPolygon, featureCollection as turfFeatureCollection } from '@turf/turf'
+import { union as turfUnion, polygon as turfPolygon, featureCollection as turfFeatureCollection, booleanPointInPolygon as turfPIP, point as turfPoint, buffer as turfBuffer } from '@turf/turf'
 
 // SVG 캔버스는 클라이언트 전용
 const SolarLayoutCanvas = dynamic(
@@ -1078,6 +1078,9 @@ export default function MapTab() {
         .map(ring => convertGeoRingToLocalPolygon(ring, apiCoords.lat, apiCoords.lon))
         .filter(p => p.length >= 3)
       if (allPolygons.length === 0) return
+      // turf buffer: 필지 union을 GeoJSON 레벨에서 수축 → 정확한 safe zone
+      const szMargin = svgPlotType === 'roof' ? 0.5 : 2.0
+      const safeZoneGeoJson = turfBuffer(mergedFeature, -szMargin, { units: 'meters' })
       const commonOpts = {
         azimuthDeg: svgAzimuthDeg,
         slopeAngleDeg: 0,
@@ -1110,8 +1113,24 @@ export default function MapTab() {
           validPolygons,
           ...commonOpts,
         })
-        setSvgAnalysisResult(faResult)
-        setLastFullAnalysisJson(JSON.stringify(faResult))
+        // turf booleanPointInPolygon: GeoJSON 기반 정밀 PIP 재필터
+        let finalResult = faResult
+        if (safeZoneGeoJson) {
+          const refLat = apiCoords.lat
+          const refLon = apiCoords.lon
+          const MPD = 111319.9
+          const cosLat = Math.cos(refLat * Math.PI / 180)
+          const filtered = faResult.layout.placements.filter(p => {
+            const ptLon = refLon + p.centerX / (MPD * cosLat)
+            const ptLat = refLat + p.centerY / MPD
+            return turfPIP(turfPoint([ptLon, ptLat]), safeZoneGeoJson)
+          })
+          const totalCount = filtered.length
+          const totalKwp = parseFloat((totalCount * panelSpec.wattNominal / 1000).toFixed(1))
+          finalResult = { ...faResult, layout: { ...faResult.layout, placements: filtered, totalCount, totalKwp } }
+        }
+        setSvgAnalysisResult(finalResult)
+        setLastFullAnalysisJson(JSON.stringify(finalResult))
         setIsEditing(true)
         setAnalysisKey(k => k + 1)
       }
