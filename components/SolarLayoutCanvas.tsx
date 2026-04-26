@@ -194,7 +194,7 @@ function ZoneLayer({
           <polygon
             key={`z${zoneIndex}-p${panel.id}`}
             points={pts}
-            fill={isHovered ? '#ffffff' : (isActive !== false ? panelColor : 'rgba(160,160,160,0.35)')}
+            fill={isHovered ? '#ffffff' : (isActive !== false ? panelColor : 'rgba(230,81,0,0.25)')}
             stroke={panelStroke}
             strokeWidth={isHovered ? 1.5 : 0.5}
             opacity={isHovered ? 1 : 0.85}

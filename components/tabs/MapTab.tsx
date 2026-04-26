@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 // VWorld는 Vercel/Cloudflare 서버 IP를 모두 차단함
 // → 브라우저(한국 사용자 IP)에서 직접 호출하는 방식으로 전환
@@ -1834,6 +1834,7 @@ export default function MapTab() {
                           </button>
                         )
                       })}
+                      <span className="text-xs text-slate-400 ml-1 self-center">{`| 전체 ${(svgAnalysisResult as MultiZoneResult).zones.reduce((s, z) => s + z.layout.totalCount, 0)}장`}</span>
                     </div>
                   ) : (
                     <div />
@@ -1877,49 +1878,46 @@ export default function MapTab() {
                     height={Math.round(svgContainerWidth * 520 / 920)}
                     onCountChange={(count) => setEditingCount(count)}
                     onComplete={(placements, totalKwp) => {
-                      setIsEditing(false)
-                      setEditingCount(null)
                       if (isMultiZoneResult(svgAnalysisResult)) {
-                        // 다구역: activeZoneId 구역만 업데이트
-                        setSvgAnalysisResult(prev => {
-                          if (!prev || !isMultiZoneResult(prev)) return prev
-                          const zoneLabel = activeZoneId + '구역'
-                          const newZones = prev.zones.map(z =>
-                            z.zoneLabel === zoneLabel
-                              ? {
-                                  ...z,
-                                  layout: {
-                                    ...z.layout,
-                                    placements,
-                                    totalCount: placements.length,
-                                    totalKwp,
-                                    utilizationRate: placements.length / (z.layout.theoreticalMax || 1),
-                                  },
-                                }
-                              : z
-                          )
-                          const newTotalCount = newZones.reduce((s, z) => s + z.layout.totalCount, 0)
-                          const newTotalKwp = Math.round(newZones.reduce((s, z) => s + z.layout.totalKwp, 0) * 100) / 100
-                          return { ...prev, zones: newZones, totalCount: newTotalCount, totalKwp: newTotalKwp }
-                        })
+                        // 다구역: activeZoneId 구역만 직접 업데이트
+                        const mzResult = svgAnalysisResult as MultiZoneResult
+                        const zoneLabel = activeZoneId + '구역'
+                        const updatedZones = mzResult.zones.map(z =>
+                          z.zoneLabel === zoneLabel
+                            ? {
+                                ...z,
+                                layout: {
+                                  ...z.layout,
+                                  placements,
+                                  totalCount: placements.length,
+                                  totalKwp,
+                                  utilizationRate: placements.length / (z.layout.theoreticalMax || 1),
+                                },
+                              }
+                            : z
+                        )
+                        const newTotalCount = updatedZones.reduce((s, z) => s + z.layout.totalCount, 0)
+                        const newTotalKwp = parseFloat(
+                          updatedZones.reduce((s, z) => s + z.layout.totalKwp, 0).toFixed(2)
+                        )
+                        setSvgAnalysisResult({ ...mzResult, zones: updatedZones, totalCount: newTotalCount, totalKwp: newTotalKwp })
+                        setAnalysisKey(k => k + 1)  // LayoutEditor remount → isDirty 초기화
                       } else {
                         // 단일 구역
-                        setSvgAnalysisResult(prev => {
-                          if (!prev || isMultiZoneResult(prev)) return prev
-                          return {
-                            ...prev,
-                            layout: {
-                              ...prev.layout,
-                              placements,
-                              totalCount: placements.length,
-                              totalKwp,
-                              coverageRatio: prev.layout.coverageRatio,
-                              theoreticalMax: prev.layout.theoreticalMax,
-                              utilizationRate: placements.length / (prev.layout.theoreticalMax || 1),
-                            },
-                          }
+                        const faResult = svgAnalysisResult as FullAnalysisResult
+                        setSvgAnalysisResult({
+                          ...faResult,
+                          layout: {
+                            ...faResult.layout,
+                            placements,
+                            totalCount: placements.length,
+                            totalKwp,
+                            utilizationRate: placements.length / (faResult.layout.theoreticalMax || 1),
+                          },
                         })
+                        setIsEditing(false)
                       }
+                      setEditingCount(null)
                     }}
                     onCancel={() => { setIsEditing(false); setEditingCount(null) }}
                   />

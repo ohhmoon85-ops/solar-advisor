@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 // components/LayoutEditor.tsx — 인터랙티브 패널 배치 편집기 (v5.2)
 // SolarLayoutCanvas 위에 올라가는 편집 레이어
@@ -713,7 +713,7 @@ export default function LayoutEditor({
               const cy = poly.length > 0 ? poly.reduce((s: number, q: Point) => s + q.y, 0) / poly.length : 0
               const lbl = toSvg({ x: cx, y: cy }, vb, SVG_W, SVG_H)
               return (
-                <g key={`bg-${bgIdx}`} opacity={0.3} pointerEvents="none">
+                <g key={`bg-${bgIdx}`} opacity={0.45} pointerEvents="none">
                   {bz.safeZone.originalPolygon.length > 2 && (
                     <polygon
                       points={polyToPoints(bz.safeZone.originalPolygon, vb, SVG_W, SVG_H)}
