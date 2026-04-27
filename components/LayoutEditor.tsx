@@ -708,8 +708,17 @@ export default function LayoutEditor({
             <div className="w-px h-5 bg-slate-600 mx-1" />
             <div className="flex items-center gap-1 text-xs text-slate-300">
               <span className="text-slate-400 text-[10px]">그리드 방위각</span>
-              <span className="font-mono text-amber-300 min-w-[38px] text-center">{gridAzimuth}°</span>
-              {([-15, -5, 5, 15] as const).map(deg => (
+              <input
+                type="number"
+                value={gridAzimuth}
+                onChange={e => {
+                  const val = parseInt(e.target.value)
+                  if (!isNaN(val)) handleRotateGrid(val - gridAzimuth)
+                }}
+                className="w-16 px-1.5 py-0.5 rounded text-xs bg-slate-900 text-amber-300 border border-slate-600 font-mono text-center"
+              />
+              <span className="text-slate-500 text-[10px]">°</span>
+              {([-15, -5, -1, 1, 5, 15] as const).map(deg => (
                 <button key={deg}
                   onClick={() => handleRotateGrid(deg)}
                   className="px-2 py-0.5 rounded text-xs bg-slate-700 text-amber-300 hover:bg-amber-900/50 font-mono"
@@ -886,27 +895,6 @@ export default function LayoutEditor({
               {/* 상태 표시 */}
               <div className="bg-slate-800/95 border border-slate-600 rounded px-2.5 py-1 text-xs text-blue-300 font-semibold">
                 ✓ {state.selectedIds.size}장 선택됨
-              </div>
-
-              {/* 회전 */}
-              <div className="bg-slate-800/95 border border-slate-600 rounded px-2 py-1.5">
-                <div className="text-[10px] text-slate-400 mb-1">회전 [ / ] · Shift=15°</div>
-                <div className="flex gap-1">
-                  {([-15, -5, 5, 15] as const).map(deg => (
-                    <button key={deg}
-                      onClick={() => dispatch({ type: 'ROTATE_SELECTED', angleDeg: deg })}
-                      className="px-2 py-0.5 rounded text-xs bg-slate-700 text-amber-300 hover:bg-amber-900/50 font-mono"
-                    >
-                      {deg > 0 ? `+${deg}°` : `${deg}°`}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => dispatch({ type: 'ROTATE_SELECTED', angleDeg: 90 })}
-                    className="px-2 py-0.5 rounded text-xs bg-slate-700 text-amber-300 hover:bg-amber-900/50 font-mono"
-                  >
-                    +90°
-                  </button>
-                </div>
               </div>
 
               {/* 이격 조정 */}
