@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 // VWorld는 Vercel/Cloudflare 서버 IP를 모두 차단함
 // → 브라우저(한국 사용자 IP)에서 직접 호출하는 방식으로 전환
@@ -24,6 +24,11 @@ const SolarLayoutCanvas = dynamic(
 
 const LayoutEditor = dynamic(
   () => import('@/components/LayoutEditor'),
+  { ssr: false }
+)
+
+const ParcelInfoCard = dynamic(
+  () => import('@/components/ParcelInfoCard'),
   { ssr: false }
 )
 
@@ -313,6 +318,8 @@ export default function MapTab() {
   const [capacityKwp, setCapacityKwp] = useState(0)
   const [annualKwh, setAnnualKwh] = useState(0)
   // 필지별 패널 수 (union ring 단위, STEP 3)
+  const [landInfo, setLandInfo] = useState<import('@/components/ParcelInfoCard').LandInfoData | null>(null)
+  const [smpPrice, setSmpPrice] = useState<number | null>(null)
   const [ringPanelCounts, setRingPanelCounts] = useState<number[]>([])
   // SVG 캔버스 동적 너비 (STEP 4)
   const svgContainerRef = useRef<HTMLDivElement>(null)
@@ -691,6 +698,10 @@ export default function MapTab() {
 
   // 설정 변경 시 자동 재계산 (검색 후 유형·모듈 등을 바꾸면 즉시 반영)
   useEffect(() => {
+    fetch('/api/smp').then(r => r.ok ? r.json() : null).then(d => { if (d?.smp) setSmpPrice(d.smp) }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
     if (parcels.length > 0 && pixelScale > 0) {
       recalculatePanels(parcels, pixelScale)
     }
@@ -966,6 +977,12 @@ export default function MapTab() {
       fetchKierData(first.lat, first.lon, tiltAngle)
       fetchSlope(first.lon, first.lat)
 
+      // land-info: 용도지역·지목 조회
+      fetch('/api/land-info?lon=' + first.lon + '&lat=' + first.lat)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d && !d.error) setLandInfo(d) })
+        .catch(() => {})
+
     } catch (e) {
       setSearchError('검색 중 오류가 발생했습니다: ' + String(e))
     } finally {
@@ -982,6 +999,7 @@ export default function MapTab() {
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
     // 복수 필지 초기화
     setParcels([])
+    setLandInfo(null)
   }
 
   const handleSendToRevenue = (source: 'quick' | 'precision' = 'quick') => {
@@ -1369,6 +1387,17 @@ export default function MapTab() {
                   <span className="truncate">{p.label} — {p.areaSqm.toFixed(0)}m²</span>
                 </div>
               ))}
+            </div>
+          )}
+          {landInfo && parcels.length > 0 && (
+            <div className='mt-2'>
+              <ParcelInfoCard
+                landInfo={landInfo}
+                smp={smpPrice}
+                panelCount={panelCount || undefined}
+                capacityKwp={capacityKwp || undefined}
+                annualKwh={annualKwh || undefined}
+              />
             </div>
           )}
           {satLoading && (
