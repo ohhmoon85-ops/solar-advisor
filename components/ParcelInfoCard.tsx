@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useSolarStore } from '@/store/useStore'
+import { useAdjacencyStore } from '@/store/useAdjacencyStore'
 import { ADJACENCY_RULES, ADJACENCY_DISCLAIMER, getRiskLevel } from '@/lib/adjacencyRules'
 
 export interface LandInfoData {
@@ -39,17 +40,19 @@ export default function ParcelInfoCard({ landInfo, smp, panelCount, capacityKwp,
     : null
 
   // ── 인접 시설 체크리스트 (자가 점검) ──
-  // PNU가 바뀌면 자동 초기화 — 새 지번에 이전 체크가 남지 않도록
-  const [checked, setChecked] = useState<Record<string, boolean>>({})
-  const [distances, setDistances] = useState<Record<string, number>>(() =>
-    Object.fromEntries(ADJACENCY_RULES.map(r => [r.id, r.defaultDistance])),
-  )
+  // store: localStorage 영속화. 같은 pnu면 새로고침 후에도 복원, 다른 pnu면 자동 reset
+  const checked = useAdjacencyStore(s => s.checked)
+  const distances = useAdjacencyStore(s => s.distances)
+  const setChecked = useAdjacencyStore(s => s.setChecked)
+  const setDistance = useAdjacencyStore(s => s.setDistance)
+  const syncWithPnu = useAdjacencyStore(s => s.syncWithPnu)
+  // showAdvanced 토글은 영속화 불필요 — 로컬 state 유지
   const [showAdvanced, setShowAdvanced] = useState(false)
+
   useEffect(() => {
-    setChecked({})
+    syncWithPnu(landInfo.pnu)
     setShowAdvanced(false)
-    setDistances(Object.fromEntries(ADJACENCY_RULES.map(r => [r.id, r.defaultDistance])))
-  }, [landInfo.pnu])
+  }, [landInfo.pnu, syncWithPnu])
 
   const checkedCount = Object.values(checked).filter(Boolean).length
   const risk = getRiskLevel(checkedCount)
@@ -170,9 +173,7 @@ export default function ParcelInfoCard({ landInfo, smp, panelCount, capacityKwp,
                   <input
                     type="checkbox"
                     checked={isChecked}
-                    onChange={e =>
-                      setChecked(prev => ({ ...prev, [rule.id]: e.target.checked }))
-                    }
+                    onChange={e => setChecked(rule.id, e.target.checked)}
                     className="w-3.5 h-3.5 accent-amber-500 flex-shrink-0"
                   />
                   <span className="flex-shrink-0">{rule.icon}</span>
@@ -183,7 +184,7 @@ export default function ParcelInfoCard({ landInfo, smp, panelCount, capacityKwp,
                       isChecked ? 'text-amber-700' : 'text-gray-500',
                     ].join(' ')}
                   >
-                    {distances[rule.id]}m
+                    {distances[rule.id] ?? rule.defaultDistance}m
                   </span>
                 </label>
                 {showAdvanced && (
@@ -193,13 +194,8 @@ export default function ParcelInfoCard({ landInfo, smp, panelCount, capacityKwp,
                       min={rule.minDistance}
                       max={rule.maxDistance}
                       step={5}
-                      value={distances[rule.id]}
-                      onChange={e =>
-                        setDistances(prev => ({
-                          ...prev,
-                          [rule.id]: Number(e.target.value),
-                        }))
-                      }
+                      value={distances[rule.id] ?? rule.defaultDistance}
+                      onChange={e => setDistance(rule.id, Number(e.target.value))}
                       className="flex-1 accent-amber-500"
                     />
                     <span className="text-[9px] text-gray-400 w-14 text-right">

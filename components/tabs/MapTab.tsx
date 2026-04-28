@@ -957,6 +957,37 @@ export default function MapTab() {
     if (!srcCanvas) return
     const { jsPDF } = await import('jspdf')
     const { default: html2canvas } = await import('html2canvas')
+    // 인접 체크 결과 — store에서 직접 조회 (PDF 생성 시점 스냅샷)
+    const { useAdjacencyStore } = await import('@/store/useAdjacencyStore')
+    const { ADJACENCY_RULES, ADJACENCY_DISCLAIMER, getRiskLevel } = await import('@/lib/adjacencyRules')
+    const adj = useAdjacencyStore.getState()
+    const adjCheckedCount = Object.values(adj.checked).filter(Boolean).length
+    const adjRisk = getRiskLevel(adjCheckedCount)
+    const adjBadgeColor = adjRisk.level === 'critical'
+      ? { bg: '#fee2e2', fg: '#991b1b', border: '#fca5a5' }
+      : adjRisk.level === 'caution'
+      ? { bg: '#fef3c7', fg: '#92400e', border: '#fcd34d' }
+      : { bg: '#dcfce7', fg: '#166534', border: '#86efac' }
+    const adjacencyHtml = adjCheckedCount > 0
+      ? `<div style="margin-top:14px;padding:10px 12px;border:1px solid ${adjBadgeColor.border};background:${adjBadgeColor.bg}cc;border-radius:6px;font-size:11px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <strong style="color:${adjBadgeColor.fg};font-size:12px">🚧 인접 시설 사전 체크</strong>
+            <span style="background:${adjBadgeColor.fg};color:white;padding:2px 8px;border-radius:9999px;font-size:10px;font-weight:bold">${adjRisk.label} · ${adjCheckedCount}/4</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            ${ADJACENCY_RULES.map(rule => {
+              const isChecked = !!adj.checked[rule.id]
+              const dist = adj.distances[rule.id] ?? rule.defaultDistance
+              return `<tr style="background:${isChecked ? '#ffffff' : 'transparent'}">
+                <td style="padding:4px 8px;border-bottom:1px solid #e7e5e4;width:24px;text-align:center">${isChecked ? '☑' : '☐'}</td>
+                <td style="padding:4px 8px;border-bottom:1px solid #e7e5e4;font-weight:${isChecked ? 'bold' : 'normal'};color:${isChecked ? adjBadgeColor.fg : '#57534e'}">${rule.icon} ${rule.label}</td>
+                <td style="padding:4px 8px;border-bottom:1px solid #e7e5e4;text-align:right;font-weight:${isChecked ? 'bold' : 'normal'};color:${isChecked ? adjBadgeColor.fg : '#78716c'}">${dist}m</td>
+              </tr>`
+            }).join('')}
+          </table>
+          <div style="margin-top:6px;font-size:9px;color:#78716c;line-height:1.3">ⓘ ${ADJACENCY_DISCLAIMER}</div>
+        </div>`
+      : ''  // 체크 0개면 섹션 통째로 생략 (사용자 지시: 빈 상태 생략 권장)
 
     // 오프스크린 DIV 생성 (한글 텍스트 html2canvas 캡처 → PDF 한글 깨짐 방지)
     const div = document.createElement('div')
@@ -1001,6 +1032,7 @@ export default function MapTab() {
         `).join('')}
       </table>
       <img src="${srcCanvas.toDataURL('image/png')}" style="width:100%;border:1px solid #e2e8f0;border-radius:6px" />
+      ${adjacencyHtml}
       <div style="margin-top:10px;font-size:10px;color:#94a3b8;text-align:center">
         생성: ${new Date().toLocaleDateString('ko-KR')} — SolarAdvisor v5.2 (SMP ${smpDisplay.toFixed(2)}원/kWh${liveSmp != null ? ' · KPX 실시간' : ''} · REC 건물 ${priceOverride.recBuilding.toLocaleString()}원/MWh · 발전시간 3.5h)
       </div>
