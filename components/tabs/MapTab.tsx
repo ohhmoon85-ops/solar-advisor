@@ -27,6 +27,12 @@ const LayoutEditor = dynamic(
   { ssr: false }
 )
 
+// 경매 파일 드롭존 — pdfjs/tesseract.js 동적 로드 (번들 크기 최적화)
+const AuctionFileDropzone = dynamic(
+  () => import('@/components/AuctionFileDropzone'),
+  { ssr: false }
+)
+
 const ParcelInfoCard = dynamic(
   () => import('@/components/ParcelInfoCard'),
   { ssr: false }
@@ -1257,6 +1263,22 @@ export default function MapTab() {
               🛰 위성사진
             </button>
           </div>
+
+          {/* 경매 파일 자동 추출 (PDF/JPG/PNG 드롭존) */}
+          <AuctionFileDropzone
+            defaultCollapsed={addresses.some(a => a.trim().length > 0)}
+            onParsed={jibuns => {
+              const next = [...addresses]
+              jibuns.slice(0, 5).forEach((j, i) => { next[i] = j })
+              // 5개 미만이면 나머지는 기존 값 유지 (또는 빈 칸)
+              setAddresses(next)
+              setSearchError('')
+            }}
+            onAutoSearch={() => {
+              // setAddresses는 비동기 — 다음 틱에 검색 트리거
+              setTimeout(() => handleAddressSearch(), 0)
+            }}
+          />
 
           {/* 5개 지번 입력 필드 */}
           <div className="space-y-1.5">
