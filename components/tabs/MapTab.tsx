@@ -84,27 +84,6 @@ function tileToWgs84Bbox(z: number, tx: number, ty: number): string {
   return `${latS},${west},${latN},${east}`
 }
 
-/** VWorld JSONP 호출 (CORS 미지원 우회) */
-function vwJsonp<T = unknown>(url: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const cb = '_vw_' + Math.random().toString(36).slice(2)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any)[cb] = (data: T) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (window as any)[cb]
-      script.remove()
-      resolve(data)
-    }
-    const script = document.createElement('script')
-    script.src = url + (url.includes('?') ? '&' : '?') + `callback=${cb}`
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    script.onerror = () => { delete (window as any)[cb]; script.remove(); reject(new Error('JSONP failed')) }
-    document.head.appendChild(script)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setTimeout(() => { delete (window as any)[cb]; script.remove(); reject(new Error('JSONP timeout')) }, 10000)
-  })
-}
-
 // ── 지리좌표 헬퍼 (순수함수) ─────────────────────────────────────
 function mpdLon(lat: number) { return 111319.9 * Math.cos((lat * Math.PI) / 180) }
 const MPD_LAT = 111319.9
@@ -794,102 +773,41 @@ export default function MapTab() {
     } catch { /* 무시 */ } finally { setSlopeFetching(false) }
   }, [])
 
-  // ── 주소 → 좌표 변환 (VWorld → Kakao → Naver → Nominatim 순) ──
-  const geocodeAddress = async (q: string): Promise<{ lon: number; lat: number; source?: string } | { error: string } | null> => {
-    const errors: string[] = []
-
-    // 1차: VWorld 검색 API — JSONP (CORS 미지원 우회)
-    try {
-      const vwSData = await vwJsonp<{ response?: { status?: string; result?: { items?: { point?: { x: string; y: string } }[] } } }>(
-        `${VW}/req/search?service=search&request=search&version=2.0&crs=epsg:4326&size=1&page=1&format=json&key=${VW_KEY}&query=${encodeURIComponent(q)}&type=address&category=PARCEL`
-      )
-      if (vwSData?.response?.status === 'OK') {
-        const item = vwSData?.response?.result?.items?.[0]
-        const point = item?.point
-        if (point) {
-          const lon = parseFloat(point.x)
-          const lat = parseFloat(point.y)
-          if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'vworld-search' }
-        }
-      }
-      errors.push('VWorld검색: ' + (vwSData?.response?.status ?? 'no result'))
-    } catch (e) { errors.push('VWorld검색: ' + String(e)) }
-
-    // 2차: Kakao Local API
-    try {
-      const kakaoRes = await fetch(`/api/kakao?query=${encodeURIComponent(q)}`)
-      const kakaoData = await kakaoRes.json()
-      if (kakaoRes.ok && !kakaoData.fallback && kakaoData.documents?.length > 0) {
-        const doc = kakaoData.documents[0]
-        const lon = parseFloat(doc.x ?? doc.address?.x ?? doc.road_address?.x)
-        const lat = parseFloat(doc.y ?? doc.address?.y ?? doc.road_address?.y)
-        if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'kakao' }
-      }
-      errors.push('Kakao: ' + (kakaoData?.error ?? `HTTP ${kakaoRes.status}`))
-    } catch (e) { errors.push('Kakao: ' + String(e)) }
-
-    // 3차: Naver Geocoding API (1/2차 실패 시 폴백)
-    try {
-      const naverRes = await fetch(`/api/naver?query=${encodeURIComponent(q)}`)
-      const naverData = await naverRes.json()
-      if (naverRes.ok && !naverData.fallback && naverData.addresses?.length > 0) {
-        const addr = naverData.addresses[0]
-        const lon = parseFloat(addr.x)
-        const lat = parseFloat(addr.y)
-        if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'naver' }
-      }
-      errors.push('Naver: ' + (naverData?.error ?? `HTTP ${naverRes.status}`))
-    } catch (e) { errors.push('Naver: ' + String(e)) }
-
-    // 4차: VWorld 주소→좌표 — JSONP (CORS 미지원 우회)
-    try {
-      const vwData = await vwJsonp<{ response?: { result?: { point?: { x: string; y: string } }; error?: string } }>(
-        `${VW}/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&refine=true&simple=false&format=json&key=${VW_KEY}&address=${encodeURIComponent(q)}&type=parcel`
-      )
-      const point = vwData?.response?.result?.point
-      if (point) return { lon: parseFloat(point.x), lat: parseFloat(point.y), source: 'vworld' }
-      errors.push('VWorld: ' + (vwData?.response?.error ?? '결과없음'))
-    } catch (e) { errors.push('VWorld: ' + String(e)) }
-
-    // 5차: OpenStreetMap Nominatim (무료, API키 불필요)
-    try {
-      const nomRes = await fetch(`/api/nominatim?query=${encodeURIComponent(q)}`)
-      const nomData = await nomRes.json()
-      if (nomRes.ok && Array.isArray(nomData) && nomData.length > 0) {
-        const lon = parseFloat(nomData[0].lon)
-        const lat = parseFloat(nomData[0].lat)
-        if (!isNaN(lon) && !isNaN(lat)) return { lon, lat, source: 'nominatim' }
-      }
-      errors.push('Nominatim: ' + (nomData?.error ?? (Array.isArray(nomData) && nomData.length === 0 ? '결과없음' : `HTTP ${nomRes.status}`)))
-    } catch (e) { errors.push('Nominatim: ' + String(e)) }
-
-    return { error: errors.join(' / ') }
+  // ── 주소 → 좌표 + 필지 통합 조회 (VWorld 단일 체계) ──
+  // /api/geocode (Edge Runtime) 한 번의 호출로 좌표·PNU·폴리곤·면적·라벨 모두 수신
+  interface GeocodeResult {
+    lon: number; lat: number
+    ring: number[][]
+    areaSqm: number
+    label: string
+    pnu?: string
+    jimok?: string
   }
-
-  // ── 단일 지번 필지 경계 조회 ──
-  const fetchParcelRing = async (lon: number, lat: number): Promise<{
-    ring: number[][], label: string
-  } | null> => {
+  const geocodeAddress = async (q: string): Promise<GeocodeResult | { error: string }> => {
     try {
-      // VWorld 필지 경계 — JSONP (CORS 미지원 우회)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const parcelData = await vwJsonp<any>(
-        `${VW}/req/data?service=data&request=GetFeature&data=LP_PA_CBND_BUBUN&key=${VW_KEY}&format=json&geometry=true&attribute=true&crs=epsg:4326&page=1&size=1&geomFilter=POINT(${lon}%20${lat})`
-      )
-      const features = parcelData?.response?.result?.featureCollection?.features
-      if (!features?.length) return null
-      const geometry = features[0].geometry
-      let rawCoords: number[][] = []
-      if (geometry.type === 'Polygon') rawCoords = geometry.coordinates[0]
-      else if (geometry.type === 'MultiPolygon') rawCoords = geometry.coordinates[0][0]
-      if (rawCoords.length < 3) return null
-      const closed = rawCoords[0][0] === rawCoords[rawCoords.length - 1][0] &&
-        rawCoords[0][1] === rawCoords[rawCoords.length - 1][1]
-      const ring = closed ? rawCoords.slice(0, -1) : rawCoords
-      const attrs = features[0].properties ?? {}
-      const label = [attrs.EMD_NM, attrs.RI_NM, attrs.JIBUN].filter(Boolean).join(' ')
-      return { ring, label }
-    } catch { return null }
+      const res = await fetch(`/api/geocode?address=${encodeURIComponent(q)}`)
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        return { error: data.error ?? `HTTP ${res.status}` }
+      }
+      if (typeof data.lat !== 'number' || typeof data.lng !== 'number') {
+        return { error: '좌표 응답 형식 오류' }
+      }
+      if (!data.parcel) {
+        return { error: '필지 경계를 찾을 수 없습니다' }
+      }
+      return {
+        lon: data.lng,
+        lat: data.lat,
+        ring: data.parcel.ring,
+        areaSqm: data.parcel.areaSqm,
+        label: data.parcel.label,
+        pnu: data.parcel.pnu ?? data.pnu,
+        jimok: data.parcel.jimok,
+      }
+    } catch (e) {
+      return { error: 'VWorld 통합 지오코더 호출 실패: ' + String(e) }
+    }
   }
 
   // ── 다중 지번 검색 핸들러 ──
@@ -905,41 +823,26 @@ export default function MapTab() {
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
 
     try {
-      // 모든 지번 병렬 조회
-      const coordResults = await Promise.all(queries.map(q => geocodeAddress(q)))
+      // 모든 지번 병렬 조회 — /api/geocode 단일 호출로 좌표+필지 동시 수신
+      const geoResults = await Promise.all(queries.map(q => geocodeAddress(q)))
       const parcelResults: ParcelInfo[] = []
 
-      for (let i = 0; i < coordResults.length; i++) {
-        const coords = coordResults[i]
-        if (!coords || 'error' in coords) continue
-        const { lon, lat } = coords
-        const parcelData = await fetchParcelRing(lon, lat)
-        if (!parcelData) continue
+      for (let i = 0; i < geoResults.length; i++) {
+        const r = geoResults[i]
+        if ('error' in r) continue
         parcelResults.push({
-          ring: parcelData.ring,
+          ring: r.ring,
           canvasPoints: [], // 나중에 공통 좌표계로 변환
-          areaSqm: geoRingAreaSqm(parcelData.ring),
-          label: parcelData.label,
-          lon, lat,
+          areaSqm: r.areaSqm,
+          label: r.label,
+          lon: r.lon, lat: r.lat,
           color: PARCEL_COLORS[i % PARCEL_COLORS.length],
         })
       }
 
       if (parcelResults.length === 0) {
-        // 경계 없음 — 첫 번째 좌표로 위성 로드
-        const coords = coordResults.find(c => c && !('error' in c)) as { lon: number; lat: number } | undefined
-        if (coords) {
-          const defaultZ = 18
-          const defaultScale = tilePixelScaleM(coords.lat, defaultZ)
-          setPixelScale(defaultScale); setSatZoom(defaultZ)
-          setApiSource('api')
-          setLocationCoords(coords)
-          setApiCoords(coords)
-          loadTiles(coords.lon, coords.lat, defaultZ, defaultScale, mapMode)
-          fetchKierData(coords.lat, coords.lon, tiltAngle)
-          fetchSlope(coords.lon, coords.lat)
-        }
-        setSearchError('필지 경계를 불러올 수 없습니다.')
+        const firstError = geoResults.find(r => 'error' in r) as { error: string } | undefined
+        setSearchError(firstError?.error ?? '필지 경계를 불러올 수 없습니다.')
         return
       }
 
