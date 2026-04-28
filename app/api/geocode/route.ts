@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 // VWorld 통합 지오코더 — 주소 → (좌표 + PNU + 필지)
-// Edge Runtime: 한국 사용자 IP의 Vercel PoP에서 실행 → VWorld 호출 안정
+// Edge Runtime + 인천 PoP 강제 → VWorld 한국 IP 정책 안정 우회
 export const runtime = 'edge'
+export const preferredRegion = 'icn1'  // Seoul/Incheon (Vercel Edge region)
 
 interface ParcelInfo {
   ring: number[][]      // [[lon, lat], ...]
@@ -58,7 +59,17 @@ export async function GET(req: NextRequest) {
     Origin: siteOrigin,
     'User-Agent': 'Mozilla/5.0 (compatible; SolarAdvisor/1.0)',
   }
-  const vwFetch = (url: string) => fetch(url, { cache: 'no-store', headers: vwHeaders })
+  // Edge Runtime fetch에 명시적 timeout — outbound 무한 대기 시
+  // "Network connection lost" 에러 회피
+  const vwFetch = async (url: string, timeoutMs = 8000) => {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), timeoutMs)
+    try {
+      return await fetch(url, { cache: 'no-store', headers: vwHeaders, signal: ctrl.signal })
+    } finally {
+      clearTimeout(t)
+    }
+  }
 
   try {
     // ── Step 1: 주소 → 좌표 ────────────────────────────────────
@@ -163,9 +174,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(body)
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown error'
-    return NextResponse.json(
-      { error: 'VWorld 통합 지오코더 실패: ' + msg },
-      { status: 500 },
-    )
+    const isAbort = err instanceof Error && err.name === 'AbortError'
+    const friendly = isAbort
+      ? 'VWorld 응답 지연 (8초 초과) — 잠시 후 다시 시도하세요'
+      : msg.toLowerCase().includes('network')
+      ? 'VWorld 네트워크 연결 실패 — VPN 또는 프로덕션 도메인 등록 확인'
+      : 'VWorld 통합 지오코더 실패: ' + msg
+    return NextResponse.json({ error: friendly, _raw: msg }, { status: 502 })
   }
 }
