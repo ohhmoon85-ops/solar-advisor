@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// Node.js Serverless + vercel.json regions=['icn1'] — law.go.kr 한국 IP 정책 통과
+export const runtime = 'nodejs'
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const region = searchParams.get('region') || ''

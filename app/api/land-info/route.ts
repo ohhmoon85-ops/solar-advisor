@@ -1,6 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'edge'
+// Node.js Serverless + vercel.json regions=['icn1'] (인천 PoP 강제)
+// Edge Runtime의 sin1 fallback 회피 — VWorld 한국 IP 정책 통과
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 const VW = 'https://api.vworld.kr'
 

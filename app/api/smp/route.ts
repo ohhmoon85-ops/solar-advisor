@@ -3,7 +3,9 @@
 // KPX SMP API - data.go.kr B552115/SmpWithForecastDemand
 // Operation: getSmpWithForecastDemand | areaCd: 1=land
 // Daily limit: 100 req/day -> memory cache 1h + Next.js revalidate 1h
+// Node.js Serverless + vercel.json regions=['icn1'] (한국 region 강제 — data.go.kr 차단 회피)
 
+export const runtime = 'nodejs'
 export const revalidate = 3600
 
 const BASE_URL = 'https://apis.data.go.kr/B552115/SmpWithForecastDemand/getSmpWithForecastDemand'

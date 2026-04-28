@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// Node.js Serverless + vercel.json regions=['icn1'] — data.go.kr 한국 IP 정책 통과
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
 // KIER API 엔드포인트 (2025-11-18 서비스 URL 변경 적용)
 const ENDPOINTS = {
   pv:    'https://apis.data.go.kr/B551184/SolarPvService/getSolarPvHrInfo',

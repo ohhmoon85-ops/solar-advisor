@@ -10,6 +10,26 @@
       "regions": ["icn1"],
       "maxDuration": 15,
       "memory": 256
+    },
+    "app/api/land-info/route.ts": {
+      "regions": ["icn1"],
+      "maxDuration": 15,
+      "memory": 256
+    },
+    "app/api/smp/route.ts": {
+      "regions": ["icn1"],
+      "maxDuration": 15,
+      "memory": 256
+    },
+    "app/api/kier/route.ts": {
+      "regions": ["icn1"],
+      "maxDuration": 30,
+      "memory": 256
+    },
+    "app/api/ordinance/route.ts": {
+      "regions": ["icn1"],
+      "maxDuration": 15,
+      "memory": 256
     }
   }
 }
