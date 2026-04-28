@@ -157,8 +157,18 @@ export default function LayoutEditor({
 
   const handleRotateGrid = useCallback((deltaDeg: number) => {
     if (!reanalysisOptions) return
+    if (deltaDeg === 0) return  // 값 미변경 시 재배치 스킵 (입력란 클릭 등)
     const newAzimuth = gridAzimuth + deltaDeg
     setGridAzimuth(newAzimuth)
+    // 사용자가 SET_ROW_STACK으로 변경한 단수를 우선 적용 (rowConfigs에서 가장 흔한 stackCount)
+    // → 방위각 변경 시 1단으로 리셋되는 버그 방지
+    const userStackCounts = state.rowConfigs.map(r => r.stackCount).filter(s => s > 0)
+    const userStack = userStackCounts.length > 0
+      ? userStackCounts.sort((a, b) =>
+          userStackCounts.filter(v => v === b).length - userStackCounts.filter(v => v === a).length
+        )[0]
+      : null
+    const effectiveRowStack = userStack ?? reanalysisOptions.rowStack ?? 1
     const newLayout = generateLayout({
       safeZonePolygon: result.safeZone.safeZonePolygon,
       panelSpec: reanalysisOptions.panelSpec,
@@ -166,13 +176,13 @@ export default function LayoutEditor({
       tiltAngle: result.optimalTilt,
       azimuthDeg: newAzimuth,
       panelOrientation: result.panelOrientation,
-      rowStack: reanalysisOptions.rowStack ?? 1,
+      rowStack: effectiveRowStack,
       validPolygons: reanalysisOptions.validPolygons,
       fixedGridAngle: true,
     })
     dispatch({ type: 'REINIT', placements: newLayout.placements })
     onCountChange?.(newLayout.placements.length)
-  }, [reanalysisOptions, gridAzimuth, result, dispatch, onCountChange])
+  }, [reanalysisOptions, gridAzimuth, result, dispatch, onCountChange, state.rowConfigs])
 
   // ── 드래그 선택 ────────────────────────────────────────────────────
   const svgRef = useRef<SVGSVGElement>(null)
@@ -682,8 +692,11 @@ export default function LayoutEditor({
         )}
 
         {tool === 'spacing' && (
-          <div className="flex items-center gap-1 text-xs text-slate-300">
-            <span className="text-slate-400">이격 조정</span>
+          <div
+            className="flex items-center gap-1 text-xs text-slate-300"
+            title="행 사이의 간격을 조정합니다 (다단 묶음의 경우 묶음 사이의 간격). 첫 행은 고정, 북쪽 행이 누적 이동"
+          >
+            <span className="text-slate-400">행간 조정</span>
             {([-0.3, -0.1, 0.1, 0.3] as const).map(d => (
               <button
                 key={d}
@@ -694,6 +707,7 @@ export default function LayoutEditor({
                   dispatch({ type: 'SPREAD_ROWS', deltaM: d, rowIndices })
                 }}
                 className="px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-green-300 hover:bg-green-900/50"
+                title={`행 사이 간격 ${d > 0 ? '+' : ''}${d}m`}
               >
                 {d > 0 ? `+${d}m` : `${d}m`}
               </button>
@@ -713,9 +727,10 @@ export default function LayoutEditor({
                 value={gridAzimuth}
                 onChange={e => {
                   const val = parseInt(e.target.value)
-                  if (!isNaN(val)) handleRotateGrid(val - gridAzimuth)
+                  if (!isNaN(val) && val !== gridAzimuth) handleRotateGrid(val - gridAzimuth)
                 }}
                 className="w-16 px-1.5 py-0.5 rounded text-xs bg-slate-900 text-amber-300 border border-slate-600 font-mono text-center"
+                title="그리드 회전 방위각 (값 변경 시에만 재배치)"
               />
               <span className="text-slate-500 text-[10px]">°</span>
               {([-15, -5, -1, 1, 5, 15] as const).map(deg => (

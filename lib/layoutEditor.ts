@@ -327,6 +327,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     }
 
     case 'SPREAD_ROWS': {
+      // 행간 ±조정 — 회전된 그리드(방위각≠180°)에서도 정확히 동작하도록 north vector 기반 이동
+      // - 첫 행(가장 남쪽)은 고정, 북쪽으로 갈수록 i*deltaM 누적 이동
+      // - 단순 centerY 가산이 아닌 패널의 회전된 north 방향으로 이동 → 회전 그리드에서도 행 방향 보존
       const allRowIds = new Set(state.placements.map(p => p.row))
       const targetRows = action.rowIndices?.filter(r => allRowIds.has(r)) ?? [...allRowIds]
       if (targetRows.length < 2) return state
@@ -336,20 +339,33 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         if (!rowPanelMap.has(p.row)) rowPanelMap.set(p.row, [])
         rowPanelMap.get(p.row)!.push(p)
       }
-      const avgY = (r: number) => {
+      // 회전된 north vector — 패널 corners[3](NW) - corners[0](SW)
+      const ref = saved.placements[0]
+      const upX0 = ref.corners[3].x - ref.corners[0].x
+      const upY0 = ref.corners[3].y - ref.corners[0].y
+      const upLen = Math.sqrt(upX0 * upX0 + upY0 * upY0)
+      const upX = upLen > 0 ? upX0 / upLen : 0
+      const upY = upLen > 0 ? upY0 / upLen : 1  // fallback: 정북(Y축)
+      // 행 중심을 north 방향으로 투영하여 남→북 정렬
+      const projOnUp = (r: number) => {
         const ps = rowPanelMap.get(r)!
-        return ps.reduce((s, p) => s + p.centerY, 0) / ps.length
+        const cx = ps.reduce((s, p) => s + p.centerX, 0) / ps.length
+        const cy = ps.reduce((s, p) => s + p.centerY, 0) / ps.length
+        return cx * upX + cy * upY
       }
-      const sortedRows = targetRows.slice().sort((a, b) => avgY(a) - avgY(b))
-      const dyMap = new Map<number, number>()
-      sortedRows.forEach((r, i) => dyMap.set(r, action.deltaM * i))
+      const sortedRows = targetRows.slice().sort((a, b) => projOnUp(a) - projOnUp(b))
+      const idxMap = new Map<number, number>()
+      sortedRows.forEach((r, i) => idxMap.set(r, i))
       const placements = saved.placements.map(p => {
-        const dy = dyMap.get(p.row)
-        if (dy === undefined) return p
+        const i = idxMap.get(p.row)
+        if (i === undefined || i === 0) return p  // 첫 행 고정
+        const dx = upX * action.deltaM * i
+        const dy = upY * action.deltaM * i
         return {
           ...p,
+          centerX: p.centerX + dx,
           centerY: p.centerY + dy,
-          corners: p.corners.map(c => ({ x: c.x, y: c.y + dy })) as typeof p.corners,
+          corners: p.corners.map(c => ({ x: c.x + dx, y: c.y + dy })) as typeof p.corners,
         }
       })
       return { ...saved, placements, isDirty: true }

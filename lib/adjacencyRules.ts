@@ -16,16 +16,9 @@ export interface AdjacencyRule {
   icon: string
 }
 
+// 표시 순서: 발생 빈도 + 실무 우선순위 기준 (사용자 요청, 2026-04 재배치)
+//   고속도로/국도 → 주거지역 → 학교 → 철도
 export const ADJACENCY_RULES: AdjacencyRule[] = [
-  {
-    id: 'railway',
-    label: '철도',
-    defaultDistance: 25,
-    minDistance: 10,
-    maxDistance: 100,
-    reason: '빛 반사 → 기관사 시야 방해 (한국철도공사 안전관리 기준)',
-    icon: '🚆',
-  },
   {
     id: 'highway',
     label: '고속도로/국도',
@@ -52,6 +45,15 @@ export const ADJACENCY_RULES: AdjacencyRule[] = [
     maxDistance: 500,
     reason: '학습 환경 보호 (교육환경 보호에 관한 법률 적용 권역)',
     icon: '🏫',
+  },
+  {
+    id: 'railway',
+    label: '철도',
+    defaultDistance: 25,
+    minDistance: 10,
+    maxDistance: 100,
+    reason: '빛 반사 → 기관사 시야 방해 (한국철도공사 안전관리 기준)',
+    icon: '🚆',
   },
 ]
 
