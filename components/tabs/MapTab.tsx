@@ -244,7 +244,10 @@ export default function MapTab() {
     setMapResult, setActiveTab, setKierPvHours, setKierGhi, setLocationCoords,
     setLastFullAnalysisJson,
     pendingRestore, setPendingRestore,
+    liveSmp, priceOverride,
   } = useSolarStore()
+  // SMP 단일 소스 — store의 실시간 KPX 응답값 (없으면 사용자 수동 설정값)
+  const smpDisplay = liveSmp ?? priceOverride.smp
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const blobUrlsRef = useRef<string[]>([]) // cleanup용
 
@@ -298,7 +301,6 @@ export default function MapTab() {
   const [annualKwh, setAnnualKwh] = useState(0)
   // 필지별 패널 수 (union ring 단위, STEP 3)
   const [landInfo, setLandInfo] = useState<import('@/components/ParcelInfoCard').LandInfoData | null>(null)
-  const [smpPrice, setSmpPrice] = useState<number | null>(null)
   const [ringPanelCounts, setRingPanelCounts] = useState<number[]>([])
   // SVG 캔버스 동적 너비 (STEP 4)
   const svgContainerRef = useRef<HTMLDivElement>(null)
@@ -675,10 +677,7 @@ export default function MapTab() {
     setAnnualKwh(Math.round(cap * GENERATION_HOURS * 365))
   }, [installType, moduleIndex, tiltAngle, spacingValue, panelOrientation, rowStack, slopePercent])
 
-  // 설정 변경 시 자동 재계산 (검색 후 유형·모듈 등을 바꾸면 즉시 반영)
-  useEffect(() => {
-    fetch('/api/smp').then(r => r.ok ? r.json() : null).then(d => { if (d?.smp) setSmpPrice(d.smp) }).catch(() => {})
-  }, [])
+  // SMP는 app/page.tsx 에서 단일 fetch (store.liveSmp) — 여기서 중복 호출 안 함
 
   useEffect(() => {
     if (parcels.length > 0 && pixelScale > 0) {
@@ -693,17 +692,38 @@ export default function MapTab() {
     setAnnualKwh(Math.round(capacityKwp * genHours * 365))
   }, [capacityKwp, kierResult])
 
-  // SVG 캔버스 컨테이너 너비 측정 — 창 크기 변경 시 갱신
+  // SVG 캔버스 컨테이너 너비 측정
+  // - showSvgCanvas/svgAnalysisResult 의존성: 캔버스가 처음 마운트되는 타이밍에 measure
+  // - requestAnimationFrame: 레이아웃 안정 후 정확한 clientWidth 획득
+  // - ResizeObserver: 다구역↔단일 토글, 윈도우 리사이즈, 사이드바 펼침 등 폭 변동 자동 감지
   useEffect(() => {
+    if (!showSvgCanvas || !svgAnalysisResult) return
+    const el = svgContainerRef.current
+    if (!el) return
+
     const measure = () => {
-      if (svgContainerRef.current) {
-        setSvgContainerWidth(svgContainerRef.current.clientWidth || 900)
-      }
+      const w = el.clientWidth
+      if (w > 0) setSvgContainerWidth(w)
     }
-    measure()
+
+    // 첫 측정은 다음 프레임으로 연기 (DOM 레이아웃 안정 후)
+    const rafId = requestAnimationFrame(measure)
+
+    // 컨테이너 크기 변경 자동 감지
+    let ro: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => measure())
+      ro.observe(el)
+    }
+    // 폴백: 구형 브라우저 — 윈도우 리사이즈 이벤트
     window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [])
+
+    return () => {
+      cancelAnimationFrame(rafId)
+      ro?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [showSvgCanvas, svgAnalysisResult])
 
   // ── KIER API ──
   const fetchKierData = useCallback(async (lat: number, lon: number, tilt: number) => {
@@ -976,7 +996,7 @@ export default function MapTab() {
       </table>
       <img src="${srcCanvas.toDataURL('image/png')}" style="width:100%;border:1px solid #e2e8f0;border-radius:6px" />
       <div style="margin-top:10px;font-size:10px;color:#94a3b8;text-align:center">
-        생성: ${new Date().toLocaleDateString('ko-KR')} — SolarAdvisor v5.2 (SMP 110원/kWh · REC 건물 105,000원/MWh · 발전시간 3.5h)
+        생성: ${new Date().toLocaleDateString('ko-KR')} — SolarAdvisor v5.2 (SMP ${smpDisplay.toFixed(2)}원/kWh${liveSmp != null ? ' · KPX 실시간' : ''} · REC 건물 ${priceOverride.recBuilding.toLocaleString()}원/MWh · 발전시간 3.5h)
       </div>
     `
     document.body.appendChild(div)
@@ -1296,7 +1316,7 @@ export default function MapTab() {
             <div className='mt-2'>
               <ParcelInfoCard
                 landInfo={landInfo}
-                smp={smpPrice}
+                smp={liveSmp}
                 panelCount={panelCount || undefined}
                 capacityKwp={capacityKwp || undefined}
                 annualKwh={annualKwh || undefined}

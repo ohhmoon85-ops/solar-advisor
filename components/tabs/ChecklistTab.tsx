@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useSolarStore } from '@/store/useStore'
 
 const STORAGE_KEY = 'solar-advisor-checklist'
 
@@ -42,6 +43,8 @@ const STAGE_INFO: Record<Stage, { label: string; icon: string; color: string }> 
 export default function ChecklistTab() {
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [activeStage, setActiveStage] = useState<Stage>('pre')
+  const { liveSmp, priceOverride } = useSolarStore()
+  const smpDisplay = liveSmp ?? priceOverride.smp
 
   useEffect(() => {
     try {
@@ -50,18 +53,32 @@ export default function ChecklistTab() {
     } catch {}
   }, [])
 
+  // c5 안내 문구를 실시간 SMP/REC 값으로 동기화
+  const checklist = useMemo<CheckItem[]>(
+    () =>
+      CHECKLIST.map(item =>
+        item.id === 'c5'
+          ? {
+              ...item,
+              text: `수익성 시뮬레이터 계산 (SMP ${smpDisplay.toFixed(2)}원${liveSmp != null ? ' KPX 실시간' : ''}, REC ${priceOverride.recBuilding.toLocaleString()}/${priceOverride.recLand.toLocaleString()}원 자동 반영)`,
+            }
+          : item,
+      ),
+    [smpDisplay, liveSmp, priceOverride.recBuilding, priceOverride.recLand],
+  )
+
   const toggle = (id: string) => {
     const next = { ...checked, [id]: !checked[id] }
     setChecked(next)
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
   }
 
-  const totalItems = CHECKLIST.length
-  const checkedCount = CHECKLIST.filter(i => checked[i.id]).length
+  const totalItems = checklist.length
+  const checkedCount = checklist.filter(i => checked[i.id]).length
   const progress = Math.round((checkedCount / totalItems) * 100)
-  const requiredUnchecked = CHECKLIST.filter(i => i.required && !checked[i.id])
+  const requiredUnchecked = checklist.filter(i => i.required && !checked[i.id])
 
-  const stageItems = (stage: Stage) => CHECKLIST.filter(i => i.stage === stage)
+  const stageItems = (stage: Stage) => checklist.filter(i => i.stage === stage)
   const stageProgress = (stage: Stage) => {
     const items = stageItems(stage)
     const done = items.filter(i => checked[i.id]).length

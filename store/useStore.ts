@@ -60,6 +60,11 @@ interface SolarStore {
   priceOverride: PriceOverride
   setPriceOverride: (p: PriceOverride) => void
 
+  /** /api/smp 실시간 응답값 (KPX) — 헤더·ParcelInfoCard·PDF 공통 단일 소스 */
+  liveSmp: number | null
+  liveSmpFetchedAt: number | null
+  setLiveSmp: (smp: number | null) => void
+
   // ── 시뮬레이션 이력 ─────────────────────────────────────────────
   /** SVG 정밀 분석 최신 결과 JSON (저장 모달에서 snapshot으로 사용) */
   lastFullAnalysisJson: string | null
@@ -134,6 +139,10 @@ export const useSolarStore = create<SolarStore>((set) => ({
     try { localStorage.setItem(PRICE_LS_KEY, JSON.stringify(p)) } catch { /* ignore */ }
     set({ priceOverride: p })
   },
+
+  liveSmp: null,
+  liveSmpFetchedAt: null,
+  setLiveSmp: (smp) => set({ liveSmp: smp, liveSmpFetchedAt: smp != null ? Date.now() : null }),
 
   lastFullAnalysisJson: null,
   setLastFullAnalysisJson: (json) => set({ lastFullAnalysisJson: json }),

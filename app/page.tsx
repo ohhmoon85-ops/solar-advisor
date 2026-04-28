@@ -34,6 +34,7 @@ export default function Home() {
     activeTab, setActiveTab, priceOverride,
     historyPanelOpen, setHistoryPanelOpen,
     historyCount, setHistoryCount,
+    liveSmp, liveSmpFetchedAt, setLiveSmp,
   } = useSolarStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const router = useRouter()
@@ -51,6 +52,23 @@ export default function Home() {
       setHistoryCount(m.getAllSimulations().length)
     })
   }, [setHistoryCount])
+
+  // KPX SMP 실시간 단일 소스 — 헤더·ParcelInfoCard·PDF 공통 (중복 호출 방지)
+  useEffect(() => {
+    fetch('/api/smp')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.smp != null) setLiveSmp(Number(d.smp)) })
+      .catch(() => { /* silent — fallback to priceOverride */ })
+  }, [setLiveSmp])
+
+  // 헤더 SMP 배지 표시값
+  const smpDisplay = liveSmp ?? priceOverride.smp
+  const smpFetchedTime = liveSmpFetchedAt
+    ? new Date(liveSmpFetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+    : null
+  const smpTooltip = liveSmp != null
+    ? `KPX 한국전력거래소 실시간 SMP${smpFetchedTime ? ` · 업데이트: ${smpFetchedTime}` : ''}`
+    : `단가관리 탭에서 수동 설정된 값 (실시간 조회 실패 또는 로딩 중)`
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -100,8 +118,19 @@ export default function Home() {
 
           {/* Right side */}
           <div className="flex items-center gap-2 ml-auto flex-shrink-0">
-            <span className="hidden md:inline-flex text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium border border-green-200">
-              SMP {priceOverride.smp}원 확정
+            <span
+              className={[
+                'hidden md:inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium border',
+                liveSmp != null
+                  ? 'bg-green-100 text-green-700 border-green-200'
+                  : 'bg-gray-100 text-gray-500 border-gray-200',
+              ].join(' ')}
+              title={smpTooltip}
+            >
+              {liveSmp != null
+                ? <>⚡ SMP {smpDisplay.toFixed(2)}원/kWh</>
+                : <>SMP ---</>
+              }
             </span>
             {/* 이력 버튼 */}
             <button
@@ -249,7 +278,7 @@ export default function Home() {
         <div className="max-w-screen-2xl mx-auto px-4 flex items-center justify-between text-xs text-gray-400 flex-wrap gap-2">
           <span>SolarAdvisor v5.2 © 2026 — 태양광 사업성 분석 플랫폼</span>
           <div className="flex items-center gap-3">
-            <span>SMP {priceOverride.smp}원/kWh</span>
+            <span>SMP {smpDisplay.toFixed(2)}원/kWh{liveSmp != null ? ' ⚡' : ''}</span>
             <span>REC건물 {priceOverride.recBuilding.toLocaleString()}원/MWh ×1.5</span>
             <span>REC토지 {priceOverride.recLand.toLocaleString()}원/MWh</span>
             <span>발전시간 3.5h/일</span>

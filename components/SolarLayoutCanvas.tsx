@@ -543,8 +543,13 @@ export default function SolarLayoutCanvas({
         >−</button>
         <button
           onClick={handleReset}
-          className="w-7 h-7 bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-bold rounded flex items-center justify-center border border-slate-500 transition-colors"
-          title="초기화"
+          className={[
+            'w-7 h-7 text-white text-[10px] font-bold rounded flex items-center justify-center border transition-colors',
+            zoom !== 1 || pan.x !== 0 || pan.y !== 0
+              ? 'bg-amber-600 hover:bg-amber-500 border-amber-400'
+              : 'bg-slate-700 hover:bg-slate-600 border-slate-500',
+          ].join(' ')}
+          title="전체 보기 (Fit)"
         >↺</button>
       </div>
 
