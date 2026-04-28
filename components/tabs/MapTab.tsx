@@ -1,9 +1,7 @@
 ﻿'use client'
 
-// VWorld는 Vercel/Cloudflare 서버 IP를 모두 차단함
-// → 브라우저(한국 사용자 IP)에서 직접 호출하는 방식으로 전환
-const VW_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY ?? ''
-const VW = 'https://api.vworld.kr'
+// VWorld 호출은 모두 /api/vworld 서버 프록시 경유 (Edge Runtime, icn1 PoP)
+// → 브라우저는 키 노출 없이 사용, Vercel IP 차단 회피
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
@@ -390,7 +388,8 @@ export default function MapTab() {
           const origin = tileOriginLonLat(tx, ty, z)
           const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
           const bbox = tileToWgs84Bbox(z, tx, ty)
-          const src = `${VW}/req/wms?service=WMS&request=GetMap&version=1.3.0&layers=lt_c_landinfobasemap&width=256&height=256&format=image/png&transparent=true&crs=EPSG:4326&bbox=${bbox}&key=${VW_KEY}`
+          // /api/vworld 서버 프록시 경유 (브라우저 키 노출 없음, Vercel IP 차단 회피)
+          const src = `/api/vworld?type=wms&bbox=${encodeURIComponent(bbox)}&layers=lt_c_landinfobasemap&width=256&height=256&transparent=true`
           tiles.push({ src, cx, cy, px: tilePx })
         }
       }
@@ -775,26 +774,15 @@ export default function MapTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapMode])
 
-  // ── VWorld DEM 경사도 자동 측정 ──
+  // ── VWorld DEM 경사도 자동 측정 (서버 프록시 경유, 5점 통합 1회 호출) ──
   const fetchSlope = useCallback(async (lon: number, lat: number) => {
     setSlopeFetching(true)
     try {
-      const dLat = 20 / 111319.9
-      const dLon = 20 / (111319.9 * Math.cos(lat * Math.PI / 180))
-      const pts = [[lon,lat],[lon,lat+dLat],[lon,lat-dLat],[lon+dLon,lat],[lon-dLon,lat]]
-      const getElev = async (lo: number, la: number) => {
-        try {
-          const r = await fetch(`${VW}/req/dem?service=dem&request=getElevation&version=2.0&crs=epsg:4326&key=${VW_KEY}&format=json&point=${lo},${la}`)
-          if (!r.ok) return null
-          const d = await r.json()
-          const h = d?.response?.result?.height ?? d?.response?.result?.elevation
-          return h != null ? parseFloat(h) : null
-        } catch { return null }
-      }
-      const [hC,hN,hS,hE,hW] = await Promise.all(pts.map(([lo,la]) => getElev(lo,la)))
-      if (hC==null||hN==null||hS==null||hE==null||hW==null) return
-      const slopePct = Math.round(Math.sqrt(((hN-hS)/40)**2 + ((hE-hW)/40)**2) * 100)
-      setSlopePercent(Math.min(slopePct, 50))
+      const r = await fetch(`/api/vworld?type=elevation&lon=${lon}&lat=${lat}`)
+      if (!r.ok) return
+      const d = await r.json()
+      if (typeof d?.slope !== 'number') return
+      setSlopePercent(Math.min(d.slope, 50))
       setSlopeAuto(true)
     } catch { /* 무시 */ } finally { setSlopeFetching(false) }
   }, [])

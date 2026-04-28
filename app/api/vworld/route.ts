@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Edge Runtime: 한국 사용자 → 서울 Cloudflare PoP에서 실행
-// → VWorld(한국)를 한국 IP로 호출하여 502 해결
+// Edge Runtime + 인천 PoP 강제 → VWorld 한국 IP 정책 안정 우회
+// 모든 VWorld 직접 호출은 본 라우트를 통해 프록시 (브라우저는 키 노출 없이 사용)
 export const runtime = 'edge'
+export const preferredRegion = 'icn1'  // Seoul/Incheon
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -98,6 +99,37 @@ export async function GET(req: NextRequest) {
         headers: {
           'Content-Type': ct,
           'Cache-Control': 'public, max-age=86400',
+        },
+      })
+    }
+
+    // VWorld WMS 타일 (bbox 기반, 임의 레이어 지원)
+    //   layers=lt_c_landinfobasemap (지적도 + 행정경계, MapTab 기본)
+    //   layers=lp_pa_cbnd_bubun (필지 경계만)
+    // 1주일 캐시 (s-maxage=604800) — 타일은 거의 변하지 않음
+    if (type === 'wms') {
+      const bbox = searchParams.get('bbox')
+      const layers = searchParams.get('layers') ?? 'lt_c_landinfobasemap'
+      const width = searchParams.get('width') ?? '256'
+      const height = searchParams.get('height') ?? '256'
+      const transparent = searchParams.get('transparent') ?? 'true'
+      if (!bbox) {
+        return NextResponse.json({ error: 'bbox required (minLat,minLon,maxLat,maxLon)' }, { status: 400 })
+      }
+      const tileUrl =
+        `https://api.vworld.kr/req/wms?service=WMS&request=GetMap&version=1.3.0` +
+        `&layers=${encodeURIComponent(layers)}` +
+        `&width=${width}&height=${height}&format=image/png` +
+        `&transparent=${transparent}&crs=EPSG:4326` +
+        `&bbox=${encodeURIComponent(bbox)}&key=${apiKey}`
+      const tileRes = await vwFetch(tileUrl)
+      if (!tileRes.ok) return new Response(null, { status: tileRes.status })
+      const buf = await tileRes.arrayBuffer()
+      const ct = tileRes.headers.get('content-type') ?? 'image/png'
+      return new Response(buf, {
+        headers: {
+          'Content-Type': ct,
+          'Cache-Control': 'public, max-age=86400, s-maxage=604800, immutable',
         },
       })
     }
