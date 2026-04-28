@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Edge Runtime + 인천 PoP 강제 → VWorld 한국 IP 정책 안정 우회
+// Node.js Serverless Runtime — vercel.json의 functions.regions=['icn1']로
+// 인천 PoP 강제 (Edge Runtime의 preferredRegion은 region fallback이 발생하여
+// sin1로 라우팅되는 문제 회피)
 // 모든 VWorld 직접 호출은 본 라우트를 통해 프록시 (브라우저는 키 노출 없이 사용)
-export const runtime = 'edge'
-export const preferredRegion = 'icn1'  // Seoul/Incheon
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)

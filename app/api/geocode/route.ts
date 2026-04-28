@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 // VWorld 통합 지오코더 — 주소 → (좌표 + PNU + 필지)
-// Edge Runtime + 인천 PoP 강제 → VWorld 한국 IP 정책 안정 우회
-export const runtime = 'edge'
-export const preferredRegion = 'icn1'  // Seoul/Incheon (Vercel Edge region)
+// Node.js Serverless Runtime — vercel.json functions.regions=['icn1']로 인천 PoP 강제
+// (Edge Runtime의 preferredRegion은 sin1으로 fallback되는 사례 확인됨)
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 interface ParcelInfo {
   ring: number[][]      // [[lon, lat], ...]

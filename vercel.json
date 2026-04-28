@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app/api/vworld/route.ts": {
+      "regions": ["icn1"],
+      "maxDuration": 15,
+      "memory": 256
+    },
+    "app/api/geocode/route.ts": {
+      "regions": ["icn1"],
+      "maxDuration": 15,
+      "memory": 256
+    }
+  }
+}
