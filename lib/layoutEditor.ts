@@ -1,7 +1,8 @@
 ﻿// lib/layoutEditor.ts — 배치 편집 상태 관리 (v5.2)
 // SolarLayoutCanvas 위에서 동작하는 인터랙티브 편집 상태/로직
 
-import type { PanelPlacement } from './layoutEngine'
+import type { PanelPlacement, Polygon } from './layoutEngine'
+import { isPointInPolygon } from './layoutEngine'
 
 // ── 타입 ───────────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ export type EditorAction =
   | { type: 'RESET' }
   | { type: 'APPLY_QUICK'; preset: 'dense' | 'standard' | 'corridors' | 'stack3'; baseSpacing: number }
   | { type: 'SELECT_ROWS'; rowIndices: number[]; additive?: boolean }
-  | { type: 'SPREAD_ROWS'; deltaM: number; rowIndices?: number[] }
+  | { type: 'SPREAD_ROWS'; deltaM: number; rowIndices?: number[]; boundary?: Polygon }
   | { type: 'REINIT'; placements: PanelPlacement[] }
   | { type: 'MARK_SAVED' }
 
@@ -356,7 +357,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const sortedRows = targetRows.slice().sort((a, b) => projOnUp(a) - projOnUp(b))
       const idxMap = new Map<number, number>()
       sortedRows.forEach((r, i) => idxMap.set(r, i))
-      const placements = saved.placements.map(p => {
+      const moved = saved.placements.map(p => {
         const i = idxMap.get(p.row)
         if (i === undefined || i === 0) return p  // 첫 행 고정
         const dx = upX * action.deltaM * i
@@ -368,6 +369,14 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           corners: p.corners.map(c => ({ x: c.x + dx, y: c.y + dy })) as typeof p.corners,
         }
       })
+      // 부지 폴리곤 외부로 나간 패널 자동 제거 (clipping)
+      // boundary 미지정(레거시 호출) 시 clip 스킵 — 행동 호환
+      const placements = action.boundary && action.boundary.length >= 3
+        ? moved.filter(p => {
+            // 4 코너 모두 부지 안인 패널만 유지 (자동배치 검증과 동일한 규칙)
+            return p.corners.every(c => isPointInPolygon(c, action.boundary!))
+          })
+        : moved
       return { ...saved, placements, isDirty: true }
     }
     case 'UNDO': {

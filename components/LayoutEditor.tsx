@@ -599,7 +599,7 @@ export default function LayoutEditor({
     { id: 'select', label: '선택', key: 'Esc', icon: '▢' },
     { id: 'add', label: '낱장 추가', key: 'A', icon: '+' },
     { id: 'stack', label: '단수 설정', key: 'S', icon: '≡' },
-    { id: 'spacing', label: '이격 조정', key: 'R', icon: '↕' },
+    { id: 'spacing', label: '행간 조정', key: 'R', icon: '↕' },
   ]
 
   const rowCfgMap = useMemo(() => {
@@ -697,6 +697,10 @@ export default function LayoutEditor({
             title="행 사이의 간격을 조정합니다 (다단 묶음의 경우 묶음 사이의 간격). 첫 행은 고정, 북쪽 행이 누적 이동"
           >
             <span className="text-slate-400">행간 조정</span>
+            <span
+              className="text-slate-500 cursor-help"
+              title="행간을 늘리면 부지 안에서만 확장되며, 경계 밖으로 나가는 패널은 자동 제거됩니다. Ctrl+Z로 복구 가능."
+            >ℹ</span>
             {([-0.3, -0.1, 0.1, 0.3] as const).map(d => (
               <button
                 key={d}
@@ -704,10 +708,15 @@ export default function LayoutEditor({
                   const rowIndices = state.selectedIds.size > 0
                     ? [...new Set(state.placements.filter(p => state.selectedIds.has(p.id)).map(p => p.row))]
                     : undefined
-                  dispatch({ type: 'SPREAD_ROWS', deltaM: d, rowIndices })
+                  dispatch({
+                    type: 'SPREAD_ROWS',
+                    deltaM: d,
+                    rowIndices,
+                    boundary: result.safeZone.safeZonePolygon,
+                  })
                 }}
                 className="px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-green-300 hover:bg-green-900/50"
-                title={`행 사이 간격 ${d > 0 ? '+' : ''}${d}m`}
+                title={`행 사이 간격 ${d > 0 ? '+' : ''}${d}m (부지 경계 밖 패널 자동 제거)`}
               >
                 {d > 0 ? `+${d}m` : `${d}m`}
               </button>
@@ -912,9 +921,9 @@ export default function LayoutEditor({
                 ✓ {state.selectedIds.size}장 선택됨
               </div>
 
-              {/* 이격 조정 */}
+              {/* 행간 조정 (선택 패널 영역) */}
               <div className="bg-slate-800/95 border border-slate-600 rounded px-2 py-1.5">
-                <div className="text-[10px] text-slate-400 mb-1">이격 ↕ (선택 행 기준)</div>
+                <div className="text-[10px] text-slate-400 mb-1">행간 ↕ (선택 행 기준)</div>
                 <div className="flex gap-1">
                   {([-0.3, -0.1, 0.1, 0.3] as const).map(d => (
                     <button key={d}
@@ -922,9 +931,15 @@ export default function LayoutEditor({
                         const rowIndices = [...new Set(
                           state.placements.filter(p => state.selectedIds.has(p.id)).map(p => p.row)
                         )]
-                        dispatch({ type: 'SPREAD_ROWS', deltaM: d, rowIndices })
+                        dispatch({
+                          type: 'SPREAD_ROWS',
+                          deltaM: d,
+                          rowIndices,
+                          boundary: result.safeZone.safeZonePolygon,
+                        })
                       }}
                       className="flex-1 py-0.5 rounded text-xs bg-slate-700 text-green-300 hover:bg-green-900/50 font-mono"
+                      title={`행간 ${d > 0 ? '+' : ''}${d}m (부지 경계 밖 패널 자동 제거)`}
                     >
                       {d > 0 ? `+${d}` : `${d}`}
                     </button>
