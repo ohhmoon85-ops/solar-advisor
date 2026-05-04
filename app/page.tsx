@@ -16,6 +16,7 @@ const PermitTab = dynamic(() => import('@/components/tabs/PermitTab'), { ssr: fa
 const PanelTab = dynamic(() => import('@/components/tabs/PanelTab'), { ssr: false })
 const ChecklistTab = dynamic(() => import('@/components/tabs/ChecklistTab'), { ssr: false })
 const UnitPriceTab = dynamic(() => import('@/components/tabs/UnitPriceTab'), { ssr: false })
+const DrawingTab = dynamic(() => import('@/components/tabs/DrawingTab'), { ssr: false })
 const SimulationHistoryPanel = dynamic(() => import('@/components/SimulationHistoryPanel'), { ssr: false })
 const SaveSimulationModal = dynamic(() => import('@/components/SaveSimulationModal'), { ssr: false })
 
@@ -27,6 +28,7 @@ const TABS = [
   { id: 'panel', label: '패널 사양', icon: '⚡', shortLabel: '패널' },
   { id: 'checklist', label: '실무 체크리스트', icon: '✅', shortLabel: '체크' },
   { id: 'unitprice', label: '단가 관리', icon: '💰', shortLabel: '단가' },
+  { id: 'drawing', label: '도면', icon: '📐', shortLabel: '도면' },
 ]
 
 export default function Home() {
@@ -250,6 +252,7 @@ export default function Home() {
           <div className={activeTab !== 'panel' ? 'hidden' : ''}><PanelTab /></div>
           <div className={activeTab !== 'checklist' ? 'hidden' : ''}><ChecklistTab /></div>
           <div className={activeTab !== 'unitprice' ? 'hidden' : ''}><UnitPriceTab /></div>
+          <div className={activeTab !== 'drawing' ? 'hidden' : ''}><DrawingTab /></div>
         </div>
       </main>
 
