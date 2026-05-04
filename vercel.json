@@ -21,6 +21,11 @@
       "maxDuration": 15,
       "memory": 256
     },
+    "app/api/smp-quarterly/route.ts": {
+      "regions": ["icn1"],
+      "maxDuration": 30,
+      "memory": 256
+    },
     "app/api/kier/route.ts": {
       "regions": ["icn1"],
       "maxDuration": 30,

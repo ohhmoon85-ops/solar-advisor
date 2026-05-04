@@ -38,6 +38,7 @@ export default function UnitPriceTab() {
   const [alertDismissed, setAlertDismissed] = useState(false)
   const [smpFetching, setSmpFetching] = useState(false)
   const [smpFetchMsg, setSmpFetchMsg] = useState('')
+  const [smpPreview, setSmpPreview] = useState<{ smp: number; period: string; count: number } | null>(null)
   const [loans, setLoans] = useState<PolicyLoanRate[]>(DEFAULT_POLICY_LOANS)
   const [loanEditing, setLoanEditing] = useState<string | null>(null)
   const [loanForm, setLoanForm] = useState<PolicyLoanRate | null>(null)
@@ -87,8 +88,9 @@ export default function UnitPriceTab() {
   const fetchLatestSmp = async () => {
     setSmpFetching(true)
     setSmpFetchMsg('')
+    setSmpPreview(null)
     try {
-      const res = await fetch('/api/smp')
+      const res = await fetch('/api/smp-quarterly')
       const json = await res.json()
       if (res.status === 503) {
         setSmpFetchMsg('KPX_SMP_API_KEY 미설정. data.go.kr에서 한국전력거래소 SMP 서비스를 신청하고 환경변수를 추가하세요.')
@@ -98,17 +100,23 @@ export default function UnitPriceTab() {
         setSmpFetchMsg('SMP 조회 실패: ' + (json.error ?? 'unknown'))
         return
       }
-      // 조회 성공: 자동으로 단가 업데이트
-      const today = new Date().toISOString().slice(0, 10)
-      const updated = { ...priceOverride, smp: json.smp, lastUpdated: today }
-      setPriceOverride(updated)
-      setSmpFetchMsg('SMP 자동 업데이트 완료! ' + json.smp + '원/kWh (' + json.period + ' 기준, 출처: ' + json.source + ')')
-      setAlertDismissed(true)
+      setSmpPreview({ smp: json.smp, period: json.period ?? '기간 불명', count: json.count ?? 1 })
     } catch (err) {
       setSmpFetchMsg('네트워크 오류: ' + (err instanceof Error ? err.message : 'unknown'))
     } finally {
       setSmpFetching(false)
     }
+  }
+
+  const applySmpPreview = () => {
+    if (!smpPreview) return
+    const today = new Date().toISOString().slice(0, 10)
+    const updated = { ...priceOverride, smp: smpPreview.smp, lastUpdated: today }
+    setPriceOverride(updated)
+    try { localStorage.setItem('solar_price_overrides', JSON.stringify(updated)) } catch { /* ignore */ }
+    setSmpFetchMsg(`SMP 갱신 완료! ${smpPreview.smp}원/kWh (${smpPreview.period}, ${smpPreview.count}일 평균)`)
+    setAlertDismissed(true)
+    setSmpPreview(null)
   }
 
   const openEdit = () => {
@@ -174,11 +182,11 @@ export const REC_PRICE = {
                   className="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition-colors">
                   지금 바로 수정하기
                 </button>
-                <a href="https://home.kepco.co.kr/kepco/main.do" target="_blank" rel="noopener noreferrer"
+                <a href="https://home.kepco.co.kr/kepco/CO/D/E/CODEPP00101/list.do?menuCd=FN04040501" target="_blank" rel="noopener noreferrer"
                   className="px-3 py-1.5 bg-white border border-amber-400 text-amber-700 text-xs font-semibold rounded-lg hover:bg-amber-50 transition-colors">
                   한전 홈페이지 확인
                 </a>
-                <a href="https://www.epsis.co.kr" target="_blank" rel="noopener noreferrer"
+                <a href="https://epsis.kpx.or.kr/epsisnew/selectEkmaSmpSmpChart.do?menuId=040201" target="_blank" rel="noopener noreferrer"
                   className="px-3 py-1.5 bg-white border border-amber-400 text-amber-700 text-xs font-semibold rounded-lg hover:bg-amber-50 transition-colors">
                   KPX 전력거래소
                 </a>
@@ -195,6 +203,27 @@ export const REC_PRICE = {
       {smpFetchMsg && (
         <div className={smpFetchMsg.includes('완료') ? "bg-green-50 border border-green-300 rounded-xl p-3 text-sm text-green-700" : "bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700"}>
           {smpFetchMsg}
+        </div>
+      )}
+
+      {/* SMP 분기 평균 미리보기 + 확인 다이얼로그 */}
+      {smpPreview && (
+        <div className="bg-sky-50 border border-sky-300 rounded-xl p-4">
+          <div className="font-semibold text-sky-800 mb-1">SMP 자동 조회 결과</div>
+          <p className="text-sm text-gray-700 mb-0.5">
+            최근 90일 평균 SMP: <strong>{smpPreview.smp}원/kWh</strong>
+          </p>
+          <p className="text-xs text-gray-500 mb-3">({smpPreview.period}, {smpPreview.count}일 평균, 출처: KPX)</p>
+          <div className="flex gap-2">
+            <button onClick={applySmpPreview}
+              className="px-4 py-1.5 bg-sky-600 text-white text-xs font-bold rounded-lg hover:bg-sky-700 transition-colors">
+              갱신
+            </button>
+            <button onClick={() => setSmpPreview(null)}
+              className="px-4 py-1.5 bg-white border border-gray-300 text-gray-600 text-xs rounded-lg hover:bg-gray-50 transition-colors">
+              취소
+            </button>
+          </div>
         </div>
       )}
 
