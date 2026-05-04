@@ -8,6 +8,7 @@ import dynamic from 'next/dynamic'
 import { useSolarStore } from '@/store/useStore'
 import { MODULES, GENERATION_HOURS } from '@/lib/constants'
 import { getSolarElevation } from '@/lib/shadowCalculator'
+import { calculateRowSpacing, calculateSlopeFromPercent, getSolarAngleByLocation, type RowSpacingCalcResult } from '@/lib/spacingCalculator'
 import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
@@ -261,6 +262,11 @@ export default function MapTab() {
   const [moduleIndex, setModuleIndex] = useState(0)
   const [tiltAngle, setTiltAngle] = useState(33)
   const [spacingValue, setSpacingValue] = useState(1.2)
+  const [autoSpacingMode, setAutoSpacingMode] = useState(false)
+  const [autoSolarAngle, setAutoSolarAngle] = useState<number | null>(null)
+  const [autoLandAngle, setAutoLandAngle] = useState(0)
+  const [autoMargin, setAutoMargin] = useState(1.0)
+  const [autoSpacingResult, setAutoSpacingResult] = useState<RowSpacingCalcResult | null>(null)
   const [panelOrientation, setPanelOrientation] = useState<'portrait' | 'landscape'>('portrait')
   const [rowStack, setRowStack] = useState<1 | 2 | 3>(1)
   const [slopePercent, setSlopePercent] = useState(0)
@@ -683,6 +689,17 @@ export default function MapTab() {
   }, [installType, moduleIndex, tiltAngle, spacingValue, panelOrientation, rowStack, slopePercent])
 
   // SMP는 app/page.tsx 에서 단일 fetch (store.liveSmp) — 여기서 중복 호출 안 함
+
+  useEffect(() => {
+    if (apiCoords?.lat) {
+      const angle = getSolarAngleByLocation(apiCoords.lat)
+      setAutoSolarAngle(Math.round(angle * 10) / 10)
+    }
+  }, [apiCoords?.lat])
+
+  useEffect(() => {
+    setAutoLandAngle(Math.round(calculateSlopeFromPercent(slopePercent) * 10) / 10)
+  }, [slopePercent])
 
   useEffect(() => {
     if (parcels.length > 0 && pixelScale > 0) {
@@ -1112,6 +1129,7 @@ export default function MapTab() {
   const runSVGAnalysis = useCallback(async (overrides?: {
     panelOrientation?: 'portrait' | 'landscape'
     rowStack?: 1 | 2 | 3
+    rowSpacing?: number
   }) => {
     if (!apiCoords || parcels.length === 0) return
     setSvgAnalyzing(true)
@@ -1120,6 +1138,7 @@ export default function MapTab() {
       const lat = effectiveLatitude
       const orientation = overrides?.panelOrientation ?? svgPanelOrientation
       const stack = overrides?.rowStack ?? rowStack
+      const customRowSpacing = overrides?.rowSpacing
       // turf union: GeoJSON 레벨에서 복수 필지를 정확히 합산 (convex hull 대신)
       const parcelFeatures = parcels
         .filter(p => p.ring.length >= 3)
@@ -1201,6 +1220,7 @@ export default function MapTab() {
               panelSpec,
               panelType: svgPanelType,
               precomputedSafeZonePolygon: safePolygon,
+              rowSpacing: customRowSpacing,
               ...commonOpts,
             } as ZoneConfig
           })
@@ -1221,6 +1241,7 @@ export default function MapTab() {
           latitude: lat,
           precomputedSafeZonePolygon,
           validPolygons,
+          rowSpacing: customRowSpacing,
           ...commonOpts,
         })
         setSvgAnalysisResult(faResult)
@@ -1511,7 +1532,113 @@ export default function MapTab() {
                     {n}단
                   </button>
                 ))}
-              </div>
+            {/* 행간거리 자동 계산 패널 */}
+            {(() => {
+              const solarAng = autoSolarAngle ?? getSolarAngleByLocation(effectiveLatitude)
+              const moduleLen = MODULES[moduleIndex].h
+              const result = calculateRowSpacing(solarAng, tiltAngle, autoLandAngle, moduleLen)
+              const recommended = result.rowSpacing
+              const finalSpacing = Math.round((recommended + autoMargin) * 100) / 100
+              return (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-sky-800">⚙ 행간거리 자동 계산</span>
+                    <button
+                      onClick={() => setAutoSpacingMode(m => !m)}
+                      className={
+                        'text-[10px] px-2 py-0.5 rounded-full border font-medium transition-colors ' +
+                        (autoSpacingMode ? 'bg-sky-500 text-white border-sky-500' : 'bg-white text-sky-600 border-sky-300')
+                      }
+                    >
+                      {autoSpacingMode ? '자동 ON' : '자동 OFF'}
+                    </button>
+                  </div>
+
+                  {/* 입력 행 */}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <div>
+                      <div className="text-[10px] text-gray-500 mb-0.5">모듈경사각</div>
+                      <div className="flex items-center gap-0.5">
+                        <input type="number" min={0} max={60} step={1}
+                          value={tiltAngle}
+                          onChange={e => setTiltAngle(Number(e.target.value))}
+                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
+                        <span className="text-[10px] text-gray-400">°</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-gray-500 mb-0.5">토지경사각 <span className="text-sky-500">(DEM)</span></div>
+                      <div className="flex items-center gap-0.5">
+                        <input type="number" min={0} max={45} step={0.5}
+                          value={autoLandAngle}
+                          onChange={e => setAutoLandAngle(Number(e.target.value))}
+                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
+                        <span className="text-[10px] text-gray-400">°</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-gray-500 mb-0.5">태양각(동지) <span className="text-sky-500">(위도)</span></div>
+                      <div className="flex items-center gap-0.5">
+                        <input type="number" min={10} max={50} step={0.5}
+                          value={autoSolarAngle ?? Math.round(getSolarAngleByLocation(effectiveLatitude) * 10) / 10}
+                          onChange={e => setAutoSolarAngle(Number(e.target.value))}
+                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
+                        <span className="text-[10px] text-gray-400">°</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 계산 결과 */}
+                  <div className="bg-white rounded border border-sky-200 px-2 py-1.5 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">권장 행간거리</span>
+                      <span className="font-bold text-sky-700">{recommended.toFixed(3)}m</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">안전 마진</span>
+                      <div className="flex items-center gap-1">
+                        <input type="number" min={0} max={3} step={0.1}
+                          value={autoMargin}
+                          onChange={e => setAutoMargin(Number(e.target.value))}
+                          className="w-12 px-1 py-0.5 text-xs border border-gray-300 rounded text-center font-mono" />
+                        <span className="text-gray-400">m</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-xs border-t border-sky-100 pt-1">
+                      <span className="text-gray-700 font-medium">최종 적용값</span>
+                      <span className="font-bold text-emerald-700 text-sm">{finalSpacing.toFixed(2)}m</span>
+                    </div>
+                  </div>
+
+                  {/* 미니 단면도 */}
+                  <svg viewBox="0 0 200 60" className="w-full" style={{ height: '52px' }}>
+                    <line x1="0" y1="48" x2="200" y2="48" stroke="#9ca3af" strokeWidth="1.5"/>
+                    <line x1="10" y1="48" x2="40" y2="30" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round"/>
+                    <rect x="40" y="30" width={Math.min(70, Math.round(result.moduleToModuleGap * 20))} height="18"
+                      fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.6)" strokeWidth="0.8" strokeDasharray="3,2"/>
+                    <line x1={Math.min(110, 40 + Math.round(result.moduleToModuleGap * 20))} y1="48"
+                      x2={Math.min(140, 70 + Math.round(result.moduleToModuleGap * 20))} y2="30"
+                      stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round"/>
+                    <line x1="40" y1="8" x2="18" y2="30" stroke="#f59e0b" strokeWidth="1.2"/>
+                    <text x="56" y="44" fontSize="6" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
+                    <text x="80" y="58" fontSize="6" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
+                    <text x="2" y="58" fontSize="6" fill="#3b82f6">모듈</text>
+                  </svg>
+
+                  {/* 자동 적용 버튼 */}
+                  <button
+                    onClick={() => {
+                      setSpacingValue(finalSpacing)
+                      if (showSvgCanvas) runSVGAnalysis({ rowSpacing: finalSpacing })
+                    }}
+                    className="w-full py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
+                  >
+                    ✓ 자동 계산값 적용 ({finalSpacing.toFixed(2)}m)
+                  </button>
+                </div>
+              )
+            })()}
+            </div>
             </div>
             <div>
               <div className="flex justify-between items-center">

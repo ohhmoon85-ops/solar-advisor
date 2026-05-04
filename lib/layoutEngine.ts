@@ -493,6 +493,8 @@ export function runFullAnalysis(params: {
   validPolygons?: Polygon[]
   /** 외부 사전계산 Safe Zone (제공 시 createSafeZone 스킵 — 이중 margin 방지) */
   precomputedSafeZonePolygon?: Polygon
+  /** 행간거리 강제 지정 (m) — 미지정 시 최적화 결과 사용 */
+  rowSpacing?: number
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -509,6 +511,7 @@ export function runFullAnalysis(params: {
     rowStack = 1,
     validPolygons,
     precomputedSafeZonePolygon,
+    rowSpacing: overrideRowSpacing,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -555,7 +558,7 @@ export function runFullAnalysis(params: {
   const layout = generateLayout({
     safeZonePolygon: safeZone.safeZonePolygon,
     panelSpec,
-    rowSpacing: optResult.rowSpacing,
+    rowSpacing: overrideRowSpacing ?? optResult.rowSpacing,
     tiltAngle: optResult.optimalTilt,
     azimuthDeg,
     excludeZones,
@@ -565,7 +568,7 @@ export function runFullAnalysis(params: {
 
   // Step 4: 실증 크로스체크
   const validation = validateAgainstRealCases({
-    rowSpacing: optResult.rowSpacing,
+    rowSpacing: overrideRowSpacing ?? optResult.rowSpacing,
     utilizationRate: layout.utilizationRate,
     isRoof: safeZone.plotType === 'roof',
     azimuthDeg,
@@ -574,7 +577,7 @@ export function runFullAnalysis(params: {
   return {
     safeZone,
     optimalTilt: optResult.optimalTilt,
-    rowSpacing: optResult.rowSpacing,
+    rowSpacing: overrideRowSpacing ?? optResult.rowSpacing,
     layout,
     region: optResult.region,
     panelType,

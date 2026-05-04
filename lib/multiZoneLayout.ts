@@ -1,4 +1,4 @@
-// lib/multiZoneLayout.ts — 다구역 분할 배치 엔진 (v5.2 신규)
+﻿// lib/multiZoneLayout.ts — 다구역 분할 배치 엔진 (v5.2 신규)
 // 복잡한 폴리곤(L자형·다각형)을 여러 구역으로 분할하여 독립적으로 배치
 // 사례 5·6: 2구역 병렬 배치 (총 87~91장)
 // v5.3: mergePolygonsToHull — 복수 필지를 볼록 껍질로 합병 (Bug 7)
@@ -33,6 +33,8 @@ export interface ZoneConfig {
   rowStack?: number
   /** 외부 사전계산 Safe Zone (제공 시 createSafeZone 스킵 — 이중 margin 방지) */
   precomputedSafeZonePolygon?: Polygon
+  /** 행간거리 강제 지정 (m) */
+  rowSpacing?: number
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -235,6 +237,7 @@ export function runMultiZoneAnalysis(
       panelOrientation: zone.panelOrientation ?? 'portrait',
       rowStack: zone.rowStack ?? 1,
       precomputedSafeZonePolygon: zone.precomputedSafeZonePolygon,
+      rowSpacing: zone.rowSpacing,
     })
     return {
       ...result,
