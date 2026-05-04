@@ -372,10 +372,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // 부지 폴리곤 외부로 나간 패널 자동 제거 (clipping)
       // boundary 미지정(레거시 호출) 시 clip 스킵 — 행동 호환
       const placements = action.boundary && action.boundary.length >= 3
-        ? moved.filter(p => {
-            // 4 코너 모두 부지 안인 패널만 유지 (자동배치 검증과 동일한 규칙)
-            return p.corners.every(c => isPointInPolygon(c, action.boundary!))
-          })
+        ? moved.filter(p =>
+            isPointInPolygon({ x: p.centerX, y: p.centerY }, action.boundary!)
+          )
         : moved
       return { ...saved, placements, isDirty: true }
     }
@@ -564,6 +563,12 @@ export function getEditSummary(state: EditorState) {
   const currentIds = new Set(state.placements.map(p => p.id))
   const addedCount = [...currentIds].filter(id => !originalIds.has(id)).length
   const removedCount = [...originalIds].filter(id => !currentIds.has(id)).length
+  const stackBreakdown = state.rowConfigs
+    .filter(r => r.stackCount > 1)
+    .reduce((acc, r) => {
+      acc[r.stackCount] = (acc[r.stackCount] ?? 0) + 1
+      return acc
+    }, {} as Record<number, number>)
   return {
     autoPanelCount,
     currentPanelCount,
@@ -572,5 +577,6 @@ export function getEditSummary(state: EditorState) {
     removedCount,
     corridorCount: state.corridors.length,
     stackedRowCount: state.rowConfigs.filter(r => r.stackCount > 1).length,
+    stackBreakdown,
   }
 }

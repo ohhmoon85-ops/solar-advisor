@@ -994,7 +994,7 @@ export default function LayoutEditor({
           <div className="px-3 py-2 border-b border-slate-700">
             <div className="text-xs font-semibold text-slate-400 mb-1.5">편집 통계</div>
             <div className="space-y-1 text-xs">
-              <StatRow label="자동 배치" value={`${summary.autoPanelCount}장`} />
+              <StatRow label="자동 배치 (1단 기준)" value={`${summary.autoPanelCount}장`} />
               <StatRow
                 label="현재 배치"
                 value={`${summary.currentPanelCount}장`}
@@ -1010,7 +1010,12 @@ export default function LayoutEditor({
               <div className="border-t border-slate-700 pt-1 mt-1">
                 <StatRow label="설비 용량" value={`${currentKwp} kWp`} accent="amber" />
                 <StatRow label="통로 수" value={`${summary.corridorCount}개`} />
-                <StatRow label="다단 행" value={`${summary.stackedRowCount}행`} accent={summary.stackedRowCount > 0 ? 'violet' : undefined} />
+                <StatRow
+                  label="다단 행"
+                  value={summary.stackedRowCount > 0
+                    ? Object.entries(summary.stackBreakdown).map(([n, c]) => `${n}단 ${c}행`).join(' + ')
+                    : '0행'}
+                  accent={summary.stackedRowCount > 0 ? 'violet' : undefined} />
               </div>
               <StatRow label="실행취소 가능" value={`${state.editHistory.length}/20`} />
             </div>
