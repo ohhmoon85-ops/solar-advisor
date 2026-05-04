@@ -8,11 +8,17 @@ import type { MultiZoneResult } from '@/lib/multiZoneLayout'
 // ── SVG canvas dimensions (A3 landscape proportion) ───────────────
 const SVG_W = 1120
 const SVG_H = 794
-const TB_W = 200           // title block (right side)
+const TB_W = 200           // title block width (right side)
 const DRAW_W = SVG_W - TB_W  // 920 — actual drawing area
 const DRAW_H = SVG_H         // 794
 
-// Drawing area width in mm on A3 (420mm sheet minus title block)
+// Title block layout constants
+const TB_HEADER_H = 52    // "태양광 패널 배치도" header
+const LEGEND_H = 88       // dedicated legend section at bottom
+const DATA_H = SVG_H - TB_HEADER_H - LEGEND_H  // 654px for 8 data rows
+const TB_ROW_H = DATA_H / 8                     // ≈ 81.75px per row
+
+// Drawing area width in mm on A3 (420mm sheet minus title block portion)
 const DRAW_W_MM = 420 - (TB_W / SVG_W) * 420   // ≈ 345 mm
 
 const STANDARD_SCALES = [50, 100, 150, 200, 250, 300, 500, 750, 1000, 1500, 2000, 3000, 5000]
@@ -35,15 +41,12 @@ function buildVBox(pts: Pt[], w: number, h: number, pad = 0.10): VBox {
   return { minX: cx - rangeX / 2, minY: cy - rangeY / 2, rangeX, rangeY }
 }
 
-function pxSvg(p: Pt, vb: VBox): [number, number] {
-  return [
-    ((p.x - vb.minX) / vb.rangeX) * DRAW_W,
-    DRAW_H - ((p.y - vb.minY) / vb.rangeY) * DRAW_H,
-  ]
-}
-
 function toPts(poly: Pt[], vb: VBox): string {
-  return poly.map(p => { const [x, y] = pxSvg(p, vb); return `${x.toFixed(1)},${y.toFixed(1)}` }).join(' ')
+  return poly.map(p => {
+    const x = ((p.x - vb.minX) / vb.rangeX) * DRAW_W
+    const y = DRAW_H - ((p.y - vb.minY) / vb.rangeY) * DRAW_H
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
 }
 
 function selectScale(rangeX: number): number {
@@ -64,7 +67,7 @@ function isMultiZone(v: unknown): v is MultiZoneResult {
 export default function DrawingTab() {
   const svgRef = useRef<SVGSVGElement>(null)
   const [exporting, setExporting] = useState(false)
-  const { lastFullAnalysisJson, mapResult, setActiveTab } = useSolarStore()
+  const { lastFullAnalysisJson, lastAnalysisAddress, mapResult, setActiveTab } = useSolarStore()
 
   // Parse analysis result
   let result: FullAnalysisResult | null = null
@@ -114,24 +117,24 @@ export default function DrawingTab() {
   const barM = niceBarM(vb.rangeX)
   const barPx = (barM / vb.rangeX) * DRAW_W
 
-  // Title block data
-  const address = mapResult?.address ?? '주소 정보 없음'
-  const addrLine1 = address.length > 16 ? address.slice(0, 16) : address
-  const addrLine2 = address.length > 16 ? (address.length > 32 ? address.slice(16, 30) + '…' : address.slice(16)) : null
+  // Address — prefer lastAnalysisAddress (set at analysis time), fall back to mapResult
+  const rawAddress = lastAnalysisAddress ?? mapResult?.address ?? ''
+  const addresses = rawAddress ? rawAddress.split(',').map(s => s.trim()).filter(Boolean) : []
+  const addrPrimary = addresses[0] ?? '주소 정보 없음'
+  const addrExtra = addresses.length > 1 ? `외 ${addresses.length - 1}건` : null
+
   const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
 
-  const TB_HEADER_H = 52
-  const TB_ROW_H = (SVG_H - TB_HEADER_H) / 8
-
+  // Title block data rows
   const tbRows = [
-    { label: '주 소', val1: addrLine1, val2: addrLine2 },
-    { label: '패널 수', val1: `${result.layout.totalCount.toLocaleString()} 장`, val2: null },
-    { label: '설비 용량', val1: `${result.layout.totalKwp.toFixed(2)} kWp`, val2: null },
-    { label: '경사각 (최적)', val1: `${result.optimalTilt}°`, val2: null },
-    { label: '방위각', val1: `${result.azimuthDeg}° (정남 기준)`, val2: null },
-    { label: '배열 간격', val1: `${result.rowSpacing.toFixed(2)} m`, val2: null },
-    { label: '축 척', val1: `1 : ${scale.toLocaleString()}`, val2: null },
-    { label: '작성일', val1: today, val2: null },
+    { label: '주 소', val: addrPrimary.length > 16 ? addrPrimary.slice(0, 15) + '…' : addrPrimary, sub: addrExtra },
+    { label: '패널 수', val: `${result.layout.totalCount.toLocaleString()} 장`, sub: null },
+    { label: '설비 용량', val: `${result.layout.totalKwp.toFixed(2)} kWp`, sub: null },
+    { label: '경사각 (최적)', val: `${result.optimalTilt}°`, sub: null },
+    { label: '방 위 각', val: `${result.azimuthDeg}° (정남 기준)`, sub: null },
+    { label: '배열 간격', val: `${result.rowSpacing.toFixed(2)} m`, sub: null },
+    { label: '축 척', val: `1 : ${scale.toLocaleString()}`, sub: null },
+    { label: '작 성 일', val: today, sub: null },
   ]
 
   const FONT = 'Malgun Gothic, Apple SD Gothic Neo, NanumGothic, sans-serif'
@@ -161,8 +164,8 @@ export default function DrawingTab() {
             const { jsPDF } = await import('jspdf')
             const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' })
             pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', 0, 0, 420, 297)
-            const fname = `배치도_${address.replace(/\s+/g, '_').replace(/[^\w가-힣]/g, '').slice(0, 30)}.pdf`
-            pdf.save(fname)
+            const safe = addrPrimary.replace(/\s+/g, '_').replace(/[^\w가-힣]/g, '').slice(0, 25)
+            pdf.save(`배치도_${safe}.pdf`)
             resolve()
           } catch (e) { reject(e) }
         }
@@ -231,7 +234,7 @@ export default function DrawingTab() {
 
             {/* Drawing content */}
             <g clipPath="url(#dc)">
-              {/* Safe zone (dashed blue) */}
+              {/* Safe zone */}
               {safeZone && safeZone.length >= 3 && (
                 <polygon
                   points={toPts(safeZone, vb)}
@@ -243,7 +246,7 @@ export default function DrawingTab() {
                 />
               )}
 
-              {/* Boundary (solid dark) */}
+              {/* Boundary */}
               <polygon
                 points={toPts(boundary, vb)}
                 fill="none"
@@ -283,7 +286,7 @@ export default function DrawingTab() {
             {/* Drawing area border */}
             <rect x={0} y={0} width={DRAW_W} height={DRAW_H} fill="none" stroke="#374151" strokeWidth="1.5" />
 
-            {/* ── Title block ────────────────────────────────── */}
+            {/* ── Title block background ──────────────────────── */}
             <rect x={DRAW_W} y={0} width={TB_W} height={SVG_H} fill="#f9fafb" />
             <rect x={DRAW_W} y={0} width={TB_W} height={SVG_H} fill="none" stroke="#374151" strokeWidth="1.5" />
 
@@ -297,39 +300,67 @@ export default function DrawingTab() {
             </text>
             <line x1={DRAW_W} y1={TB_HEADER_H} x2={SVG_W} y2={TB_HEADER_H} stroke="#374151" strokeWidth="1" />
 
-            {/* Data rows */}
+            {/* ── Data rows (8 rows in DATA_H area) ──────────── */}
             {tbRows.map((row, i) => {
               const ry = TB_HEADER_H + i * TB_ROW_H
-              const isLast = i === tbRows.length - 1
               return (
                 <g key={i}>
-                  {!isLast && <line x1={DRAW_W} y1={ry + TB_ROW_H} x2={SVG_W} y2={ry + TB_ROW_H} stroke="#d1d5db" strokeWidth="0.7" />}
+                  <line x1={DRAW_W} y1={ry + TB_ROW_H} x2={SVG_W} y2={ry + TB_ROW_H} stroke="#d1d5db" strokeWidth="0.7" />
                   {/* Label band */}
                   <rect x={DRAW_W} y={ry} width={TB_W} height={17} fill="#dbeafe" />
                   <text x={DRAW_W + 8} y={ry + 12} fontSize="8.5" fill="#1e40af" fontFamily={FONT}>{row.label}</text>
-                  {/* Value */}
-                  <text x={DRAW_W + 8} y={ry + 17 + (TB_ROW_H - 17) * 0.55} fontSize="11" fontWeight="bold" fill="#111827" fontFamily={FONT}>
-                    {row.val1}
+                  {/* Primary value */}
+                  <text x={DRAW_W + 8} y={ry + 17 + (TB_ROW_H - 17) * 0.48} fontSize="11" fontWeight="bold" fill="#111827" fontFamily={FONT}>
+                    {row.val}
                   </text>
-                  {row.val2 && (
-                    <text x={DRAW_W + 8} y={ry + 17 + (TB_ROW_H - 17) * 0.82} fontSize="10" fill="#374151" fontFamily={FONT}>
-                      {row.val2}
+                  {/* Secondary value (e.g. "외 N건") */}
+                  {row.sub && (
+                    <text x={DRAW_W + 8} y={ry + 17 + (TB_ROW_H - 17) * 0.78} fontSize="9" fill="#6b7280" fontFamily={FONT}>
+                      {row.sub}
                     </text>
                   )}
                 </g>
               )
             })}
 
-            {/* Legend (inside title block, bottom area) */}
-            <g transform={`translate(${DRAW_W + 8}, ${SVG_H - 68})`}>
-              <text fontSize="8" fill="#6b7280" fontFamily={FONT} y={0}>— 범 례 —</text>
-              <rect x={0} y={6} width={16} height={9} fill="none" stroke="#1e293b" strokeWidth="2" />
-              <text x={20} y={14} fontSize="8" fill="#374151" fontFamily={FONT}>부지 경계</text>
-              <rect x={0} y={21} width={16} height={9} fill="#eff6ff" stroke="#3b82f6" strokeWidth="1.2" strokeDasharray="4 2" />
-              <text x={20} y={29} fontSize="8" fill="#374151" fontFamily={FONT}>설치 가능 구역</text>
-              <rect x={0} y={36} width={16} height={9} fill="#fde68a" stroke="#b45309" strokeWidth="0.8" />
-              <text x={20} y={44} fontSize="8" fill="#374151" fontFamily={FONT}>태양광 패널</text>
-            </g>
+            {/* ── Legend section (dedicated, below data rows) ─── */}
+            {/* Divider above legend */}
+            <line
+              x1={DRAW_W} y1={TB_HEADER_H + DATA_H}
+              x2={SVG_W}  y2={TB_HEADER_H + DATA_H}
+              stroke="#374151" strokeWidth="1.2"
+            />
+            {/* Legend header band */}
+            <rect x={DRAW_W} y={TB_HEADER_H + DATA_H} width={TB_W} height={16} fill="#e2e8f0" />
+            <text
+              x={DRAW_W + TB_W / 2}
+              y={TB_HEADER_H + DATA_H + 11}
+              textAnchor="middle" fontSize="8.5" fill="#374151" fontFamily={FONT}
+            >─ 범 례 ─</text>
+
+            {/* Legend items */}
+            {[
+              { fill: 'none',    stroke: '#1e293b', sw: 2,   dash: '',     label: '부지 경계' },
+              { fill: '#eff6ff', stroke: '#3b82f6', sw: 1.2, dash: '4 2',  label: '설치 가능 구역' },
+              { fill: '#fde68a', stroke: '#b45309', sw: 0.8, dash: '',     label: '태양광 패널' },
+            ].map((item, i) => {
+              const ly = TB_HEADER_H + DATA_H + 16 + 4 + i * 21
+              return (
+                <g key={i}>
+                  <rect
+                    x={DRAW_W + 8} y={ly}
+                    width={18} height={11}
+                    fill={item.fill}
+                    stroke={item.stroke}
+                    strokeWidth={item.sw}
+                    strokeDasharray={item.dash}
+                  />
+                  <text x={DRAW_W + 30} y={ly + 9} fontSize="8.5" fill="#374151" fontFamily={FONT}>
+                    {item.label}
+                  </text>
+                </g>
+              )
+            })}
           </svg>
         </div>
       </div>

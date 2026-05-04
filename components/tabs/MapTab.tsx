@@ -247,7 +247,7 @@ function calcAutoAzimuth(pts: Point[]): number {
 export default function MapTab() {
   const {
     setMapResult, setActiveTab, setKierPvHours, setKierGhi, setLocationCoords,
-    setLastFullAnalysisJson,
+    setLastFullAnalysisJson, setLastAnalysisAddress,
     pendingRestore, setPendingRestore,
     liveSmp, priceOverride,
   } = useSolarStore()
@@ -370,6 +370,7 @@ export default function MapTab() {
         const parsed = JSON.parse(rec.fullAnalysisSnapshot)
         setSvgAnalysisResult(parsed)
         setLastFullAnalysisJson(rec.fullAnalysisSnapshot)
+        setLastAnalysisAddress(rec.address)
         setShowSvgCanvas(true)
         setIsEditing(false)
       } catch { /* 무시 */ }
@@ -1236,6 +1237,7 @@ export default function MapTab() {
         const mzResult = runMultiZoneAnalysis(zones, lat)
         setSvgAnalysisResult(mzResult)
         setLastFullAnalysisJson(JSON.stringify(mzResult))
+        setLastAnalysisAddress(addresses.filter(Boolean).join(', '))
         setIsEditing(false)
         setAnalysisKey(k => k + 1)
       } else {
@@ -1253,6 +1255,7 @@ export default function MapTab() {
         })
         setSvgAnalysisResult(faResult)
         setLastFullAnalysisJson(JSON.stringify(faResult))
+        setLastAnalysisAddress(addresses.filter(Boolean).join(', '))
         setIsEditing(true)
         setAnalysisKey(k => k + 1)
       }

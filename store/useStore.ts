@@ -70,6 +70,10 @@ interface SolarStore {
   lastFullAnalysisJson: string | null
   setLastFullAnalysisJson: (json: string | null) => void
 
+  /** 정밀 분석 실행 시 설정된 주소 레이블 (도면 탭 표제란용) */
+  lastAnalysisAddress: string | null
+  setLastAnalysisAddress: (a: string | null) => void
+
   /** 이력 패널(드로어) 열림 상태 */
   historyPanelOpen: boolean
   setHistoryPanelOpen: (open: boolean) => void
@@ -146,6 +150,9 @@ export const useSolarStore = create<SolarStore>((set) => ({
 
   lastFullAnalysisJson: null,
   setLastFullAnalysisJson: (json) => set({ lastFullAnalysisJson: json }),
+
+  lastAnalysisAddress: null,
+  setLastAnalysisAddress: (a) => set({ lastAnalysisAddress: a }),
 
   historyPanelOpen: false,
   setHistoryPanelOpen: (open) => set({ historyPanelOpen: open }),
