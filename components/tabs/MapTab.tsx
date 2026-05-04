@@ -1546,11 +1546,11 @@ export default function MapTab() {
                   </button>
                 ))}
               </div>
-              <p className="mt-1 text-[10px] text-gray-400">간이·정밀 공용 — 단수 변경 시 두 분析 모두 반영</p>
+              <p className="mt-1 text-[10px] text-gray-400">간이·정밀 공용 — 단수 변경 시 두 분석 모두 반영</p>
             </div>
             <div>
               <div className="flex justify-between items-center">
-                <label className="text-xs text-gray-500 font-medium">이격 거리 <span className="text-gray-400">(간이 분析)</span></label>
+                <label className="text-xs text-gray-500 font-medium">이격 거리 <span className="text-gray-400">(간이 분석)</span></label>
                 <span className="text-xs text-gray-400">이론값: {theoreticalSpacing}m <span className="text-gray-300">ⓘ 참조용</span></span>
               </div>
               <input
@@ -1562,7 +1562,7 @@ export default function MapTab() {
                 onChange={e => setSpacingValue(Number(e.target.value))}
                 className="mt-1 w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <p className="mt-1 text-[10px] text-gray-400">정밀 분析은 우측 행간거리 자동 계산 패널을 사용하세요</p>
+              <p className="mt-1 text-[10px] text-gray-400">정밀 분석은 우측 행간거리 자동 계산 패널을 사용하세요</p>
             </div>
             <div>
               <div className="flex justify-between items-center">
@@ -1871,7 +1871,7 @@ export default function MapTab() {
             </div>
 
 
-            {/* 행간거리 자동 계산 — 정밀 분析 전용 */}
+            {/* 행간거리 자동 계산 — 정밀 분석 전용 */}
             {(() => {
               const solarAng = autoSolarAngle ?? getSolarAngleByLocation(effectiveLatitude)
               const moduleLen = MODULES[moduleIndex].h
@@ -1882,7 +1882,7 @@ export default function MapTab() {
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2 mb-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-sky-800">⚙ 행간거리 자동 계산</span>
-                    <span className="text-[10px] bg-sky-100 text-sky-600 px-1.5 py-0.5 rounded font-medium">정밀 분析</span>
+                    <span className="text-[10px] bg-sky-100 text-sky-600 px-1.5 py-0.5 rounded font-medium">정밀 분석</span>
                   </div>
 
                   {/* 입력 행 */}
@@ -1942,25 +1942,25 @@ export default function MapTab() {
                   </div>
 
                   {/* 미니 단면도 */}
-                  <svg viewBox="0 0 200 60" className="w-full" style={{ height: '52px' }}>
-                    <line x1="0" y1="48" x2="200" y2="48" stroke="#9ca3af" strokeWidth="1.5"/>
-                    <line x1="10" y1="48" x2="40" y2="30" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round"/>
-                    <rect x="40" y="30" width={Math.min(70, Math.round(result.moduleToModuleGap * 20))} height="18"
-                      fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.6)" strokeWidth="0.8" strokeDasharray="3,2"/>
-                    <line x1={Math.min(110, 40 + Math.round(result.moduleToModuleGap * 20))} y1="48"
-                      x2={Math.min(140, 70 + Math.round(result.moduleToModuleGap * 20))} y2="30"
-                      stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round"/>
-                    <line x1="40" y1="8" x2="18" y2="30" stroke="#f59e0b" strokeWidth="1.2"/>
-                    <text x="56" y="44" fontSize="6" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
-                    <text x="80" y="58" fontSize="6" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
-                    <text x="2" y="58" fontSize="6" fill="#3b82f6">모듈</text>
+                  <svg viewBox="0 0 200 72" className="w-full" style={{ height: '120px' }}>
+                    <line x1="0" y1="56" x2="200" y2="56" stroke="#9ca3af" strokeWidth="2"/>
+                    <line x1="10" y1="56" x2="40" y2="34" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round"/>
+                    <rect x="40" y="34" width={Math.min(70, Math.round(result.moduleToModuleGap * 20))} height="22"
+                      fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.6)" strokeWidth="1" strokeDasharray="3,2"/>
+                    <line x1={Math.min(110, 40 + Math.round(result.moduleToModuleGap * 20))} y1="56"
+                      x2={Math.min(140, 70 + Math.round(result.moduleToModuleGap * 20))} y2="34"
+                      stroke="#3b82f6" strokeWidth="3" strokeLinecap="round"/>
+                    <line x1="40" y1="8" x2="18" y2="34" stroke="#f59e0b" strokeWidth="1.5"/>
+                    <text x="44" y="52" fontSize="9" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
+                    <text x="80" y="69" fontSize="9" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
+                    <text x="2" y="69" fontSize="9" fill="#3b82f6">모듈</text>
                   </svg>
 
                   {/* 간이에도 적용 체크박스 */}
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" checked={applyToQuick} onChange={e => setApplyToQuick(e.target.checked)}
                       className="accent-sky-500 w-3 h-3" />
-                    <span className="text-[10px] text-gray-500">간이 분析에도 동시 적용</span>
+                    <span className="text-[10px] text-gray-500">간이 분석에도 동시 적용</span>
                   </label>
 
                   {/* 자동 적용 버튼 */}
@@ -1971,14 +1971,14 @@ export default function MapTab() {
                       if (applyToQuick) {
                         showToast('✓ 간이·정밀 모두 반영됨')
                       } else if (showSvgCanvas) {
-                        showToast('✓ 정밀 분析 재실행됨')
+                        showToast('✓ 정밀 분석 재실행됨')
                       } else {
-                        showToast('다음 정밀 분析 실행 시 반영됩니다')
+                        showToast('다음 정밀 분석 실행 시 반영됩니다')
                       }
                     }}
                     className="w-full py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
                   >
-                    ✓ 자동 계산값 적용 — 정밀 분析 ({finalSpacing.toFixed(2)}m)
+                    ✓ 자동 계산값 적용 — 정밀 분석 ({finalSpacing.toFixed(2)}m)
                   </button>
                 </div>
               )
