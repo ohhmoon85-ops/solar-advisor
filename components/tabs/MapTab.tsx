@@ -1954,6 +1954,9 @@ export default function MapTab() {
                     <text x="44" y="52" fontSize="9" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
                     <text x="80" y="69" fontSize="9" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
                     <text x="2" y="69" fontSize="9" fill="#3b82f6">모듈</text>
+                    <text x="43" y="14" fontSize="9" fill="#f59e0b">태양 {Math.round(solarAng)}°</text>
+                    <text x="162" y="53" fontSize="9" fill="#9ca3af">토지</text>
+                    <text x="143" y="69" fontSize="9" fill="#3b82f6">다음 모듈</text>
                   </svg>
 
                   {/* 간이에도 적용 체크박스 */}
