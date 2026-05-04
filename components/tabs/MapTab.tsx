@@ -267,6 +267,8 @@ export default function MapTab() {
   const [autoLandAngle, setAutoLandAngle] = useState(0)
   const [autoMargin, setAutoMargin] = useState(1.0)
   const [autoSpacingResult, setAutoSpacingResult] = useState<RowSpacingCalcResult | null>(null)
+  const [applyToQuick, setApplyToQuick] = useState(false)
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [panelOrientation, setPanelOrientation] = useState<'portrait' | 'landscape'>('portrait')
   const [rowStack, setRowStack] = useState<1 | 2 | 3>(1)
   const [slopePercent, setSlopePercent] = useState(0)
@@ -339,6 +341,11 @@ export default function MapTab() {
   const winterAltRad = (winterElevDeg * Math.PI) / 180
   const theoreticalSpacing =
     Math.round(MODULES[moduleIndex].h * Math.cos(tiltRad) * (1 / Math.tan(winterAltRad)) * 100) / 100
+
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 3000)
+  }, [])
 
   // BIPV 계산
   const bipvCoverageRatio = 0.60
@@ -1271,6 +1278,12 @@ export default function MapTab() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-4">
+      {/* 토스트 알림 */}
+      {toastMsg && (
+        <div className="fixed top-4 right-4 z-50 bg-gray-800 text-white text-xs rounded-lg px-4 py-2.5 shadow-lg pointer-events-none">
+          {toastMsg}
+        </div>
+      )}
       {/* ── 왼쪽: 컨트롤 ── */}
       <div className="w-full lg:w-72 xl:w-80 flex-shrink-0 space-y-3">
 
@@ -1521,7 +1534,7 @@ export default function MapTab() {
               </div>
             </div>
 
-            {/* 배열 방법 + 이격거리 직접 입력 (Item 4) */}
+            {/* 배열 방법 (단수) — 간이·정밀 공용 */}
             <div>
               <label className="text-xs text-gray-500 font-medium">배열 방법 (단수)</label>
               <div className="flex gap-1.5 mt-1">
@@ -1532,118 +1545,13 @@ export default function MapTab() {
                     {n}단
                   </button>
                 ))}
-            {/* 행간거리 자동 계산 패널 */}
-            {(() => {
-              const solarAng = autoSolarAngle ?? getSolarAngleByLocation(effectiveLatitude)
-              const moduleLen = MODULES[moduleIndex].h
-              const result = calculateRowSpacing(solarAng, tiltAngle, autoLandAngle, moduleLen)
-              const recommended = result.rowSpacing
-              const finalSpacing = Math.round((recommended + autoMargin) * 100) / 100
-              return (
-                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-sky-800">⚙ 행간거리 자동 계산</span>
-                    <button
-                      onClick={() => setAutoSpacingMode(m => !m)}
-                      className={
-                        'text-[10px] px-2 py-0.5 rounded-full border font-medium transition-colors ' +
-                        (autoSpacingMode ? 'bg-sky-500 text-white border-sky-500' : 'bg-white text-sky-600 border-sky-300')
-                      }
-                    >
-                      {autoSpacingMode ? '자동 ON' : '자동 OFF'}
-                    </button>
-                  </div>
-
-                  {/* 입력 행 */}
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <div>
-                      <div className="text-[10px] text-gray-500 mb-0.5">모듈경사각</div>
-                      <div className="flex items-center gap-0.5">
-                        <input type="number" min={0} max={60} step={1}
-                          value={tiltAngle}
-                          onChange={e => setTiltAngle(Number(e.target.value))}
-                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
-                        <span className="text-[10px] text-gray-400">°</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-gray-500 mb-0.5">토지경사각 <span className="text-sky-500">(DEM)</span></div>
-                      <div className="flex items-center gap-0.5">
-                        <input type="number" min={0} max={45} step={0.5}
-                          value={autoLandAngle}
-                          onChange={e => setAutoLandAngle(Number(e.target.value))}
-                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
-                        <span className="text-[10px] text-gray-400">°</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-gray-500 mb-0.5">태양각(동지) <span className="text-sky-500">(위도)</span></div>
-                      <div className="flex items-center gap-0.5">
-                        <input type="number" min={10} max={50} step={0.5}
-                          value={autoSolarAngle ?? Math.round(getSolarAngleByLocation(effectiveLatitude) * 10) / 10}
-                          onChange={e => setAutoSolarAngle(Number(e.target.value))}
-                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
-                        <span className="text-[10px] text-gray-400">°</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 계산 결과 */}
-                  <div className="bg-white rounded border border-sky-200 px-2 py-1.5 space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">권장 행간거리</span>
-                      <span className="font-bold text-sky-700">{recommended.toFixed(3)}m</span>
-                    </div>
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500">안전 마진</span>
-                      <div className="flex items-center gap-1">
-                        <input type="number" min={0} max={3} step={0.1}
-                          value={autoMargin}
-                          onChange={e => setAutoMargin(Number(e.target.value))}
-                          className="w-12 px-1 py-0.5 text-xs border border-gray-300 rounded text-center font-mono" />
-                        <span className="text-gray-400">m</span>
-                      </div>
-                    </div>
-                    <div className="flex justify-between text-xs border-t border-sky-100 pt-1">
-                      <span className="text-gray-700 font-medium">최종 적용값</span>
-                      <span className="font-bold text-emerald-700 text-sm">{finalSpacing.toFixed(2)}m</span>
-                    </div>
-                  </div>
-
-                  {/* 미니 단면도 */}
-                  <svg viewBox="0 0 200 60" className="w-full" style={{ height: '52px' }}>
-                    <line x1="0" y1="48" x2="200" y2="48" stroke="#9ca3af" strokeWidth="1.5"/>
-                    <line x1="10" y1="48" x2="40" y2="30" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round"/>
-                    <rect x="40" y="30" width={Math.min(70, Math.round(result.moduleToModuleGap * 20))} height="18"
-                      fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.6)" strokeWidth="0.8" strokeDasharray="3,2"/>
-                    <line x1={Math.min(110, 40 + Math.round(result.moduleToModuleGap * 20))} y1="48"
-                      x2={Math.min(140, 70 + Math.round(result.moduleToModuleGap * 20))} y2="30"
-                      stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round"/>
-                    <line x1="40" y1="8" x2="18" y2="30" stroke="#f59e0b" strokeWidth="1.2"/>
-                    <text x="56" y="44" fontSize="6" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
-                    <text x="80" y="58" fontSize="6" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
-                    <text x="2" y="58" fontSize="6" fill="#3b82f6">모듈</text>
-                  </svg>
-
-                  {/* 자동 적용 버튼 */}
-                  <button
-                    onClick={() => {
-                      setSpacingValue(finalSpacing)
-                      if (showSvgCanvas) runSVGAnalysis({ rowSpacing: finalSpacing })
-                    }}
-                    className="w-full py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
-                  >
-                    ✓ 자동 계산값 적용 ({finalSpacing.toFixed(2)}m)
-                  </button>
-                </div>
-              )
-            })()}
-            </div>
+              </div>
+              <p className="mt-1 text-[10px] text-gray-400">간이·정밀 공용 — 단수 변경 시 두 분析 모두 반영</p>
             </div>
             <div>
               <div className="flex justify-between items-center">
-                <label className="text-xs text-gray-500 font-medium">이격 거리 (m)</label>
-                <span className="text-xs text-gray-400">이론값: {theoreticalSpacing}m</span>
+                <label className="text-xs text-gray-500 font-medium">이격 거리 <span className="text-gray-400">(간이 분析)</span></label>
+                <span className="text-xs text-gray-400">이론값: {theoreticalSpacing}m <span className="text-gray-300">ⓘ 참조용</span></span>
               </div>
               <input
                 type="number"
@@ -1654,6 +1562,7 @@ export default function MapTab() {
                 onChange={e => setSpacingValue(Number(e.target.value))}
                 className="mt-1 w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <p className="mt-1 text-[10px] text-gray-400">정밀 분析은 우측 행간거리 자동 계산 패널을 사용하세요</p>
             </div>
             <div>
               <div className="flex justify-between items-center">
@@ -1960,6 +1869,120 @@ export default function MapTab() {
                 </div>
               </div>
             </div>
+
+
+            {/* 행간거리 자동 계산 — 정밀 분析 전용 */}
+            {(() => {
+              const solarAng = autoSolarAngle ?? getSolarAngleByLocation(effectiveLatitude)
+              const moduleLen = MODULES[moduleIndex].h
+              const result = calculateRowSpacing(solarAng, tiltAngle, autoLandAngle, moduleLen)
+              const recommended = result.rowSpacing
+              const finalSpacing = Math.round((recommended + autoMargin) * 100) / 100
+              return (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2 mb-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-sky-800">⚙ 행간거리 자동 계산</span>
+                    <span className="text-[10px] bg-sky-100 text-sky-600 px-1.5 py-0.5 rounded font-medium">정밀 분析</span>
+                  </div>
+
+                  {/* 입력 행 */}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <div>
+                      <div className="text-[10px] text-gray-500 mb-0.5">모듈경사각</div>
+                      <div className="flex items-center gap-0.5">
+                        <input type="number" min={0} max={60} step={1}
+                          value={tiltAngle}
+                          onChange={e => setTiltAngle(Number(e.target.value))}
+                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
+                        <span className="text-[10px] text-gray-400">°</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-gray-500 mb-0.5">토지경사각 <span className="text-sky-500">(DEM)</span></div>
+                      <div className="flex items-center gap-0.5">
+                        <input type="number" min={0} max={45} step={0.5}
+                          value={autoLandAngle}
+                          onChange={e => setAutoLandAngle(Number(e.target.value))}
+                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
+                        <span className="text-[10px] text-gray-400">°</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-gray-500 mb-0.5">태양각(동지) <span className="text-sky-500">(위도)</span></div>
+                      <div className="flex items-center gap-0.5">
+                        <input type="number" min={10} max={50} step={0.5}
+                          value={autoSolarAngle ?? Math.round(getSolarAngleByLocation(effectiveLatitude) * 10) / 10}
+                          onChange={e => setAutoSolarAngle(Number(e.target.value))}
+                          className="w-full px-1 py-0.5 text-xs border border-gray-300 rounded bg-white text-center font-mono" />
+                        <span className="text-[10px] text-gray-400">°</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 계산 결과 */}
+                  <div className="bg-white rounded border border-sky-200 px-2 py-1.5 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">권장 행간거리</span>
+                      <span className="font-bold text-sky-700">{recommended.toFixed(3)}m</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">안전 마진</span>
+                      <div className="flex items-center gap-1">
+                        <input type="number" min={0} max={3} step={0.1}
+                          value={autoMargin}
+                          onChange={e => setAutoMargin(Number(e.target.value))}
+                          className="w-12 px-1 py-0.5 text-xs border border-gray-300 rounded text-center font-mono" />
+                        <span className="text-gray-400">m</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-xs border-t border-sky-100 pt-1">
+                      <span className="text-gray-700 font-medium">최종 적용값</span>
+                      <span className="font-bold text-emerald-700 text-sm">{finalSpacing.toFixed(2)}m</span>
+                    </div>
+                  </div>
+
+                  {/* 미니 단면도 */}
+                  <svg viewBox="0 0 200 60" className="w-full" style={{ height: '52px' }}>
+                    <line x1="0" y1="48" x2="200" y2="48" stroke="#9ca3af" strokeWidth="1.5"/>
+                    <line x1="10" y1="48" x2="40" y2="30" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round"/>
+                    <rect x="40" y="30" width={Math.min(70, Math.round(result.moduleToModuleGap * 20))} height="18"
+                      fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.6)" strokeWidth="0.8" strokeDasharray="3,2"/>
+                    <line x1={Math.min(110, 40 + Math.round(result.moduleToModuleGap * 20))} y1="48"
+                      x2={Math.min(140, 70 + Math.round(result.moduleToModuleGap * 20))} y2="30"
+                      stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round"/>
+                    <line x1="40" y1="8" x2="18" y2="30" stroke="#f59e0b" strokeWidth="1.2"/>
+                    <text x="56" y="44" fontSize="6" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
+                    <text x="80" y="58" fontSize="6" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
+                    <text x="2" y="58" fontSize="6" fill="#3b82f6">모듈</text>
+                  </svg>
+
+                  {/* 간이에도 적용 체크박스 */}
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={applyToQuick} onChange={e => setApplyToQuick(e.target.checked)}
+                      className="accent-sky-500 w-3 h-3" />
+                    <span className="text-[10px] text-gray-500">간이 분析에도 동시 적용</span>
+                  </label>
+
+                  {/* 자동 적용 버튼 */}
+                  <button
+                    onClick={() => {
+                      if (applyToQuick) setSpacingValue(finalSpacing)
+                      runSVGAnalysis({ rowSpacing: finalSpacing })
+                      if (applyToQuick) {
+                        showToast('✓ 간이·정밀 모두 반영됨')
+                      } else if (showSvgCanvas) {
+                        showToast('✓ 정밀 분析 재실행됨')
+                      } else {
+                        showToast('다음 정밀 분析 실행 시 반영됩니다')
+                      }
+                    }}
+                    className="w-full py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
+                  >
+                    ✓ 자동 계산값 적용 — 정밀 분析 ({finalSpacing.toFixed(2)}m)
+                  </button>
+                </div>
+              )
+            })()}
 
             {/* 실행 버튼 */}
             <div className="flex gap-2">
