@@ -2135,11 +2135,13 @@ export default function MapTab() {
                         const newTotalKwp = parseFloat(
                           updatedZones.reduce((s, z) => s + z.layout.totalKwp, 0).toFixed(2)
                         )
-                        setSvgAnalysisResult({ ...mzResult, zones: updatedZones, totalCount: newTotalCount, totalKwp: newTotalKwp })
+                        const updatedMz = { ...mzResult, zones: updatedZones, totalCount: newTotalCount, totalKwp: newTotalKwp }
+                        setSvgAnalysisResult(updatedMz)
+                        setLastFullAnalysisJson(JSON.stringify(updatedMz))
                       } else {
                         // 단일 구역
                         const faResult = svgAnalysisResult as FullAnalysisResult
-                        setSvgAnalysisResult({
+                        const updatedSingle: FullAnalysisResult = {
                           ...faResult,
                           layout: {
                             ...faResult.layout,
@@ -2148,7 +2150,9 @@ export default function MapTab() {
                             totalKwp,
                             utilizationRate: placements.length / (faResult.layout.theoreticalMax || 1),
                           },
-                        })
+                        }
+                        setSvgAnalysisResult(updatedSingle)
+                        setLastFullAnalysisJson(JSON.stringify(updatedSingle))
                         setIsEditing(false)
                       }
                       setEditingCount(null)
