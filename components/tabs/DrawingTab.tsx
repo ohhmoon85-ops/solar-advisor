@@ -271,7 +271,7 @@ export default function DrawingTab() {
               <input
                 value={authorName}
                 onChange={e => setAuthorName(e.target.value)}
-                placeholder="작성자 이름 (예: 이강물산 문형철)"
+                placeholder="작성자 이름 (예: 이강물산 조영두)"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
