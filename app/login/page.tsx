@@ -69,7 +69,7 @@ export default function LoginPage() {
             ☀️
           </div>
           <h1 className="text-2xl font-bold text-gray-900">SolarAdvisor</h1>
-          <p className="text-sm text-gray-500 mt-1">(주)이강물산 이사 (예)육군대령 조영두</p>
+          <p className="text-sm text-gray-500 mt-1">(주)이강물산</p>
         </div>
 
         {/* 로그인 카드 */}
