@@ -1168,7 +1168,7 @@ export default function MapTab() {
       }
       // Polygon vs MultiPolygon 분기: union 결과에 따라 safe zone 계산
       const margin = svgPlotType === 'roof'
-        ? (installType === '건물지붕형' && roofType === '박공' ? 0.3 : 0.5)
+        ? 0.5
         : 2.0
       const geomType = mergedFeature.geometry?.type
       const allRings: number[][][] = []
@@ -1506,7 +1506,7 @@ export default function MapTab() {
                       <span className="text-xs text-gray-700">쫙 올림 (용마루 무시, 직선 배치)</span>
                     </label>
                     <div className="bg-orange-50 border border-orange-200 rounded-lg p-2 text-xs text-orange-700">
-                      박공 기준: 60평 ≈ 30kW · 이격 0.1m · 마진 30cm
+                      박공 기준: 60평 ≈ 30kW · 이격 0.1m · 마진 50cm
                     </div>
                   </div>
                 )}
