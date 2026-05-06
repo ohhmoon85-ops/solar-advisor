@@ -276,6 +276,8 @@ export default function MapTab() {
   const [slopeFetching, setSlopeFetching] = useState(false)
   const [structureType, setStructureType] = useState<StructureType>('철골구조')
   const [bipvEnabled, setBipvEnabled] = useState(false)
+  const [roofType, setRoofType] = useState<'슬라브' | '박공'>('슬라브')
+  const [jjokOlrim, setJjokOlrim] = useState(false)
 
   // ── 드로잉 ──
   const [isComplete, setIsComplete] = useState(false)
@@ -1147,6 +1149,8 @@ export default function MapTab() {
       const orientation = overrides?.panelOrientation ?? svgPanelOrientation
       const stack = overrides?.rowStack ?? rowStack
       const customRowSpacing = overrides?.rowSpacing
+      const gableRowSpacing = installType === '건물지붕형' && roofType === '박공' ? 0.1 : undefined
+      const effectiveRowSpacing = customRowSpacing ?? gableRowSpacing
       // turf union: GeoJSON 레벨에서 복수 필지를 정확히 합산 (convex hull 대신)
       const parcelFeatures = parcels
         .filter(p => p.ring.length >= 3)
@@ -1163,7 +1167,9 @@ export default function MapTab() {
         if (result) mergedFeature = result as ReturnType<typeof turfPolygon>
       }
       // Polygon vs MultiPolygon 분기: union 결과에 따라 safe zone 계산
-      const margin = svgPlotType === 'roof' ? 0.5 : 2.0
+      const margin = svgPlotType === 'roof'
+        ? (installType === '건물지붕형' && roofType === '박공' ? 0.3 : 0.5)
+        : 2.0
       const geomType = mergedFeature.geometry?.type
       const allRings: number[][][] = []
       let cadastreRing: number[][] = []
@@ -1228,8 +1234,9 @@ export default function MapTab() {
               panelSpec,
               panelType: svgPanelType,
               precomputedSafeZonePolygon: safePolygon,
-              rowSpacing: customRowSpacing,
+              rowSpacing: effectiveRowSpacing,
               landStandard: svgPlotType === 'land',
+              fixedGridAngle: installType === '건물지붕형' && jjokOlrim,
               ...commonOpts,
             } as ZoneConfig
           })
@@ -1251,8 +1258,9 @@ export default function MapTab() {
           latitude: lat,
           precomputedSafeZonePolygon,
           validPolygons,
-          rowSpacing: customRowSpacing,
+          rowSpacing: effectiveRowSpacing,
           landStandard: svgPlotType === 'land',
+          fixedGridAngle: installType === '건물지붕형' && jjokOlrim,
           ...commonOpts,
         })
         setSvgAnalysisResult(faResult)
@@ -1474,6 +1482,35 @@ export default function MapTab() {
                   </div>
                 </div>
               )}
+              {/* 지붕 종류 — 슬라브/박공 */}
+              <div>
+                <label className="text-xs text-gray-500 font-medium">지붕 종류</label>
+                <div className="flex gap-1.5 mt-1">
+                  {(['슬라브', '박공'] as const).map(rt => (
+                    <button key={rt}
+                      onClick={() => { setRoofType(rt); if (rt === '슬라브') setJjokOlrim(false) }}
+                      className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                        roofType === rt
+                          ? 'bg-orange-500 text-white border-orange-500'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-orange-300'}`}>
+                      {rt === '슬라브' ? '슬라브 (옥상/평지붕)' : '박공 (경사지붕)'}
+                    </button>
+                  ))}
+                </div>
+                {roofType === '박공' && (
+                  <div className="mt-1.5 space-y-1">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={jjokOlrim}
+                        onChange={e => setJjokOlrim(e.target.checked)}
+                        className="accent-orange-500"/>
+                      <span className="text-xs text-gray-700">쫙 올림 (용마루 무시, 직선 배치)</span>
+                    </label>
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-2 text-xs text-orange-700">
+                      박공 기준: 60평 ≈ 30kW · 이격 0.1m · 마진 30cm
+                    </div>
+                  </div>
+                )}
+              </div>
               {/* STEP 5: BIPV 판별 및 특례 안내 */}
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={bipvEnabled} onChange={e => setBipvEnabled(e.target.checked)} className="accent-blue-500"/>
@@ -2163,6 +2200,7 @@ export default function MapTab() {
                       panelSpec: PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.GS710wp,
                       rowStack,
                       landStandard: svgPlotType === 'land',
+                      rowSpacing: installType === '건물지붕형' && roofType === '박공' ? 0.1 : undefined,
                     }}
                     onCancel={() => { setIsEditing(false); setEditingCount(null) }}
                   />

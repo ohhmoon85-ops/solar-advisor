@@ -550,6 +550,8 @@ export function runFullAnalysis(params: {
   rowSpacing?: number
   /** 토지 실무 표준 배치 활성화 (2단 주배치 + 자투리 1단 채움) */
   landStandard?: boolean
+  /** 방위각 고정 배치 — 탐색 없이 azimuthDeg 그대로 배치 (쫙 올림) */
+  fixedGridAngle?: boolean
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -568,6 +570,7 @@ export function runFullAnalysis(params: {
     precomputedSafeZonePolygon,
     rowSpacing: overrideRowSpacing,
     landStandard = false,
+    fixedGridAngle = false,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -621,6 +624,7 @@ export function runFullAnalysis(params: {
     panelOrientation,
     rowStack,
     landStandard,
+    fixedGridAngle,
   })
 
   // Step 4: 실증 크로스체크

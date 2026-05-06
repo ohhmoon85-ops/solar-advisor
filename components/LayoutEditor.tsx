@@ -126,7 +126,7 @@ interface Props {
   /** 패널 수 실시간 변경 콜백 */
   onCountChange?: (count: number) => void
   /** 방위각 기반 그리드 재배치 옵션 — 없으면 회전 버튼 비활성 */
-  reanalysisOptions?: { panelSpec: PanelSpec; rowStack?: number; validPolygons?: Polygon[]; landStandard?: boolean }
+  reanalysisOptions?: { panelSpec: PanelSpec; rowStack?: number; validPolygons?: Polygon[]; landStandard?: boolean; rowSpacing?: number }
 }
 
 export default function LayoutEditor({
@@ -172,7 +172,7 @@ export default function LayoutEditor({
     const newLayout = generateLayout({
       safeZonePolygon: result.safeZone.safeZonePolygon,
       panelSpec: reanalysisOptions.panelSpec,
-      rowSpacing: result.rowSpacing,
+      rowSpacing: reanalysisOptions.rowSpacing ?? result.rowSpacing,
       tiltAngle: result.optimalTilt,
       azimuthDeg: newAzimuth,
       panelOrientation: result.panelOrientation,

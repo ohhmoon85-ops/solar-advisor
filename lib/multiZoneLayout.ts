@@ -37,6 +37,8 @@ export interface ZoneConfig {
   rowSpacing?: number
   /** 토지 실무 표준 배치 (2단 주배치 + 자투리 1단 채움) */
   landStandard?: boolean
+  /** 방위각 고정 배치 (박공 쫙 올림) */
+  fixedGridAngle?: boolean
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -241,6 +243,7 @@ export function runMultiZoneAnalysis(
       precomputedSafeZonePolygon: zone.precomputedSafeZonePolygon,
       rowSpacing: zone.rowSpacing,
       landStandard: zone.landStandard,
+      fixedGridAngle: zone.fixedGridAngle,
     })
     return {
       ...result,
