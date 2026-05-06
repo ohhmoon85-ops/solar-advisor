@@ -1151,7 +1151,20 @@ export default function MapTab() {
       const stack = overrides?.rowStack ?? rowStack
       const customRowSpacing = overrides?.rowSpacing
       const gableRowSpacing = installType === '건물지붕형' && roofType === '박공' ? 0.1 : undefined
-      const effectiveRowSpacing = customRowSpacing ?? gableRowSpacing
+
+      // [Option C 해백] 일반토지/슬라브에서 customRowSpacing 미지정 시,
+      // 자동 계산 패널의 입력값(경사·마진)으로 행간거리를 계산하여 해백.
+      // workPath는 별도로 runFullAnalysis에 전달되므로 여기서는 baseSpacing(=recommended+margin)만 산출.
+      // 박공은 gableRowSpacing(0.1m)이 우선이므로 해백 미적용.
+      let autoCalcRowSpacing: number | undefined
+      if (customRowSpacing === undefined && gableRowSpacing === undefined) {
+        const solarAng = autoSolarAngle ?? getSolarAngleByLocation(effectiveLatitude)
+        const moduleLen = MODULES[moduleIndex].h
+        const calcResult = calculateRowSpacing(solarAng, tiltAngle, autoLandAngle, moduleLen)
+        autoCalcRowSpacing = Math.round((calcResult.rowSpacing + autoMargin) * 100) / 100
+      }
+
+      const effectiveRowSpacing = customRowSpacing ?? gableRowSpacing ?? autoCalcRowSpacing
       const isGable = installType === '건물지붕형' && roofType === '박공'
       const workPath = isGable ? 0 : workPathM
       // turf union: GeoJSON 레벨에서 복수 필지를 정확히 합산 (convex hull 대신)
@@ -1282,7 +1295,9 @@ export default function MapTab() {
     } finally {
       setSvgAnalyzing(false)
     }
-  }, [apiCoords, parcels, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude])
+  }, [apiCoords, parcels, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
+      autoSolarAngle, moduleIndex, tiltAngle, autoLandAngle, autoMargin,
+      workPathM, installType, roofType, jjokOlrim])
 
   const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
@@ -2049,34 +2064,42 @@ export default function MapTab() {
                       if (applyToQuick) {
                         showToast('✓ 간이·정밀 모두 반영됨')
                       } else if (showSvgCanvas) {
-                        showToast('✓ 정밀 분석 재실행됨')
+                        showToast('✓ 자동 계산값으로 재실행')
                       } else {
-                        showToast('다음 정밀 분석 실행 시 반영됩니다')
+                        showToast('다음 정밀 분석 시 반영됩니다')
                       }
                     }}
                     className="w-full py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
                   >
-                    ✓ 자동 계산값 적용 — 정밀 분석 ({finalSpacing.toFixed(2)}m)
+                    ✓ 이 설정으로 적용 — 정밀 분석 ({finalSpacing.toFixed(2)}m)
                   </button>
+                  <p className="text-[10px] text-emerald-700 text-center -mt-1 italic">
+                    ↑ 입력값(경사·마진·통로) 변경 후 사용
+                  </p>
                 </div>
               )
             })()}
 
             {/* 실행 버튼 */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => runSVGAnalysis()}
-                disabled={svgAnalyzing}
-                className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors">
-                {svgAnalyzing ? '분석 중...' : '정밀 분석 실행'}
-              </button>
-              {svgAnalysisResult && (
+            <div className="space-y-1">
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setShowSvgCanvas(v => !v)}
-                  className="px-3 py-2 border border-indigo-300 text-indigo-600 text-xs rounded-lg hover:bg-indigo-50">
-                  {showSvgCanvas ? '숨기기' : '결과 보기'}
+                  onClick={() => runSVGAnalysis()}
+                  disabled={svgAnalyzing}
+                  className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors">
+                  {svgAnalyzing ? '분석 중...' : '▶ 정밀 분석 실행'}
                 </button>
-              )}
+                {svgAnalysisResult && (
+                  <button
+                    onClick={() => setShowSvgCanvas(v => !v)}
+                    className="px-3 py-2 border border-indigo-300 text-indigo-600 text-xs rounded-lg hover:bg-indigo-50">
+                    {showSvgCanvas ? '숨기기' : '결과 보기'}
+                  </button>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-500 text-center italic">
+                현재 설정 그대로 분석 (자동 계산값 자동 적용)
+              </p>
             </div>
 
             {/* 결과 표시 */}
