@@ -1240,7 +1240,7 @@ export default function MapTab() {
               rowSpacing: effectiveRowSpacing,
               landStandard: svgPlotType === 'land',
               fixedGridAngle: svgPlotType === 'land' ||
-                (installType === '건물지붕형' && (roofType === '슬라브' || jjokOlrim)),
+                (installType === '건물지붕형' && jjokOlrim),
               workPath,
               ...commonOpts,
             } as ZoneConfig
@@ -1266,7 +1266,7 @@ export default function MapTab() {
           rowSpacing: effectiveRowSpacing,
           landStandard: svgPlotType === 'land',
           fixedGridAngle: svgPlotType === 'land' ||
-            (installType === '건물지붕형' && (roofType === '슬라브' || jjokOlrim)),
+            (installType === '건물지붕형' && jjokOlrim),
           workPath,
           ...commonOpts,
         })
@@ -1880,7 +1880,11 @@ export default function MapTab() {
               {/* 방위각 슬라이더 */}
               <div className="col-span-2">
                 <div className="flex justify-between items-center">
-                  <label className="text-xs text-gray-500 font-medium">방위각</label>
+                  <label className="text-xs text-gray-500 font-medium">
+                    방위각
+                    {svgPlotType !== 'land' && !(installType === '건물지붕형' && jjokOlrim) &&
+                      <span className="text-gray-400 font-normal ml-1">(배치 후 미세 조정)</span>}
+                  </label>
                   <span className="text-xs font-bold text-indigo-600">
                     {svgAzimuthDeg}°
                     {svgAzimuthDeg === 180 ? ' (정남향)' : svgAzimuthDeg < 180 ? ' (남동향)' : ' (남서향)'}
@@ -1892,6 +1896,14 @@ export default function MapTab() {
                   className="mt-1 w-full" />
                 <div className="flex justify-between text-xs text-gray-400 mt-0.5">
                   <span>145° (남동)</span><span>180° (정남)</span><span>215° (남서)</span>
+                </div>
+                {/* 정렬 정책 안내 */}
+                <div className="mt-1 text-[10px] text-gray-500 bg-gray-50 rounded px-2 py-1">
+                  {svgPlotType === 'land'
+                    ? '일반토지형: 정남향(180°) 기본 — 슬라이더 조정 후 재분석 가능'
+                    : installType === '건물지붕형' && roofType === '박공' && jjokOlrim
+                      ? `박공 쫙 올림: ${svgAzimuthDeg}° 그대로 고정 배치`
+                      : '지붕형: 형태 자동 정렬 — 배치 후 그리드 방위각 버튼으로 미세 조정'}
                 </div>
                 {Math.abs(svgAzimuthDeg - 180) > 25 && (
                   <div className="mt-1 text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
