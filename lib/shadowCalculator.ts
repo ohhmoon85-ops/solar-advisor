@@ -154,7 +154,7 @@ export function optimizeTiltAngle(params: {
       ? ROOF_ROW_SPACING
       : getRowSpacing({ panelSpec, tiltAngle: tilt, latitude, azimuthDeg, panelOrientation })
     const projLen = effNS * Math.cos(tilt * DEG2RAD)
-    const rowPitch = projLen + spacing
+    const rowPitch = spacing  // getRowSpacing()은 front-to-front 피치를 반환
     const colPitch = effEW + 0.02
 
     const sideLen = Math.sqrt(safeZoneAreaM2)

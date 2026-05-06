@@ -284,8 +284,12 @@ function placeGridAtAngle(
   const intraGap = 0.02  // 단 내 행간 간격 (2cm)
   // 단 높이: stack개의 패널 + (stack-1)개의 intraGap
   const groupHeight = stack * projLen + (stack - 1) * intraGap
-  // 단 간격: 단 시작점 기준 = 단 높이 + 음영 이격거리
-  const groupPitch = groupHeight + rowSpacing
+  // shadowGap: 그림자 거리에서 모듈 수평투영 제외한 순수 gap
+  // 박공처럼 rowSpacing < projLen인 경우 = 물리적 gap만 적용
+  const shadowGap = Math.max(rowSpacing - projLen, 0)
+  const groupPitch = rowSpacing > projLen
+    ? groupHeight + stack * shadowGap   // 일조각: 단수 비례
+    : groupHeight + rowSpacing          // 박공(0.1m): 물리 gap 그대로
 
   const centroid = polygonCentroid(safeZonePolygon)
   const rotatedPoly = safeZonePolygon.map(p => rotatePoint(p, centroid.x, centroid.y, -gridAngle))
@@ -342,8 +346,8 @@ function placeGridAtAngle(
   if (landStandard && stack >= 2) {
     const lastGroupEnd = groupIdx > 0
       ? minY + (groupIdx - 1) * groupPitch + groupHeight
-      : minY - rowSpacing  // 2단 그룹 없음 → yFill = minY 로 시작
-    let yFill = lastGroupEnd + rowSpacing
+      : minY - shadowGap  // 2단 그룹 없음 → yFill = minY 로 시작
+    let yFill = lastGroupEnd + shadowGap
     let fillRowIdx = groupIdx * stack
 
     while (yFill + projLen <= maxY) {
@@ -373,7 +377,7 @@ function placeGridAtAngle(
         fillCount++
       }
       fillRowIdx++
-      yFill += projLen + rowSpacing
+      yFill += rowSpacing  // rowSpacing = D = 1단 front-to-front pitch
     }
   }
 
