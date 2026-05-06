@@ -37,6 +37,8 @@ export interface LayoutResult {
   theoreticalMax: number
   /** 실제 배치 수 / 이론 최대 = 이용률 (0~1) */
   utilizationRate: number
+  /** 1단 자투리 패널 수 (토지 실무 표준 배치 시) */
+  fillPanelCount?: number
 }
 
 /** 부지 용도 타입
@@ -272,7 +274,8 @@ function placeGridAtAngle(
   gridAngle: number,
   rowStack: number = 1,
   validPolygons?: Polygon[],
-): PanelPlacement[] {
+  landStandard: boolean = false,
+): { placements: PanelPlacement[]; fillCount: number } {
   const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
   const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
   const projLen = effNS * Math.cos(tiltAngle * DEG2RAD)
@@ -334,7 +337,47 @@ function placeGridAtAngle(
       }
     }
   }
-  return placements
+  // ── 토지 실무 표준: 최상단 자투리 공간에 1단 채움 ──────────────────
+  let fillCount = 0
+  if (landStandard && stack >= 2) {
+    const lastGroupEnd = groupIdx > 0
+      ? minY + (groupIdx - 1) * groupPitch + groupHeight
+      : minY - rowSpacing  // 2단 그룹 없음 → yFill = minY 로 시작
+    let yFill = lastGroupEnd + rowSpacing
+    let fillRowIdx = groupIdx * stack
+
+    while (yFill + projLen <= maxY) {
+      const row = fillRowIdx
+      let col = 0
+      for (let x = minX; x + effEW <= maxX; x += colPitch, col++) {
+        const rotatedFillCorners: [Point, Point, Point, Point] = [
+          { x,            y: yFill },
+          { x: x + effEW, y: yFill },
+          { x: x + effEW, y: yFill + projLen },
+          { x,            y: yFill + projLen },
+        ]
+        const centerRotated = { x: x + effEW / 2, y: yFill + projLen / 2 }
+        const passes = rotatedValidPolys
+          ? rotatedValidPolys.some(poly => isPointInPolygon(centerRotated, poly))
+          : isPointInPolygon(centerRotated, rotatedPoly)
+        if (!passes) continue
+
+        const actualCorners = rotatedFillCorners.map(
+          p => rotatePoint(p, centroid.x, centroid.y, gridAngle)
+        ) as [Point, Point, Point, Point]
+        const center = rotatePoint(centerRotated, centroid.x, centroid.y, gridAngle)
+
+        if (excludeZones.some(zone => isPointInPolygon(center, zone))) continue
+
+        placements.push({ id: id++, corners: actualCorners, centerX: center.x, centerY: center.y, row, col })
+        fillCount++
+      }
+      fillRowIdx++
+      yFill += projLen + rowSpacing
+    }
+  }
+
+  return { placements, fillCount }
 }
 
 /**
@@ -361,6 +404,8 @@ export function generateLayout(params: {
   validPolygons?: Polygon[]
   /** true이면 0°~175° 탐색을 건너뛰고 azimuthDeg 그대로 배치 */
   fixedGridAngle?: boolean
+  /** true이면 토지 실무 표준 (2단 주배치 + 자투리 1단 채움) 적용 */
+  landStandard?: boolean
 }): LayoutResult {
   const {
     safeZonePolygon,
@@ -373,24 +418,31 @@ export function generateLayout(params: {
     rowStack = 1,
     validPolygons,
     fixedGridAngle = false,
+    landStandard = false,
   } = params
 
   // 0°~175° 범위에서 5° 단위로 탐색하여 가장 많은 패널이 배치되는 그리드 각도 선택
   // 방위각 오프셋(azimuthDeg-180)을 기준으로 탐색
   const azBase = azimuthDeg - 180
   let bestPlacements: PanelPlacement[] = []
+  let bestFillCount = 0
   if (fixedGridAngle) {
-    bestPlacements = placeGridAtAngle(
+    const r = placeGridAtAngle(
       safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
-      panelOrientation, excludeZones, azBase, rowStack,
+      panelOrientation, excludeZones, azBase, rowStack, validPolygons, landStandard,
     )
+    bestPlacements = r.placements
+    bestFillCount = r.fillCount
   } else {
     for (let sweep = 0; sweep < 180; sweep += 5) {
-      const candidate = placeGridAtAngle(
+      const r = placeGridAtAngle(
         safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
-        panelOrientation, excludeZones, azBase + sweep, rowStack,
+        panelOrientation, excludeZones, azBase + sweep, rowStack, validPolygons, landStandard,
       )
-      if (candidate.length > bestPlacements.length) bestPlacements = candidate
+      if (r.placements.length > bestPlacements.length) {
+        bestPlacements = r.placements
+        bestFillCount = r.fillCount
+      }
     }
   }
 
@@ -413,6 +465,7 @@ export function generateLayout(params: {
       : 0,
     theoreticalMax,
     utilizationRate: Math.round(utilizationRate * 1000) / 1000,
+    fillPanelCount: landStandard ? bestFillCount : undefined,
   }
 }
 
@@ -495,6 +548,8 @@ export function runFullAnalysis(params: {
   precomputedSafeZonePolygon?: Polygon
   /** 행간거리 강제 지정 (m) — 미지정 시 최적화 결과 사용 */
   rowSpacing?: number
+  /** 토지 실무 표준 배치 활성화 (2단 주배치 + 자투리 1단 채움) */
+  landStandard?: boolean
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -512,6 +567,7 @@ export function runFullAnalysis(params: {
     validPolygons,
     precomputedSafeZonePolygon,
     rowSpacing: overrideRowSpacing,
+    landStandard = false,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -564,6 +620,7 @@ export function runFullAnalysis(params: {
     excludeZones,
     panelOrientation,
     rowStack,
+    landStandard,
   })
 
   // Step 4: 실증 크로스체크

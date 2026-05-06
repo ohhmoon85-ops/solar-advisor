@@ -126,7 +126,7 @@ interface Props {
   /** 패널 수 실시간 변경 콜백 */
   onCountChange?: (count: number) => void
   /** 방위각 기반 그리드 재배치 옵션 — 없으면 회전 버튼 비활성 */
-  reanalysisOptions?: { panelSpec: PanelSpec; rowStack?: number; validPolygons?: Polygon[] }
+  reanalysisOptions?: { panelSpec: PanelSpec; rowStack?: number; validPolygons?: Polygon[]; landStandard?: boolean }
 }
 
 export default function LayoutEditor({
@@ -178,6 +178,7 @@ export default function LayoutEditor({
       panelOrientation: result.panelOrientation,
       rowStack: effectiveRowStack,
       validPolygons: reanalysisOptions.validPolygons,
+      landStandard: reanalysisOptions.landStandard,
       fixedGridAngle: true,
     })
     dispatch({ type: 'REINIT', placements: newLayout.placements })
@@ -994,7 +995,9 @@ export default function LayoutEditor({
           <div className="px-3 py-2 border-b border-slate-700">
             <div className="text-xs font-semibold text-slate-400 mb-1.5">편집 통계</div>
             <div className="space-y-1 text-xs">
-              <StatRow label="자동 배치 (1단 기준)" value={`${summary.autoPanelCount}장`} />
+              <StatRow
+                label={result.layout.fillPanelCount != null ? '자동 배치 (실무 표준)' : '자동 배치 (1단 기준)'}
+                value={`${summary.autoPanelCount}장`} />
               <StatRow
                 label="현재 배치"
                 value={`${summary.currentPanelCount}장`}
@@ -1010,12 +1013,19 @@ export default function LayoutEditor({
               <div className="border-t border-slate-700 pt-1 mt-1">
                 <StatRow label="설비 용량" value={`${currentKwp} kWp`} accent="amber" />
                 <StatRow label="통로 수" value={`${summary.corridorCount}개`} />
-                <StatRow
-                  label="다단 행"
-                  value={summary.stackedRowCount > 0
-                    ? Object.entries(summary.stackBreakdown).map(([n, c]) => `${n}단 ${c}행`).join(' + ')
-                    : '0행'}
-                  accent={summary.stackedRowCount > 0 ? 'violet' : undefined} />
+                {result.layout.fillPanelCount != null ? (
+                  <StatRow
+                    label="단수 분포"
+                    value={`2단 ${summary.autoPanelCount - result.layout.fillPanelCount}장 + 자투리 ${result.layout.fillPanelCount}장`}
+                    accent="violet" />
+                ) : (
+                  <StatRow
+                    label="다단 행"
+                    value={summary.stackedRowCount > 0
+                      ? Object.entries(summary.stackBreakdown).map(([n, c]) => `${n}단 ${c}행`).join(' + ')
+                      : '0행'}
+                    accent={summary.stackedRowCount > 0 ? 'violet' : undefined} />
+                )}
               </div>
               <StatRow label="실행취소 가능" value={`${state.editHistory.length}/20`} />
             </div>
@@ -1027,7 +1037,7 @@ export default function LayoutEditor({
             <div className="space-y-1">
               <QuickBtn
                 label="최밀집"
-                desc="자동배치 복원, 통로·다단 제거"
+                desc={result.layout.fillPanelCount != null ? "실무 표준 복원 (2단+자투리, 통로 없음)" : "자동배치 복원, 통로·다단 제거"}
                 onClick={() => dispatch({
                   type: 'APPLY_QUICK', preset: 'dense',
                   baseSpacing: result.rowSpacing,
@@ -1035,7 +1045,7 @@ export default function LayoutEditor({
               />
               <QuickBtn
                 label="표준 배치"
-                desc="4행마다 1.0m 통로 (실제 간격 확보)"
+                desc={result.layout.fillPanelCount != null ? "4행마다 1.0m 통로 (실무 표준 기반)" : "4행마다 1.0m 통로 (실제 간격 확보)"}
                 onClick={() => dispatch({
                   type: 'APPLY_QUICK', preset: 'standard',
                   baseSpacing: result.rowSpacing,
@@ -1043,7 +1053,7 @@ export default function LayoutEditor({
               />
               <QuickBtn
                 label="점검통로 삽입"
-                desc="2행마다 1.2m 통로 (다수 통로)"
+                desc={result.layout.fillPanelCount != null ? "2행마다 1.2m 통로 (실무 표준 기반)" : "2행마다 1.2m 통로 (다수 통로)"}
                 onClick={() => dispatch({
                   type: 'APPLY_QUICK', preset: 'corridors',
                   baseSpacing: result.rowSpacing,

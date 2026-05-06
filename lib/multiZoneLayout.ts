@@ -35,6 +35,8 @@ export interface ZoneConfig {
   precomputedSafeZonePolygon?: Polygon
   /** 행간거리 강제 지정 (m) */
   rowSpacing?: number
+  /** 토지 실무 표준 배치 (2단 주배치 + 자투리 1단 채움) */
+  landStandard?: boolean
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -238,6 +240,7 @@ export function runMultiZoneAnalysis(
       rowStack: zone.rowStack ?? 1,
       precomputedSafeZonePolygon: zone.precomputedSafeZonePolygon,
       rowSpacing: zone.rowSpacing,
+      landStandard: zone.landStandard,
     })
     return {
       ...result,

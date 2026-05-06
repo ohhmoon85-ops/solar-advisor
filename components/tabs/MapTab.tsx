@@ -270,7 +270,7 @@ export default function MapTab() {
   const [applyToQuick, setApplyToQuick] = useState(false)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [panelOrientation, setPanelOrientation] = useState<'portrait' | 'landscape'>('portrait')
-  const [rowStack, setRowStack] = useState<1 | 2 | 3>(1)
+  const [rowStack, setRowStack] = useState<1 | 2 | 3>(2)
   const [slopePercent, setSlopePercent] = useState(0)
   const [slopeAuto, setSlopeAuto] = useState(false)  // 자동측정 여부
   const [slopeFetching, setSlopeFetching] = useState(false)
@@ -1229,6 +1229,7 @@ export default function MapTab() {
               panelType: svgPanelType,
               precomputedSafeZonePolygon: safePolygon,
               rowSpacing: customRowSpacing,
+              landStandard: svgPlotType === 'land',
               ...commonOpts,
             } as ZoneConfig
           })
@@ -1251,6 +1252,7 @@ export default function MapTab() {
           precomputedSafeZonePolygon,
           validPolygons,
           rowSpacing: customRowSpacing,
+          landStandard: svgPlotType === 'land',
           ...commonOpts,
         })
         setSvgAnalysisResult(faResult)
@@ -2160,6 +2162,7 @@ export default function MapTab() {
                     reanalysisOptions={{
                       panelSpec: PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.GS710wp,
                       rowStack,
+                      landStandard: svgPlotType === 'land',
                     }}
                     onCancel={() => { setIsEditing(false); setEditingCount(null) }}
                   />
