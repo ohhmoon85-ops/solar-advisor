@@ -556,6 +556,8 @@ export function runFullAnalysis(params: {
   landStandard?: boolean
   /** 방위각 고정 배치 — 탐색 없이 azimuthDeg 그대로 배치 (쫙 올림) */
   fixedGridAngle?: boolean
+  /** 작업 통로 폭 (m) — 행간거리에 추가 (토지/슬라브 전용) */
+  workPath?: number
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -575,6 +577,7 @@ export function runFullAnalysis(params: {
     rowSpacing: overrideRowSpacing,
     landStandard = false,
     fixedGridAngle = false,
+    workPath = 0,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -618,10 +621,11 @@ export function runFullAnalysis(params: {
   })
 
   // Step 3: 패널 배치 (방위각 회전 + 방향 + 단수)
+  const effectiveSpacing = (overrideRowSpacing ?? optResult.rowSpacing) + workPath
   const layout = generateLayout({
     safeZonePolygon: safeZone.safeZonePolygon,
     panelSpec,
-    rowSpacing: overrideRowSpacing ?? optResult.rowSpacing,
+    rowSpacing: effectiveSpacing,
     tiltAngle: optResult.optimalTilt,
     azimuthDeg,
     excludeZones,
@@ -633,7 +637,7 @@ export function runFullAnalysis(params: {
 
   // Step 4: 실증 크로스체크
   const validation = validateAgainstRealCases({
-    rowSpacing: overrideRowSpacing ?? optResult.rowSpacing,
+    rowSpacing: effectiveSpacing,
     utilizationRate: layout.utilizationRate,
     isRoof: safeZone.plotType === 'roof',
     azimuthDeg,
@@ -642,7 +646,7 @@ export function runFullAnalysis(params: {
   return {
     safeZone,
     optimalTilt: optResult.optimalTilt,
-    rowSpacing: overrideRowSpacing ?? optResult.rowSpacing,
+    rowSpacing: effectiveSpacing,
     layout,
     region: optResult.region,
     panelType,

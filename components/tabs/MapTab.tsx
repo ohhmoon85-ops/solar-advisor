@@ -266,6 +266,7 @@ export default function MapTab() {
   const [autoSolarAngle, setAutoSolarAngle] = useState<number | null>(null)
   const [autoLandAngle, setAutoLandAngle] = useState(0)
   const [autoMargin, setAutoMargin] = useState(1.0)
+  const [workPathM, setWorkPathM] = useState(1.0)
   const [autoSpacingResult, setAutoSpacingResult] = useState<RowSpacingCalcResult | null>(null)
   const [applyToQuick, setApplyToQuick] = useState(false)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
@@ -1151,6 +1152,8 @@ export default function MapTab() {
       const customRowSpacing = overrides?.rowSpacing
       const gableRowSpacing = installType === '건물지붕형' && roofType === '박공' ? 0.1 : undefined
       const effectiveRowSpacing = customRowSpacing ?? gableRowSpacing
+      const isGable = installType === '건물지붕형' && roofType === '박공'
+      const workPath = isGable ? 0 : workPathM
       // turf union: GeoJSON 레벨에서 복수 필지를 정확히 합산 (convex hull 대신)
       const parcelFeatures = parcels
         .filter(p => p.ring.length >= 3)
@@ -1236,7 +1239,9 @@ export default function MapTab() {
               precomputedSafeZonePolygon: safePolygon,
               rowSpacing: effectiveRowSpacing,
               landStandard: svgPlotType === 'land',
-              fixedGridAngle: installType === '건물지붕형' && jjokOlrim,
+              fixedGridAngle: svgPlotType === 'land' ||
+                (installType === '건물지붕형' && (roofType === '슬라브' || jjokOlrim)),
+              workPath,
               ...commonOpts,
             } as ZoneConfig
           })
@@ -1260,7 +1265,9 @@ export default function MapTab() {
           validPolygons,
           rowSpacing: effectiveRowSpacing,
           landStandard: svgPlotType === 'land',
-          fixedGridAngle: installType === '건물지붕형' && jjokOlrim,
+          fixedGridAngle: svgPlotType === 'land' ||
+            (installType === '건물지붕형' && (roofType === '슬라브' || jjokOlrim)),
+          workPath,
           ...commonOpts,
         })
         setSvgAnalysisResult(faResult)
@@ -1919,7 +1926,10 @@ export default function MapTab() {
               const moduleLen = MODULES[moduleIndex].h
               const result = calculateRowSpacing(solarAng, tiltAngle, autoLandAngle, moduleLen)
               const recommended = result.rowSpacing
-              const finalSpacing = Math.round((recommended + autoMargin) * 100) / 100
+              const isGablePanel = installType === '건물지붕형' && roofType === '박공'
+              const workDisplay = isGablePanel ? 0 : workPathM
+              const baseSpacing = Math.round((recommended + autoMargin) * 100) / 100
+              const finalSpacing = Math.round((baseSpacing + workDisplay) * 100) / 100
               return (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2 mb-3">
                   <div className="flex items-center justify-between">
@@ -1968,6 +1978,17 @@ export default function MapTab() {
                       <span className="font-bold text-sky-700">{recommended.toFixed(3)}m</span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">작업 통로 <span className="text-gray-400">(그늘+관리)</span></span>
+                      <div className="flex items-center gap-1">
+                        <input type="number" min={0} max={2} step={0.1}
+                          value={workPathM}
+                          onChange={e => setWorkPathM(Number(e.target.value))}
+                          disabled={isGablePanel}
+                          className="w-12 px-1 py-0.5 text-xs border border-gray-300 rounded text-center font-mono disabled:opacity-40" />
+                        <span className="text-gray-400">m</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
                       <span className="text-gray-500">안전 마진</span>
                       <div className="flex items-center gap-1">
                         <input type="number" min={0} max={3} step={0.1}
@@ -2012,7 +2033,7 @@ export default function MapTab() {
                   <button
                     onClick={() => {
                       if (applyToQuick) setSpacingValue(finalSpacing)
-                      runSVGAnalysis({ rowSpacing: finalSpacing })
+                      runSVGAnalysis({ rowSpacing: baseSpacing })
                       if (applyToQuick) {
                         showToast('✓ 간이·정밀 모두 반영됨')
                       } else if (showSvgCanvas) {

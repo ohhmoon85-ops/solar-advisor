@@ -39,6 +39,8 @@ export interface ZoneConfig {
   landStandard?: boolean
   /** 방위각 고정 배치 (박공 쫙 올림) */
   fixedGridAngle?: boolean
+  /** 작업 통로 폭 (m) — 행간거리에 추가 (토지/슬라브 전용) */
+  workPath?: number
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -244,6 +246,7 @@ export function runMultiZoneAnalysis(
       rowSpacing: zone.rowSpacing,
       landStandard: zone.landStandard,
       fixedGridAngle: zone.fixedGridAngle,
+      workPath: zone.workPath,
     })
     return {
       ...result,
