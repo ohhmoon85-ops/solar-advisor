@@ -6,7 +6,7 @@
 
 import type { PanelSpec } from './panelConfig'
 import {
-  type Polygon, type Point, type PlotType, type FullAnalysisResult,
+  type Polygon, type Point, type PlotType, type FullAnalysisResult, type SpacingPolicy,
   runFullAnalysis, polygonAreaM2, polygonCentroid, applyInsetMargin,
 } from './layoutEngine'
 
@@ -41,6 +41,10 @@ export interface ZoneConfig {
   fixedGridAngle?: boolean
   /** 작업 통로 폭 (m) — 행간거리에 추가 (토지/슬라브 전용) */
   workPath?: number
+  /** 단수별 그늘 정책 — 기본 'construction_std' */
+  spacingPolicy?: SpacingPolicy
+  /** 2단+ 빈공간 (m) — construction_std 전용, 미지정 시 자동 */
+  constructionStdGap?: number
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -247,6 +251,8 @@ export function runMultiZoneAnalysis(
       landStandard: zone.landStandard,
       fixedGridAngle: zone.fixedGridAngle,
       workPath: zone.workPath,
+      spacingPolicy: zone.spacingPolicy,
+      constructionStdGap: zone.constructionStdGap,
     })
     return {
       ...result,

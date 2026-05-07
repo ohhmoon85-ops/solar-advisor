@@ -4,8 +4,8 @@
 // SolarLayoutCanvas 위에 올라가는 편집 레이어
 // lib/layoutEditor.ts의 reducer 기반 상태 관리
 
-import { useReducer, useCallback, useRef, useState, useEffect, useMemo } from 'react'
-import type { FullAnalysisResult, Point, PanelPlacement, Polygon } from '@/lib/layoutEngine'
+import React, { useReducer, useCallback, useRef, useState, useEffect, useMemo } from 'react'
+import type { FullAnalysisResult, Point, PanelPlacement, Polygon, SpacingPolicy } from '@/lib/layoutEngine'
 import { generateLayout } from '@/lib/layoutEngine'
 import type { PanelSpec } from '@/lib/panelConfig'
 import type { ZoneLayoutResult } from '@/lib/multiZoneLayout'
@@ -126,7 +126,7 @@ interface Props {
   /** 패널 수 실시간 변경 콜백 */
   onCountChange?: (count: number) => void
   /** 방위각 기반 그리드 재배치 옵션 — 없으면 회전 버튼 비활성 */
-  reanalysisOptions?: { panelSpec: PanelSpec; rowStack?: number; validPolygons?: Polygon[]; landStandard?: boolean; rowSpacing?: number }
+  reanalysisOptions?: { panelSpec: PanelSpec; rowStack?: number; validPolygons?: Polygon[]; landStandard?: boolean; rowSpacing?: number; spacingPolicy?: SpacingPolicy; constructionStdGap?: number }
 }
 
 export default function LayoutEditor({
@@ -180,6 +180,8 @@ export default function LayoutEditor({
       validPolygons: reanalysisOptions.validPolygons,
       landStandard: reanalysisOptions.landStandard,
       fixedGridAngle: true,
+      spacingPolicy: reanalysisOptions.spacingPolicy,
+      constructionStdGap: reanalysisOptions.constructionStdGap,
     })
     dispatch({ type: 'REINIT', placements: newLayout.placements })
     onCountChange?.(newLayout.placements.length)
@@ -997,7 +999,20 @@ export default function LayoutEditor({
             <div className="space-y-1 text-xs">
               <StatRow
                 label={result.layout.fillPanelCount != null ? '자동 배치 (실무 표준)' : '자동 배치 (1단 기준)'}
-                value={`${summary.autoPanelCount}장`} />
+                value={
+                  <span className="flex items-center gap-1">
+                    {summary.autoPanelCount}장
+                    {reanalysisOptions?.spacingPolicy != null && (
+                      <span className={`text-[9px] px-1 py-0 rounded font-semibold ${
+                        reanalysisOptions.spacingPolicy === 'construction_std'
+                          ? 'bg-emerald-900/60 text-emerald-300'
+                          : 'bg-violet-900/60 text-violet-300'
+                      }`}>
+                        {reanalysisOptions.spacingPolicy === 'construction_std' ? '시공표준' : '그늘회피'}
+                      </span>
+                    )}
+                  </span>
+                } />
               <StatRow
                 label="현재 배치"
                 value={`${summary.currentPanelCount}장`}
@@ -1208,7 +1223,7 @@ function StatRow({
   accent,
 }: {
   label: string
-  value: string
+  value: string | React.ReactNode
   accent?: 'green' | 'red' | 'amber' | 'violet'
 }) {
   const colorMap = {

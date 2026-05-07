@@ -46,6 +46,9 @@ export interface LayoutResult {
  */
 export type PlotType = 'land' | 'roof' | 'farmland' | 'forest' | 'land_change_planned'
 
+/** 단수별 그늘 정책 */
+export type SpacingPolicy = 'shadow_avoid' | 'construction_std'
+
 /** 경계 구간 종류 (하천·도로 특별 마진용) */
 export type BoundarySegmentType = 'river' | 'road' | 'default'
 
@@ -275,6 +278,8 @@ function placeGridAtAngle(
   rowStack: number = 1,
   validPolygons?: Polygon[],
   landStandard: boolean = false,
+  spacingPolicy: SpacingPolicy = 'construction_std',
+  constructionStdGap?: number,
 ): { placements: PanelPlacement[]; fillCount: number } {
   const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
   const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
@@ -287,9 +292,21 @@ function placeGridAtAngle(
   // shadowGap: 그림자 거리에서 모듈 수평투영 제외한 순수 gap
   // 박공처럼 rowSpacing < projLen인 경우 = 물리적 gap만 적용
   const shadowGap = Math.max(rowSpacing - projLen, 0)
-  const groupPitch = rowSpacing > projLen
-    ? groupHeight + stack * shadowGap   // 일조각: 단수 비례
-    : groupHeight + rowSpacing          // 박공(0.1m): 물리 gap 그대로
+  let groupPitch: number
+  if (rowSpacing > projLen) {
+    if (spacingPolicy === 'shadow_avoid') {
+      groupPitch = groupHeight + stack * shadowGap  // 그늘 회피: 단수 비례
+    } else {
+      if (stack === 1) {
+        groupPitch = groupHeight + shadowGap        // 1단: 자동 계산
+      } else {
+        const userGap = constructionStdGap ?? shadowGap
+        groupPitch = groupHeight + userGap          // 2단+: 사용자 입력 빈공간
+      }
+    }
+  } else {
+    groupPitch = groupHeight + rowSpacing           // 박공(0.1m): 물리 gap — 정책 무관
+  }
 
   const centroid = polygonCentroid(safeZonePolygon)
   const rotatedPoly = safeZonePolygon.map(p => rotatePoint(p, centroid.x, centroid.y, -gridAngle))
@@ -410,6 +427,10 @@ export function generateLayout(params: {
   fixedGridAngle?: boolean
   /** true이면 토지 실무 표준 (2단 주배치 + 자투리 1단 채움) 적용 */
   landStandard?: boolean
+  /** 단수별 그늘 정책 — 기본 'construction_std' (시공 표준) */
+  spacingPolicy?: SpacingPolicy
+  /** 2단+ 빈공간 (m) — construction_std 전용, 미지정 시 자동(shadowGap) */
+  constructionStdGap?: number
 }): LayoutResult {
   const {
     safeZonePolygon,
@@ -423,6 +444,8 @@ export function generateLayout(params: {
     validPolygons,
     fixedGridAngle = false,
     landStandard = false,
+    spacingPolicy = 'construction_std',
+    constructionStdGap,
   } = params
 
   // 0°~175° 범위에서 5° 단위로 탐색하여 가장 많은 패널이 배치되는 그리드 각도 선택
@@ -433,7 +456,7 @@ export function generateLayout(params: {
   if (fixedGridAngle) {
     const r = placeGridAtAngle(
       safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
-      panelOrientation, excludeZones, azBase, rowStack, validPolygons, landStandard,
+      panelOrientation, excludeZones, azBase, rowStack, validPolygons, landStandard, spacingPolicy, constructionStdGap,
     )
     bestPlacements = r.placements
     bestFillCount = r.fillCount
@@ -441,7 +464,7 @@ export function generateLayout(params: {
     for (let sweep = 0; sweep < 180; sweep += 5) {
       const r = placeGridAtAngle(
         safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
-        panelOrientation, excludeZones, azBase + sweep, rowStack, validPolygons, landStandard,
+        panelOrientation, excludeZones, azBase + sweep, rowStack, validPolygons, landStandard, spacingPolicy, constructionStdGap,
       )
       if (r.placements.length > bestPlacements.length) {
         bestPlacements = r.placements
@@ -558,6 +581,10 @@ export function runFullAnalysis(params: {
   fixedGridAngle?: boolean
   /** 작업 통로 폭 (m) — 행간거리에 추가 (토지/슬라브 전용) */
   workPath?: number
+  /** 단수별 그늘 정책 — 기본 'construction_std' (시공 표준) */
+  spacingPolicy?: SpacingPolicy
+  /** 2단+ 빈공간 (m) — construction_std 전용, 미지정 시 자동(shadowGap) */
+  constructionStdGap?: number
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -578,6 +605,8 @@ export function runFullAnalysis(params: {
     landStandard = false,
     fixedGridAngle = false,
     workPath = 0,
+    spacingPolicy = 'construction_std',
+    constructionStdGap,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -633,6 +662,8 @@ export function runFullAnalysis(params: {
     rowStack,
     landStandard,
     fixedGridAngle,
+    spacingPolicy,
+    constructionStdGap,
   })
 
   // Step 4: 실증 크로스체크

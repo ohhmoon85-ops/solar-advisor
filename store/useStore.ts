@@ -1,9 +1,38 @@
-import { create } from 'zustand'
+﻿import { create } from 'zustand'
 import { SMP, REC_PRICE } from '@/lib/constants'
+import type { SpacingPolicy } from '@/lib/layoutEngine'
 import type { InstallationType } from '@/lib/constants'
 import type { SimulationRecord } from '@/lib/simulationHistory'
 
 const PRICE_LS_KEY = 'solar_price_overrides'
+
+// ── Phase C-1: 지붕 폴리곤 그리기 타입 ─────────────────────────────
+export interface GeoPoint { lng: number; lat: number }
+
+export interface RoofPolygon {
+  id: string
+  points: GeoPoint[]
+  areaM2: number
+}
+
+/** 경위도 폴리곤 면적 계산 (Shoelace, Equirectangular 근사) */
+function calcGeoPolygonAreaM2(points: GeoPoint[]): number {
+  if (points.length < 3) return 0
+  const cLat = points.reduce((s, p) => s + p.lat, 0) / points.length
+  const cLon = points.reduce((s, p) => s + p.lng, 0) / points.length
+  const mpdLonVal = 111319.9 * Math.cos((cLat * Math.PI) / 180)
+  const MPD_LAT_V = 111319.9
+  const local = points.map(p => ({
+    x: (p.lng - cLon) * mpdLonVal,
+    y: (p.lat - cLat) * MPD_LAT_V,
+  }))
+  let area = 0
+  for (let i = 0; i < local.length; i++) {
+    const j = (i + 1) % local.length
+    area += local[i].x * local[j].y - local[j].x * local[i].y
+  }
+  return Math.abs(area / 2)
+}
 
 interface MapResult {
   panelCount: number
@@ -48,6 +77,12 @@ interface SolarStore {
   loanYears: number
   setLoanYears: (years: number) => void
 
+  // 단수별 그늘 정책
+  spacingPolicy: SpacingPolicy
+  setSpacingPolicy: (policy: SpacingPolicy) => void
+  constructionStdGap: number | undefined
+  setConstructionStdGap: (gap: number | undefined) => void
+
   // KIER 실측 일사량 데이터
   kierPvHours: number | null
   setKierPvHours: (h: number | null) => void
@@ -89,6 +124,18 @@ interface SolarStore {
   /** 이력 건수 (헤더 버튼 배지용) */
   historyCount: number
   setHistoryCount: (n: number) => void
+
+  // ── Phase C-1: 지붕 폴리곤 그리기 ────────────────────────────────
+  roofPolygons: RoofPolygon[]
+  drawingMode: boolean
+  currentDrawingPoints: GeoPoint[]
+  setDrawingMode: (on: boolean) => void
+  addDrawingPoint: (point: GeoPoint) => void
+  popDrawingPoint: () => void
+  clearDrawing: () => void
+  commitPolygon: () => void
+  removePolygon: (id: string) => void
+  clearAllPolygons: () => void
 }
 
 const DEFAULT_PRICE: PriceOverride = {
@@ -131,6 +178,11 @@ export const useSolarStore = create<SolarStore>((set) => ({
   loanYears: 15,
   setLoanYears: (years) => set({ loanYears: years }),
 
+  spacingPolicy: 'construction_std' as SpacingPolicy,
+  setSpacingPolicy: (policy) => set({ spacingPolicy: policy }),
+  constructionStdGap: undefined,
+  setConstructionStdGap: (gap) => set({ constructionStdGap: gap }),
+
   kierPvHours: null,
   setKierPvHours: (h) => set({ kierPvHours: h }),
   kierGhi: null,
@@ -165,4 +217,27 @@ export const useSolarStore = create<SolarStore>((set) => ({
 
   historyCount: 0,
   setHistoryCount: (n) => set({ historyCount: n }),
+
+  // ── Phase C-1: 지붕 폴리곤 그리기 ────────────────────────────────
+  roofPolygons: [],
+  drawingMode: false,
+  currentDrawingPoints: [],
+  setDrawingMode: (on) => set({ drawingMode: on }),
+  addDrawingPoint: (point) => set(s => ({ currentDrawingPoints: [...s.currentDrawingPoints, point] })),
+  popDrawingPoint: () => set(s => ({ currentDrawingPoints: s.currentDrawingPoints.slice(0, -1) })),
+  clearDrawing: () => set({ currentDrawingPoints: [] }),
+  commitPolygon: () => set(s => {
+    if (s.currentDrawingPoints.length < 3) return {}
+    const areaM2 = calcGeoPolygonAreaM2(s.currentDrawingPoints)
+    return {
+      roofPolygons: [...s.roofPolygons, {
+        id: `roof-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        points: [...s.currentDrawingPoints],
+        areaM2,
+      }],
+      currentDrawingPoints: [],
+    }
+  }),
+  removePolygon: (id) => set(s => ({ roofPolygons: s.roofPolygons.filter(p => p.id !== id) })),
+  clearAllPolygons: () => set({ roofPolygons: [] }),
 }))

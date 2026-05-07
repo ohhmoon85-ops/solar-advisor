@@ -9,7 +9,7 @@ import { useSolarStore } from '@/store/useStore'
 import { MODULES, GENERATION_HOURS } from '@/lib/constants'
 import { getSolarElevation } from '@/lib/shadowCalculator'
 import { calculateRowSpacing, calculateSlopeFromPercent, getSolarAngleByLocation, type RowSpacingCalcResult } from '@/lib/spacingCalculator'
-import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType } from '@/lib/layoutEngine'
+import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType, type SpacingPolicy } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
 import { type MultiZoneResult, type ZoneLayoutResult, type ZoneConfig, runMultiZoneAnalysis, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
@@ -250,6 +250,11 @@ export default function MapTab() {
     setLastFullAnalysisJson, setLastAnalysisAddress,
     pendingRestore, setPendingRestore,
     liveSmp, priceOverride,
+    roofPolygons, drawingMode, currentDrawingPoints,
+    setDrawingMode, addDrawingPoint, popDrawingPoint, clearDrawing, commitPolygon,
+    removePolygon, clearAllPolygons,
+    spacingPolicy, setSpacingPolicy,
+    constructionStdGap, setConstructionStdGap,
   } = useSolarStore()
   // SMP 단일 소스 — store의 실시간 KPX 응답값 (없으면 사용자 수동 설정값)
   const smpDisplay = liveSmp ?? priceOverride.smp
@@ -336,6 +341,8 @@ export default function MapTab() {
   const [analysisKey, setAnalysisKey] = useState(0)
   // 다구역 편집 시 선택된 구역 ('A', 'B', ...)
   const [activeZoneId, setActiveZoneId] = useState<string>('A')
+  // Phase C-1: 지붕 그리기 마우스 미리보기 위치 (canvas 내부 픽셀 좌표)
+  const [mouseCanvasPos, setMouseCanvasPos] = useState<{ x: number; y: number } | null>(null)
 
   // 이론 이격 거리 — 현장 위도 기반 (hardcode 37.5665° → 동적 위도)
   const tiltRad = (tiltAngle * Math.PI) / 180
@@ -348,6 +355,66 @@ export default function MapTab() {
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg)
     setTimeout(() => setToastMsg(null), 3000)
+  }, [])
+
+  // svgPlotType !== 'roof' 전환 시 그리기 상태 초기화 (토지형 회귀 보호)
+  useEffect(() => {
+    if (svgPlotType !== 'roof' && drawingMode) {
+      clearDrawing()
+      setDrawingMode(false)
+    }
+  }, [svgPlotType]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Phase C-1: 지붕 그리기 키보드 핸들러 ──────────────────────────
+  useEffect(() => {
+    if (!drawingMode || svgPlotType !== 'roof') {
+      setMouseCanvasPos(null)
+      return
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { clearDrawing(); setDrawingMode(false) }
+      else if (e.key === 'Enter') { commitPolygon() }
+      else if (e.key === 'Backspace') { e.preventDefault(); popDrawingPoint() }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [drawingMode, svgPlotType, clearDrawing, setDrawingMode, commitPolygon, popDrawingPoint])
+
+  // canvas px → 경위도 변환 (geoToCanvas 역함수)
+  const canvasPxToGeo = useCallback((cx: number, cy: number) => {
+    if (!apiCoords || pixelScale <= 0) return null
+    const { lat, lon } = apiCoords
+    return {
+      lng: lon + (cx - CANVAS_W / 2) * pixelScale / mpdLon(lat),
+      lat: lat + (CANVAS_H / 2 - cy) * pixelScale / MPD_LAT,
+    }
+  }, [apiCoords, pixelScale])
+
+  const handleDrawingSvgClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (!drawingMode) return
+    if (e.detail > 1) return  // 더블클릭의 두 번째 클릭은 무시
+    const rect = e.currentTarget.getBoundingClientRect()
+    const cx = (e.clientX - rect.left) * (CANVAS_W / rect.width)
+    const cy = (e.clientY - rect.top) * (CANVAS_H / rect.height)
+    const geo = canvasPxToGeo(cx, cy)
+    if (geo) addDrawingPoint(geo)
+  }, [drawingMode, canvasPxToGeo, addDrawingPoint])
+
+  const handleDrawingSvgDoubleClick = useCallback(() => {
+    if (!drawingMode) return
+    commitPolygon()
+  }, [drawingMode, commitPolygon])
+
+  const handleDrawingSvgMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (!drawingMode) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const cx = (e.clientX - rect.left) * (CANVAS_W / rect.width)
+    const cy = (e.clientY - rect.top) * (CANVAS_H / rect.height)
+    setMouseCanvasPos({ x: cx, y: cy })
+  }, [drawingMode])
+
+  const handleDrawingSvgMouseLeave = useCallback(() => {
+    setMouseCanvasPos(null)
   }, [])
 
   // BIPV 계산
@@ -1142,7 +1209,12 @@ export default function MapTab() {
     rowStack?: 1 | 2 | 3
     rowSpacing?: number
   }) => {
-    if (!apiCoords || parcels.length === 0) return
+    if (!apiCoords) return
+    if (svgPlotType !== 'roof' && parcels.length === 0) return
+    if (svgPlotType === 'roof' && roofPolygons.length === 0) {
+      showToast('지붕을 먼저 그려주세요')
+      return
+    }
     setSvgAnalyzing(true)
     try {
       const panelSpec = PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.GS710wp
@@ -1167,6 +1239,57 @@ export default function MapTab() {
       const effectiveRowSpacing = customRowSpacing ?? gableRowSpacing ?? autoCalcRowSpacing
       const isGable = installType === '건물지붕형' && roofType === '박공'
       const workPath = isGable ? 0 : workPathM
+
+      // ── Phase C-2: 지붕 폴리곤 모드 ────────────────────────────────
+      if (svgPlotType === 'roof' && roofPolygons.length > 0) {
+        const ROOF_MARGIN = 0.5
+        const roofFixedGridAngle = isGable && jjokOlrim
+        const roofRowSpacing = isGable ? 0.1 : effectiveRowSpacing
+        const commonRoofOpts = {
+          azimuthDeg: svgAzimuthDeg,
+          slopeAngleDeg: 0,
+          slopeAzimuthDeg: 180,
+          isJimokChangePlanned: false,
+          panelOrientation: orientation,
+          rowStack: stack,
+        }
+        const zones: ZoneConfig[] = roofPolygons.map((poly, idx) => {
+          const ring: number[][] = poly.points.map(p => [p.lng, p.lat])
+          const closed = (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
+            ? ring : [...ring, ring[0]]
+          const geoJson = turfPolygon([closed])
+          const safeGeoJson = turfBuffer(geoJson, -ROOF_MARGIN, { units: 'meters' })
+          if (!safeGeoJson || safeGeoJson.geometry.type !== 'Polygon') return null
+          const safeRing = safeGeoJson.geometry.coordinates[0] as number[][]
+          const safePolygon = convertGeoRingToLocalPolygon(safeRing, apiCoords.lat, apiCoords.lon)
+          const cadastrePolyLocal = convertGeoRingToLocalPolygon(closed, apiCoords.lat, apiCoords.lon)
+          return {
+            label: `${String.fromCharCode(65 + idx)}구역`,
+            polygon: cadastrePolyLocal,
+            plotType: 'roof' as PlotType,
+            panelSpec,
+            panelType: svgPanelType,
+            precomputedSafeZonePolygon: safePolygon,
+            rowSpacing: roofRowSpacing,
+            landStandard: false,
+            fixedGridAngle: roofFixedGridAngle,
+            workPath: 0,
+            spacingPolicy,
+            constructionStdGap,
+            ...commonRoofOpts,
+          } as ZoneConfig
+        }).filter((z): z is ZoneConfig => z !== null)
+        if (zones.length === 0) return
+        const mzResult = runMultiZoneAnalysis(zones, lat)
+        setSvgAnalysisResult(mzResult)
+        setLastFullAnalysisJson(JSON.stringify(mzResult))
+        setLastAnalysisAddress(addresses.filter(Boolean).join(', '))
+        setIsEditing(false)
+        setAnalysisKey(k => k + 1)
+        setShowSvgCanvas(true)
+        return
+      }
+
       // turf union: GeoJSON 레벨에서 복수 필지를 정확히 합산 (convex hull 대신)
       const parcelFeatures = parcels
         .filter(p => p.ring.length >= 3)
@@ -1255,6 +1378,8 @@ export default function MapTab() {
               fixedGridAngle: svgPlotType === 'land' ||
                 (installType === '건물지붕형' && jjokOlrim),
               workPath,
+              spacingPolicy,
+              constructionStdGap,
               ...commonOpts,
             } as ZoneConfig
           })
@@ -1281,6 +1406,8 @@ export default function MapTab() {
           fixedGridAngle: svgPlotType === 'land' ||
             (installType === '건물지붕형' && jjokOlrim),
           workPath,
+          spacingPolicy,
+          constructionStdGap,
           ...commonOpts,
         })
         setSvgAnalysisResult(faResult)
@@ -1295,9 +1422,9 @@ export default function MapTab() {
     } finally {
       setSvgAnalyzing(false)
     }
-  }, [apiCoords, parcels, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
+  }, [apiCoords, parcels, roofPolygons, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
       autoSolarAngle, moduleIndex, tiltAngle, autoLandAngle, autoMargin,
-      workPathM, installType, roofType, jjokOlrim])
+      workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap])
 
   const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
@@ -1801,6 +1928,90 @@ export default function MapTab() {
                 background: cadImgTiles.length > 0 ? 'transparent' : '#f8fafc',
               }}
             />
+            {/* Phase C-1: 지붕 그리기 SVG 오버레이 (svgPlotType==='roof' 시 항상 마운트) */}
+            {svgPlotType === 'roof' && (
+              <svg
+                viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
+                preserveAspectRatio="none"
+                onClick={handleDrawingSvgClick}
+                onDoubleClick={handleDrawingSvgDoubleClick}
+                onMouseMove={handleDrawingSvgMouseMove}
+                onMouseLeave={handleDrawingSvgMouseLeave}
+                style={{
+                  position: 'absolute',
+                  top: 0, left: 0,
+                  width: '100%', height: '100%',
+                  zIndex: 5,
+                  cursor: drawingMode ? 'crosshair' : 'default',
+                  pointerEvents: drawingMode ? 'auto' : 'none',
+                }}
+              >
+                {/* VWorld 필지 경계 — 회색 점선 참고용 */}
+                {parcels.map((parcel, pi) => {
+                  const pts = parcel.canvasPoints
+                  if (pts.length < 2) return null
+                  const d = `M${pts[0].x},${pts[0].y}` +
+                    pts.slice(1).map(p => `L${p.x},${p.y}`).join('') + 'Z'
+                  return (
+                    <path key={pi} d={d} fill="none"
+                      stroke="#9ca3af" strokeWidth="1.5" strokeDasharray="4 2" />
+                  )
+                })}
+
+                {/* 완성된 지붕 폴리곤들 */}
+                {roofPolygons.map(poly => {
+                  if (!apiCoords) return null
+                  const svgPts = poly.points.map(p =>
+                    geoToCanvas(p.lng, p.lat, apiCoords.lon, apiCoords.lat, pixelScale)
+                  )
+                  if (svgPts.length < 2) return null
+                  const cx = svgPts.reduce((s, p) => s + p.x, 0) / svgPts.length
+                  const cy = svgPts.reduce((s, p) => s + p.y, 0) / svgPts.length
+                  const ptStr = svgPts.map(p => `${p.x},${p.y}`).join(' ')
+                  return (
+                    <g key={poly.id}>
+                      <polygon points={ptStr}
+                        fill="rgba(34,197,94,0.18)" stroke="#16a34a" strokeWidth="2" />
+                      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
+                        fontSize="13" fontWeight="bold" fill="#166534"
+                        style={{ pointerEvents: 'none' }}>
+                        {poly.areaM2.toFixed(1)} m²
+                      </text>
+                    </g>
+                  )
+                })}
+
+                {/* 현재 그리는 중인 폴리곤 */}
+                {(() => {
+                  if (!apiCoords || currentDrawingPoints.length === 0) return null
+                  const pts = currentDrawingPoints.map(p =>
+                    geoToCanvas(p.lng, p.lat, apiCoords.lon, apiCoords.lat, pixelScale)
+                  )
+                  return (
+                    <g>
+                      {/* 정점 간 변 */}
+                      {pts.slice(1).map((p, i) => (
+                        <line key={i}
+                          x1={pts[i].x} y1={pts[i].y} x2={p.x} y2={p.y}
+                          stroke="#f59e0b" strokeWidth="2" />
+                      ))}
+                      {/* 마우스 위치까지 점선 미리보기 */}
+                      {mouseCanvasPos && (
+                        <line
+                          x1={pts[pts.length - 1].x} y1={pts[pts.length - 1].y}
+                          x2={mouseCanvasPos.x} y2={mouseCanvasPos.y}
+                          stroke="#f59e0b" strokeWidth="2" strokeDasharray="5 3" />
+                      )}
+                      {/* 정점 원형 마커 */}
+                      {pts.map((p, i) => (
+                        <circle key={i} cx={p.x} cy={p.y} r="4"
+                          fill="#f59e0b" stroke="#ffffff" strokeWidth="1.5" />
+                      ))}
+                    </g>
+                  )
+                })()}
+              </svg>
+            )}
           </div>
 
           {isComplete && area > 0 && (
@@ -1837,7 +2048,71 @@ export default function MapTab() {
           )}
         </div>
 
-        {/* ── SVG 정밀 배치 분석 (API 모드) ── */}
+        {/* ── Phase C-1: 지붕 폴리곤 그리기 UI (svgPlotType==='roof' 전용) ── */}
+        {svgPlotType === 'roof' && isComplete && parcels.length > 0 && (
+          <div className="mt-3 bg-amber-50 rounded-xl border border-amber-200 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-semibold text-amber-900 text-sm flex items-center gap-1.5">
+                🏠 지붕 폴리곤 그리기
+              </h4>
+              <button
+                onClick={() => {
+                  if (drawingMode) { clearDrawing(); setDrawingMode(false) }
+                  else { setDrawingMode(true) }
+                }}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                  drawingMode
+                    ? 'bg-amber-500 text-white shadow-sm'
+                    : 'bg-white border border-amber-300 text-amber-700 hover:bg-amber-100'
+                }`}
+              >
+                {drawingMode ? '✏ 그리기 모드 ON' : '🏠 지붕 그리기 모드'}
+              </button>
+            </div>
+            {drawingMode && (
+              <p className="text-xs text-amber-700 bg-amber-100 rounded px-2 py-1.5 mb-2">
+                위성사진에서 지붕 외곽을 클릭으로 그려주세요.
+                더블클릭으로 닫기, Esc 취소, Backspace로 마지막 정점 삭제.
+                {currentDrawingPoints.length > 0 && (
+                  <span className="ml-1 font-semibold text-amber-900">
+                    ({currentDrawingPoints.length}개 정점)
+                  </span>
+                )}
+              </p>
+            )}
+            {roofPolygons.length > 0 && (
+              <div className="space-y-1 mt-1">
+                {roofPolygons.map((poly, i) => (
+                  <div key={poly.id}
+                    className="flex items-center justify-between bg-white rounded px-2 py-1 text-xs border border-amber-100">
+                    <span className="text-gray-700">지붕 {i + 1}: {poly.areaM2.toFixed(1)} m²</span>
+                    <button
+                      onClick={() => removePolygon(poly.id)}
+                      className="text-red-500 hover:text-red-700 ml-2 font-medium">
+                      삭제
+                    </button>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-1.5 border-t border-amber-200 mt-1">
+                  <span className="text-xs font-semibold text-amber-900">
+                    합계: {roofPolygons.reduce((s, p) => s + p.areaM2, 0).toFixed(1)} m²
+                  </span>
+                  <button
+                    onClick={clearAllPolygons}
+                    className="text-xs text-red-500 hover:text-red-700 font-medium">
+                    모두 지우기
+                  </button>
+                </div>
+              </div>
+            )}
+            {roofPolygons.length === 0 && !drawingMode && (
+              <p className="text-xs text-amber-600 text-center py-1">
+                지붕 그리기 모드를 켜고 위성사진에서 지붕 외곽을 그려보세요.
+              </p>
+            )}
+          </div>
+        )}
+
         {isComplete && parcels.length > 0 && (
           <div className="mt-4 bg-white rounded-xl border border-indigo-200 p-4">
             <div className="mb-3">
@@ -2030,6 +2305,84 @@ export default function MapTab() {
                       <span className="font-bold text-emerald-700 text-sm">{finalSpacing.toFixed(2)}m</span>
                     </div>
                   </div>
+
+                  {/* ── 단수별 그늘 정책 토글 ── */}
+                  {!isGablePanel && (
+                    <div className="rounded-md border border-sky-200 bg-white p-2.5 space-y-2">
+                      <div className="text-xs font-semibold text-sky-800">단수별 그늘 정책</div>
+                      {(['construction_std', 'shadow_avoid'] as const).map(pol => (
+                        <label key={pol} className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="spacingPolicy"
+                            value={pol}
+                            checked={spacingPolicy === pol}
+                            onChange={() => setSpacingPolicy(pol)}
+                            className="mt-0.5 accent-sky-500"
+                          />
+                          <span className="text-[11px] text-gray-700 leading-tight">
+                            {pol === 'construction_std' ? (
+                              <><span className="font-semibold text-sky-700">시공 표준</span> — 빈공간 단수 무관 <span className="text-[10px] text-sky-600 font-semibold">(기본값)</span></>
+                            ) : (
+                              <><span className="font-semibold text-violet-700">그늘 회피</span> — 단수 비례, 동지 정오 100% 회피</>
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                      {/* 2단+ 빈공간 입력 (시공표준 전용) */}
+                      {spacingPolicy === 'construction_std' && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <label className="text-[11px] text-gray-600 whitespace-nowrap">2단+ 빈공간</label>
+                          <input
+                            type="number"
+                            min={0.1}
+                            max={5}
+                            step={0.1}
+                            placeholder="자동"
+                            value={constructionStdGap ?? ''}
+                            onChange={e => {
+                              const v = parseFloat(e.target.value)
+                              setConstructionStdGap(isNaN(v) ? undefined : v)
+                            }}
+                            className="w-20 text-[11px] border border-gray-300 rounded px-1.5 py-0.5 text-right"
+                          />
+                          <span className="text-[11px] text-gray-500">m <span className="text-sky-600">(권장 2.4m)</span></span>
+                          {constructionStdGap != null && (
+                            <button onClick={() => setConstructionStdGap(undefined)}
+                              className="text-[10px] text-gray-400 hover:text-red-500">초기화</button>
+                          )}
+                        </div>
+                      )}
+                      {/* 정책별 행간 미리보기 */}
+                      {(() => {
+                        const projLen = moduleLen * Math.cos(tiltAngle * Math.PI / 180)
+                        const D = baseSpacing
+                        const sg = Math.max(D - projLen, 0)
+                        const rows = [1, 2, 3].map(n => {
+                          const gh = n * projLen + (n - 1) * 0.02
+                          const std = n === 1 ? D : parseFloat((gh + (constructionStdGap ?? sg)).toFixed(2))
+                          const avoid = n === 1 ? D : parseFloat((gh + n * sg).toFixed(2))
+                          return { n, std, avoid }
+                        })
+                        return (
+                          <div className="mt-1 text-[10px] text-gray-500">
+                            <div className="grid grid-cols-3 gap-x-1 font-semibold text-[10px] border-b border-gray-100 pb-0.5 mb-0.5">
+                              <span>단수</span>
+                              <span className="text-sky-600 text-center">시공표준</span>
+                              <span className="text-violet-600 text-center">그늘회피</span>
+                            </div>
+                            {rows.map(r => (
+                              <div key={r.n} className={`grid grid-cols-3 gap-x-1 py-0.5 ${r.n === 1 ? 'text-gray-400' : ''}`}>
+                                <span>{r.n}단 행간</span>
+                                <span className={`text-center font-mono ${spacingPolicy === 'construction_std' ? 'text-sky-700 font-semibold' : 'text-gray-500'}`}>{r.std.toFixed(2)}m</span>
+                                <span className={`text-center font-mono ${spacingPolicy === 'shadow_avoid' ? 'text-violet-700 font-semibold' : 'text-gray-500'}`}>{r.avoid.toFixed(2)}m</span>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  )}
 
                   {/* 미니 단면도 */}
                   <svg viewBox="0 0 200 72" className="w-full" style={{ height: '120px' }}>
@@ -2257,6 +2610,8 @@ export default function MapTab() {
                       rowStack,
                       landStandard: svgPlotType === 'land',
                       rowSpacing: installType === '건물지붕형' && roofType === '박공' ? 0.1 : undefined,
+                      spacingPolicy,
+                      constructionStdGap,
                     }}
                     onCancel={() => { setIsEditing(false); setEditingCount(null) }}
                   />
@@ -2282,21 +2637,29 @@ export default function MapTab() {
                     )}
                     {/* 다구역 — 구역별 요약 */}
                     {isMultiZoneResult(svgAnalysisResult) && (
-                      <div className="mt-2 grid grid-cols-3 gap-2">
-                        {(svgAnalysisResult as MultiZoneResult).zones.map(z => (
-                          <div
-                            key={z.zoneLabel}
-                            className={`rounded p-2 text-xs cursor-pointer transition-colors ${
-                              activeZoneId === z.zoneLabel.replace('구역', '')
-                                ? 'bg-indigo-100 border border-indigo-300'
-                                : 'bg-indigo-50 border border-transparent hover:border-indigo-200'
-                            }`}
-                            onClick={() => { setActiveZoneId(z.zoneLabel.replace('구역', '')); setIsEditing(false) }}
-                          >
-                            <div className="font-semibold text-indigo-700">{z.zoneLabel}</div>
-                            <div className="text-gray-600">{z.layout.totalCount}장 · {z.layout.totalKwp}kWp</div>
-                          </div>
-                        ))}
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center justify-between text-xs text-slate-500 px-1">
+                          <span>{svgPlotType === 'roof' ? '지붕면적 합계' : '토지면적'}</span>
+                          <span className="font-semibold text-slate-700">
+                            {(svgAnalysisResult as MultiZoneResult).totalAreaM2.toFixed(1)} m²
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(svgAnalysisResult as MultiZoneResult).zones.map(z => (
+                            <div
+                              key={z.zoneLabel}
+                              className={`rounded p-2 text-xs cursor-pointer transition-colors ${
+                                activeZoneId === z.zoneLabel.replace('구역', '')
+                                  ? 'bg-indigo-100 border border-indigo-300'
+                                  : 'bg-indigo-50 border border-transparent hover:border-indigo-200'
+                              }`}
+                              onClick={() => { setActiveZoneId(z.zoneLabel.replace('구역', '')); setIsEditing(false) }}
+                            >
+                              <div className="font-semibold text-indigo-700">{z.zoneLabel}</div>
+                              <div className="text-gray-600">{z.layout.totalCount}장 · {z.layout.totalKwp}kWp</div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                     {/* SafeZone 오류 */}
