@@ -272,8 +272,8 @@ export default function MapTab() {
   const [autoSpacingMode, setAutoSpacingMode] = useState(false)
   const [autoSolarAngle, setAutoSolarAngle] = useState<number | null>(null)
   const [autoLandAngle, setAutoLandAngle] = useState(0)
-  const [autoMargin, setAutoMargin] = useState(1.0)
-  const [workPathM, setWorkPathM] = useState(1.0)
+  const [autoMargin, setAutoMargin] = useState(0)
+  const [workPathM, setWorkPathM] = useState(0)
   const [autoSpacingResult, setAutoSpacingResult] = useState<RowSpacingCalcResult | null>(null)
   const [applyToQuick, setApplyToQuick] = useState(false)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
@@ -2357,22 +2357,26 @@ export default function MapTab() {
                       </div>
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500">작업 통로 <span className="text-gray-400">(그늘+관리)</span></span>
+                      <span className="text-gray-500" title="권장 행간거리에 그늘 회피 + 시공 여유 이미 포함. 추가 운영 통로 필요시 입력">작업 통로</span>
                       <div className="flex items-center gap-1">
                         <input type="number" min={0} max={2} step={0.1}
                           value={workPathM}
+                          placeholder="0"
                           onChange={e => setWorkPathM(Number(e.target.value))}
                           disabled={isGablePanel}
+                          title="권장 행간거리에 그늘 회피 + 시공 여유 이미 포함. 추가 운영 통로 필요시 입력"
                           className="w-12 px-1 py-0.5 text-xs border border-gray-300 rounded text-center font-mono disabled:opacity-40" />
                         <span className="text-gray-400">m</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500">안전 마진</span>
+                      <span className="text-gray-500" title="측량 오차/시공 편차 추가 여유. 일반적으로 0m">안전 마진</span>
                       <div className="flex items-center gap-1">
                         <input type="number" min={0} max={3} step={0.1}
                           value={autoMargin}
+                          placeholder="0"
                           onChange={e => setAutoMargin(Number(e.target.value))}
+                          title="측량 오차/시공 편차 추가 여유. 일반적으로 0m"
                           className="w-12 px-1 py-0.5 text-xs border border-gray-300 rounded text-center font-mono" />
                         <span className="text-gray-400">m</span>
                       </div>
