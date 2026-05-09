@@ -152,6 +152,128 @@ function shiftRowsAboveCorridors(
   })
 }
 
+// ── 전체 그리드 빈 슬롯 채움 (Phase K-2) ──────────────────────────
+
+/**
+ * 기존 패널 배치에서 그리드 파라미터(origin, EW/UP 축, 행/열 간격)를 재구성하여
+ * 부지 안에 있는 모든 빈 그리드 슬롯에 패널을 추가한다.
+ * MOVE_SELECTED / SET_ROW_STACK 트리거 전용 — REINIT·REMOVE 에서는 호출하지 않음.
+ */
+function fillGridGlobal(
+  placements: PanelPlacement[],
+  boundary: Polygon,
+  startId: number
+): PanelPlacement[] {
+  if (placements.length < 4) return []
+
+  const ref = placements[0]
+
+  // EW 단위 벡터 (SW → SE = corners[1] - corners[0])
+  const ewDx = ref.corners[1].x - ref.corners[0].x
+  const ewDy = ref.corners[1].y - ref.corners[0].y
+  const ewLen = Math.sqrt(ewDx ** 2 + ewDy ** 2)
+  // UP 단위 벡터 (SW → NW = corners[3] - corners[0])
+  const upDx = ref.corners[3].x - ref.corners[0].x
+  const upDy = ref.corners[3].y - ref.corners[0].y
+  const upLen = Math.sqrt(upDx ** 2 + upDy ** 2)
+  if (ewLen < 0.01 || upLen < 0.01) return []
+  const ewUx = ewDx / ewLen, ewUy = ewDy / ewLen
+  const upUx = upDx / upLen, upUy = upDy / upLen
+
+  // 패널 중심 기준 꼭짓점 오프셋 (형태 템플릿)
+  const offsets = ref.corners.map(c => ({ x: c.x - ref.centerX, y: c.y - ref.centerY }))
+
+  // 모든 패널 중심을 EW/UP 축에 투영
+  const projs = placements.map(p => ({
+    ew: (p.centerX - ref.centerX) * ewUx + (p.centerY - ref.centerY) * ewUy,
+    up: (p.centerX - ref.centerX) * upUx + (p.centerY - ref.centerY) * upUy,
+  }))
+
+  // UP 투영 기준 행 군집화 (문턱값 = UP 길이 × 1.1 — 단수 패널은 같은 군집으로 묶임)
+  const sortedByUp = [...projs].sort((a, b) => a.up - b.up)
+  type RGroup = { meanUp: number; ewList: number[] }
+  const rowGroups: RGroup[] = []
+  let grpUps: number[] = [sortedByUp[0].up]
+  let grpEws: number[] = [sortedByUp[0].ew]
+  for (let i = 1; i < sortedByUp.length; i++) {
+    if (sortedByUp[i].up - sortedByUp[i - 1].up > upLen * 1.1) {
+      rowGroups.push({ meanUp: grpUps.reduce((a, b) => a + b, 0) / grpUps.length, ewList: grpEws })
+      grpUps = []; grpEws = []
+    }
+    grpUps.push(sortedByUp[i].up)
+    grpEws.push(sortedByUp[i].ew)
+  }
+  rowGroups.push({ meanUp: grpUps.reduce((a, b) => a + b, 0) / grpUps.length, ewList: grpEws })
+  if (rowGroups.length < 2) return []
+
+  // rowPitch 중앙값
+  const rPitches = rowGroups.slice(1).map((rg, i) => rg.meanUp - rowGroups[i].meanUp)
+  rPitches.sort((a, b) => a - b)
+  const rowPitch = rPitches[Math.floor(rPitches.length / 2)]
+  if (rowPitch < upLen * 1.1) return []
+
+  // colPitch 중앙값 (동일 열 중복 패널 diff < ewLen*0.5 는 스킵)
+  const cPitches: number[] = []
+  for (const rg of rowGroups) {
+    const ewSorted = [...rg.ewList].sort((a, b) => a - b)
+    for (let i = 1; i < ewSorted.length; i++) {
+      const d = ewSorted[i] - ewSorted[i - 1]
+      if (d > ewLen * 0.5) cPitches.push(d)
+    }
+  }
+  if (cPitches.length === 0) return []
+  cPitches.sort((a, b) => a - b)
+  const colPitch = cPitches[Math.floor(cPitches.length / 2)]
+  if (colPitch < ewLen * 0.5) return []
+
+  // 그리드 원점: 최남단 행의 최서쪽 EW 투영
+  const anchorUp = rowGroups[0].meanUp
+  const anchorEw = Math.min(...rowGroups[0].ewList)
+  const maxRi = rowGroups.length - 1
+  const allEw = projs.map(p => p.ew)
+  const maxCi = Math.round((Math.max(...allEw) - anchorEw) / colPitch)
+
+  // AABB 겹침 검사 헬퍼
+  const tol = Math.min(ewLen, upLen) * 0.05
+  type BBox = { x1: number; x2: number; y1: number; y2: number }
+  const bbOverlap = (a: BBox, b: BBox) =>
+    Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1) > tol &&
+    Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1) > tol
+  const existingBBoxes: BBox[] = placements.map(p => {
+    const xs = p.corners.map(c => c.x), ys = p.corners.map(c => c.y)
+    return { x1: Math.min(...xs), x2: Math.max(...xs), y1: Math.min(...ys), y2: Math.max(...ys) }
+  })
+
+  // 빈 슬롯 순회 및 채움
+  const fills: PanelPlacement[] = []
+  const fillBBoxes: BBox[] = []
+  let nextId = startId
+
+  for (let ri = 0; ri <= maxRi; ri++) {
+    for (let ci = 0; ci <= maxCi; ci++) {
+      const ewPos = anchorEw + ci * colPitch
+      const upPos = anchorUp + ri * rowPitch
+      const cx = ref.centerX + ewPos * ewUx + upPos * upUx
+      const cy = ref.centerY + ewPos * ewUy + upPos * upUy
+      const corners = offsets.map(o => ({ x: cx + o.x, y: cy + o.y })) as typeof ref.corners
+
+      if (!isPanelInsidePolygon(corners, boundary)) continue
+
+      const bbox: BBox = {
+        x1: Math.min(...corners.map(c => c.x)), x2: Math.max(...corners.map(c => c.x)),
+        y1: Math.min(...corners.map(c => c.y)), y2: Math.max(...corners.map(c => c.y)),
+      }
+      if (existingBBoxes.some(bb => bbOverlap(bbox, bb))) continue
+      if (fillBBoxes.some(bb => bbOverlap(bbox, bb))) continue
+
+      fills.push({ id: nextId++, row: ri, col: ci, centerX: cx, centerY: cy, corners })
+      fillBBoxes.push(bbox)
+    }
+  }
+
+  return fills
+}
+
 // ── Reducer ────────────────────────────────────────────────────────
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
@@ -294,8 +416,14 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
             ...newPlacements.filter(p => p.row === action.rowIndex && isPanelInsidePolygon(p.corners, action.boundary!))
           ]
         : newPlacements
+      // Phase K-2: 전체 그리드 빈 슬롯 채움 (boundary 있을 때만)
+      const k2StartIdStack = clippedPlacements.length > 0
+        ? Math.max(...clippedPlacements.map(p => p.id)) + 1 : 0
+      const k2FillsStack = action.boundary && action.boundary.length >= 3
+        ? fillGridGlobal(clippedPlacements, action.boundary, k2StartIdStack)
+        : []
       return upsertRowConfig(
-        { ...saved, placements: clippedPlacements, isDirty: true },
+        { ...saved, placements: [...clippedPlacements, ...k2FillsStack], isDirty: true },
         { ...rowCfg, stackCount: action.stackCount }
       )
     }
@@ -366,8 +494,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           if (allCurrent.some(p => aabbOverlap(orig, p))) continue
           fills.push({ ...orig, corners: [...orig.corners] as typeof orig.corners, id: nextId++ })
         }
-        moveFillCount = fills.length
-        return { ...saved, placements: [...placements, ...fills], spreadRemovedCount, moveFillCount, isDirty: true }
+        // Phase K-2: 전체 그리드 빈 슬롯 채움
+        const phaseKAll = [...placements, ...fills]
+        const k2StartId = phaseKAll.length > 0 ? Math.max(...phaseKAll.map(p => p.id)) + 1 : 0
+        const k2Fills = fillGridGlobal(phaseKAll, action.boundary, k2StartId)
+        moveFillCount = fills.length + k2Fills.length
+        return { ...saved, placements: [...phaseKAll, ...k2Fills], spreadRemovedCount, moveFillCount, isDirty: true }
       }
       return { ...saved, placements, spreadRemovedCount, moveFillCount, isDirty: true }
     }
