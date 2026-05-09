@@ -256,6 +256,7 @@ export default function MapTab() {
     spacingPolicy, setSpacingPolicy,
     constructionStdGap, setConstructionStdGap,
     userBoundaryMargin, setUserBoundaryMargin,
+    userRowSpacing, setUserRowSpacing,
   } = useSolarStore()
   // SMP 단일 소스 — store의 실시간 KPX 응답값 (없으면 사용자 수동 설정값)
   const smpDisplay = liveSmp ?? priceOverride.smp
@@ -1245,7 +1246,8 @@ export default function MapTab() {
         const solarAng = autoSolarAngle ?? getSolarAngleByLocation(effectiveLatitude)
         const moduleLen = MODULES[moduleIndex].h
         const calcResult = calculateRowSpacing(solarAng, tiltAngle, autoLandAngle, moduleLen)
-        autoCalcRowSpacing = Math.round((calcResult.rowSpacing + autoMargin) * 100) / 100
+        const baseRecommended = userRowSpacing ?? calcResult.rowSpacing
+        autoCalcRowSpacing = Math.round((baseRecommended + autoMargin) * 100) / 100
       }
 
       const effectiveRowSpacing = customRowSpacing ?? gableRowSpacing ?? autoCalcRowSpacing
@@ -1436,7 +1438,7 @@ export default function MapTab() {
     }
   }, [apiCoords, parcels, roofPolygons, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
       autoSolarAngle, moduleIndex, tiltAngle, autoLandAngle, autoMargin,
-      workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap, userBoundaryMargin])
+      workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap, userBoundaryMargin, userRowSpacing])
 
   const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
@@ -2160,8 +2162,8 @@ export default function MapTab() {
                   value={svgPlotType}
                   onChange={e => setSvgPlotType(e.target.value as PlotType)}
                   className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5">
-                  <option value="land">토지 (기본 마진 2.0m)</option>
-                  <option value="roof">지붕 (기본 마진 0.5m)</option>
+                  <option value="land">토지</option>
+                  <option value="roof">지붕</option>
                 </select>
               </div>
 
@@ -2279,7 +2281,7 @@ export default function MapTab() {
               const recommended = result.rowSpacing
               const isGablePanel = installType === '건물지붕형' && roofType === '박공'
               const workDisplay = isGablePanel ? 0 : workPathM
-              const baseSpacing = Math.round((recommended + autoMargin) * 100) / 100
+              const baseSpacing = Math.round(((userRowSpacing ?? recommended) + autoMargin) * 100) / 100
               const finalSpacing = Math.round((baseSpacing + workDisplay) * 100) / 100
               return (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2 mb-3">
@@ -2324,9 +2326,25 @@ export default function MapTab() {
 
                   {/* 계산 결과 */}
                   <div className="bg-white rounded border border-sky-200 px-2 py-1.5 space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">권장 행간거리</span>
-                      <span className="font-bold text-sky-700">{recommended.toFixed(3)}m</span>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">권장 행간거리 <span className="text-gray-400 text-[10px]">(자동 {recommended.toFixed(3)}m)</span></span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number" min={0.5} max={15} step={0.05}
+                          placeholder={recommended.toFixed(2)}
+                          value={userRowSpacing ?? ''}
+                          onChange={e => {
+                            const v = parseFloat(e.target.value)
+                            setUserRowSpacing(isNaN(v) ? undefined : v)
+                          }}
+                          className="w-20 text-xs border border-sky-300 rounded px-2 py-0.5 text-right font-mono bg-white"
+                        />
+                        <span className="text-gray-400">m</span>
+                        {userRowSpacing != null && (
+                          <button onClick={() => setUserRowSpacing(undefined)}
+                            className="text-[10px] text-gray-400 hover:text-red-500 transition-colors">리셋</button>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-gray-500">작업 통로 <span className="text-gray-400">(그늘+관리)</span></span>

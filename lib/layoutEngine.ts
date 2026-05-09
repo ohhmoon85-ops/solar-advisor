@@ -339,8 +339,8 @@ function placeGridAtAngle(
         ]
         const centerRotated = { x: x + effEW / 2, y: y + projLen / 2 }
         const passes = rotatedValidPolys
-          ? rotatedValidPolys.some(poly => isPointInPolygon(centerRotated, poly))
-          : isPointInPolygon(centerRotated, rotatedPoly)
+          ? rotatedValidPolys.some(poly => isPanelInsidePolygon(rotatedCorners, poly))
+          : isPanelInsidePolygon(rotatedCorners, rotatedPoly)
         if (!passes) continue
 
         const actualCorners = rotatedCorners.map(
@@ -379,8 +379,8 @@ function placeGridAtAngle(
         ]
         const centerRotated = { x: x + effEW / 2, y: yFill + projLen / 2 }
         const passes = rotatedValidPolys
-          ? rotatedValidPolys.some(poly => isPointInPolygon(centerRotated, poly))
-          : isPointInPolygon(centerRotated, rotatedPoly)
+          ? rotatedValidPolys.some(poly => isPanelInsidePolygon(rotatedFillCorners, poly))
+          : isPanelInsidePolygon(rotatedFillCorners, rotatedPoly)
         if (!passes) continue
 
         const actualCorners = rotatedFillCorners.map(
