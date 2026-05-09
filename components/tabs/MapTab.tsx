@@ -1256,7 +1256,8 @@ export default function MapTab() {
 
       // 경계 마진: 사용자 입력 우선, 미지정 시 모드별 기본값 (토지 2m / 지붕 0.5m)
       const defaultMargin = svgPlotType === 'roof' ? 0.5 : 2.0
-      const effectiveMargin = userBoundaryMargin ?? defaultMargin
+      const rawMargin = userBoundaryMargin ?? defaultMargin
+      const effectiveMargin = Math.max(rawMargin, 0.01)  // 0 입력 시 turfBuffer 크래시 방지
 
       // ── Phase C-2: 지붕 폴리곤 모드 ────────────────────────────────
       if (svgPlotType === 'roof' && roofPolygons.length > 0) {

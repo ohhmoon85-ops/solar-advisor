@@ -398,6 +398,22 @@ function placeGridAtAngle(
     }
   }
 
+  // 자투리 채움 패널이 메인 패널과 겹치면 제거 (방어적 AABB 검사)
+  if (fillCount > 0) {
+    const mainEndIdx = placements.length - fillCount
+    const mainPanels = placements.slice(0, mainEndIdx)
+    const fillPanels = placements.slice(mainEndIdx)
+    const panelTol = Math.min(effEW, projLen) * 0.05
+    const hasOverlap = (a: PanelPlacement, b: PanelPlacement): boolean => {
+      const aXs = a.corners.map(c => c.x), aYs = a.corners.map(c => c.y)
+      const bXs = b.corners.map(c => c.x), bYs = b.corners.map(c => c.y)
+      const overX = Math.min(Math.max(...aXs), Math.max(...bXs)) - Math.max(Math.min(...aXs), Math.min(...bXs))
+      const overY = Math.min(Math.max(...aYs), Math.max(...bYs)) - Math.max(Math.min(...aYs), Math.min(...bYs))
+      return overX > panelTol && overY > panelTol
+    }
+    const cleanFill = fillPanels.filter(fp => !mainPanels.some(mp => hasOverlap(fp, mp)))
+    return { placements: [...mainPanels, ...cleanFill], fillCount: cleanFill.length }
+  }
   return { placements, fillCount }
 }
 

@@ -2,7 +2,7 @@
 // SolarLayoutCanvas 위에서 동작하는 인터랙티브 편집 상태/로직
 
 import type { PanelPlacement, Polygon } from './layoutEngine'
-import { isPointInPolygon } from './layoutEngine'
+import { isPointInPolygon, isPanelInsidePolygon } from './layoutEngine'
 
 // ── 타입 ───────────────────────────────────────────────────────────
 
@@ -36,6 +36,8 @@ export interface EditorState {
   isDirty: boolean
   /** 자동배치 원본 — "자동배치로 초기화" 복원용 */
   originalPlacements: PanelPlacement[]
+  /** 행간 조정 후 경계 밖으로 제거된 패널 수 (UI 피드백용) */
+  spreadRemovedCount: number
 }
 
 export type EditorAction =
@@ -71,6 +73,7 @@ export function initEditorState(placements: PanelPlacement[]): EditorState {
     editHistory: [],
     isDirty: false,
     originalPlacements: deepCopyPlacements(placements),
+    spreadRemovedCount: 0,
   }
 }
 
@@ -369,14 +372,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           corners: p.corners.map(c => ({ x: c.x + dx, y: c.y + dy })) as typeof p.corners,
         }
       })
-      // 부지 폴리곤 외부로 나간 패널 자동 제거 (clipping)
+      // 부지 폴리곤 외부로 나간 패널 자동 제거 (clipping) — 꼭짓점 전체 IN 기준 (Phase F 정책)
       // boundary 미지정(레거시 호출) 시 clip 스킵 — 행동 호환
       const placements = action.boundary && action.boundary.length >= 3
-        ? moved.filter(p =>
-            isPointInPolygon({ x: p.centerX, y: p.centerY }, action.boundary!)
-          )
+        ? moved.filter(p => isPanelInsidePolygon(p.corners, action.boundary!))
         : moved
-      return { ...saved, placements, isDirty: true }
+      const spreadRemovedCount = moved.length - placements.length
+      return { ...saved, placements, spreadRemovedCount, isDirty: true }
     }
     case 'UNDO': {
       if (state.editHistory.length === 0) return state

@@ -6,7 +6,7 @@
 
 import React, { useReducer, useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import type { FullAnalysisResult, Point, PanelPlacement, Polygon, SpacingPolicy } from '@/lib/layoutEngine'
-import { generateLayout } from '@/lib/layoutEngine'
+import { generateLayout, isPointInPolygon } from '@/lib/layoutEngine'
 import type { PanelSpec } from '@/lib/panelConfig'
 import type { ZoneLayoutResult } from '@/lib/multiZoneLayout'
 import {
@@ -160,8 +160,35 @@ export default function LayoutEditor({
     if (deltaDeg === 0) return  // 값 미변경 시 재배치 스킵 (입력란 클릭 등)
     const newAzimuth = gridAzimuth + deltaDeg
     setGridAzimuth(newAzimuth)
-    // 사용자가 SET_ROW_STACK으로 변경한 단수를 우선 적용 (rowConfigs에서 가장 흔한 stackCount)
-    // → 방위각 변경 시 1단으로 리셋되는 버그 방지
+
+    // 사용자 편집 내용이 있으면 패널을 수학적으로 회전시켜 편집 보존 (Option A)
+    if (state.isDirty && state.placements.length > 0) {
+      const safeZone = result.safeZone.safeZonePolygon
+      const cx = safeZone.reduce((s, p) => s + p.x, 0) / (safeZone.length || 1)
+      const cy = safeZone.reduce((s, p) => s + p.y, 0) / (safeZone.length || 1)
+      const rad = deltaDeg * Math.PI / 180
+      const cosr = Math.cos(rad), sinr = Math.sin(rad)
+      const rotatePt = (p: { x: number; y: number }) => ({
+        x: cx + (p.x - cx) * cosr - (p.y - cy) * sinr,
+        y: cy + (p.x - cx) * sinr + (p.y - cy) * cosr,
+      })
+      const rotated = state.placements
+        .map(panel => {
+          const newCenter = rotatePt({ x: panel.centerX, y: panel.centerY })
+          return {
+            ...panel,
+            centerX: newCenter.x,
+            centerY: newCenter.y,
+            corners: panel.corners.map(rotatePt) as typeof panel.corners,
+          }
+        })
+        .filter(panel => isPointInPolygon({ x: panel.centerX, y: panel.centerY }, safeZone))
+      dispatch({ type: 'REINIT', placements: rotated })
+      onCountChange?.(rotated.length)
+      return
+    }
+
+    // 편집 없는 클린 상태: 레이아웃 재생성
     const userStackCounts = state.rowConfigs.map(r => r.stackCount).filter(s => s > 0)
     const userStack = userStackCounts.length > 0
       ? userStackCounts.sort((a, b) =>
@@ -185,7 +212,7 @@ export default function LayoutEditor({
     })
     dispatch({ type: 'REINIT', placements: newLayout.placements })
     onCountChange?.(newLayout.placements.length)
-  }, [reanalysisOptions, gridAzimuth, result, dispatch, onCountChange, state.rowConfigs])
+  }, [reanalysisOptions, gridAzimuth, result, dispatch, onCountChange, state.isDirty, state.placements, state.rowConfigs])
 
   // ── 드래그 선택 ────────────────────────────────────────────────────
   const svgRef = useRef<SVGSVGElement>(null)
@@ -725,6 +752,11 @@ export default function LayoutEditor({
               </button>
             ))}
             <span className="text-[10px] text-slate-500">선택행/전체</span>
+            {state.spreadRemovedCount > 0 && (
+              <span className="text-[10px] text-orange-400" title="경계 밖으로 나간 패널이 자동 제거됨 (Ctrl+Z로 복구)">
+                -{state.spreadRemovedCount}개 제거
+              </span>
+            )}
           </div>
         )}
 
