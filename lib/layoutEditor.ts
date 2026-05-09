@@ -60,6 +60,7 @@ export type EditorAction =
   | { type: 'SELECT_ROWS'; rowIndices: number[]; additive?: boolean }
   | { type: 'SPREAD_ROWS'; deltaM: number; rowIndices?: number[]; boundary?: Polygon }
   | { type: 'REINIT'; placements: PanelPlacement[] }
+  | { type: 'ROTATE_APPLY'; placements: PanelPlacement[] }
   | { type: 'MARK_SAVED' }
 
 // ── 초기화 ─────────────────────────────────────────────────────────
@@ -396,6 +397,18 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
     case 'RESET':
       return initEditorState(state.originalPlacements)
+
+    case 'ROTATE_APPLY': {
+      // 회전 후 편집 보존: 패널 위치만 교체, corridors/rowConfigs/isDirty 유지
+      // originalPlacements는 보존 → RESET이 원본 자동 배치로 복귀 가능
+      const saved = pushHistory(state)
+      return {
+        ...saved,
+        placements: deepCopyPlacements(action.placements),
+        selectedIds: new Set(),
+        isDirty: true,
+      }
+    }
 
     case 'REINIT':
       return initEditorState(action.placements)

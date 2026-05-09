@@ -943,6 +943,12 @@ export default function MapTab() {
     setParcels([])
     setArea(0); setPanelRects([]); setPanelCount(0)
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
+    // 부지 변경 시 이전 분석 결과 초기화
+    // (구 결과가 남아 있으면 multizone onCountChange → setSvgAnalysisResult 무한 루프 발생)
+    setSvgAnalysisResult(null)
+    setShowSvgCanvas(false)
+    setIsEditing(false)
+    setEditingCount(null)
 
     try {
       // 모든 지번 병렬 조회 — /api/geocode 단일 호출로 좌표+필지 동시 수신

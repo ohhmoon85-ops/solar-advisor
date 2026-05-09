@@ -183,7 +183,7 @@ export default function LayoutEditor({
           }
         })
         .filter(panel => isPointInPolygon({ x: panel.centerX, y: panel.centerY }, safeZone))
-      dispatch({ type: 'REINIT', placements: rotated })
+      dispatch({ type: 'ROTATE_APPLY', placements: rotated })
       onCountChange?.(rotated.length)
       return
     }
@@ -284,9 +284,14 @@ export default function LayoutEditor({
   }, [])
 
   // ── 패널 수 실시간 콜백 ─────────────────────────────────────────
+  // onCountChange는 MapTab에서 인라인으로 정의 → 매 렌더마다 새 참조
+  // deps에 포함 시 multizone setSvgAnalysisResult → 무한 루프 발생
+  // ref로 래핑해 placements.length 변경 시에만 발화하도록 수정
+  const onCountChangeRef = useRef(onCountChange)
+  useEffect(() => { onCountChangeRef.current = onCountChange })
   useEffect(() => {
-    onCountChange?.(state.placements.length)
-  }, [state.placements.length, onCountChange])
+    onCountChangeRef.current?.(state.placements.length)
+  }, [state.placements.length])
 
   // ── 드래그 중 SVG 밖에서 마우스 버튼을 놓았을 때 정리 ────────────
   useEffect(() => {
