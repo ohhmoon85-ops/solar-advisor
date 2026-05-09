@@ -255,6 +255,7 @@ export default function MapTab() {
     removePolygon, clearAllPolygons,
     spacingPolicy, setSpacingPolicy,
     constructionStdGap, setConstructionStdGap,
+    userBoundaryMargin, setUserBoundaryMargin,
   } = useSolarStore()
   // SMP 단일 소스 — store의 실시간 KPX 응답값 (없으면 사용자 수동 설정값)
   const smpDisplay = liveSmp ?? priceOverride.smp
@@ -343,6 +344,8 @@ export default function MapTab() {
   const [activeZoneId, setActiveZoneId] = useState<string>('A')
   // Phase C-1: 지붕 그리기 마우스 미리보기 위치 (canvas 내부 픽셀 좌표)
   const [mouseCanvasPos, setMouseCanvasPos] = useState<{ x: number; y: number } | null>(null)
+  // 다중 지붕 폴리곤 commit 감지 (toast 알림용)
+  const prevRoofCountRef = useRef(0)
 
   // 이론 이격 거리 — 현장 위도 기반 (hardcode 37.5665° → 동적 위도)
   const tiltRad = (tiltAngle * Math.PI) / 180
@@ -356,6 +359,15 @@ export default function MapTab() {
     setToastMsg(msg)
     setTimeout(() => setToastMsg(null), 3000)
   }, [])
+
+  // 지붕 폴리곤 추가 감지 — drawingMode 중 commit 시 toast 안내
+  useEffect(() => {
+    const prev = prevRoofCountRef.current
+    prevRoofCountRef.current = roofPolygons.length
+    if (roofPolygons.length > prev && drawingMode) {
+      showToast(`건물 ${roofPolygons.length} 추가됨. 다음 건물 외곽을 클릭으로 시작하거나 그리기 모드를 끄세요.`)
+    }
+  }, [roofPolygons.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // svgPlotType !== 'roof' 전환 시 그리기 상태 초기화 (토지형 회귀 보호)
   useEffect(() => {
@@ -1240,9 +1252,12 @@ export default function MapTab() {
       const isGable = installType === '건물지붕형' && roofType === '박공'
       const workPath = isGable ? 0 : workPathM
 
+      // 경계 마진: 사용자 입력 우선, 미지정 시 모드별 기본값 (토지 2m / 지붕 0.5m)
+      const defaultMargin = svgPlotType === 'roof' ? 0.5 : 2.0
+      const effectiveMargin = userBoundaryMargin ?? defaultMargin
+
       // ── Phase C-2: 지붕 폴리곤 모드 ────────────────────────────────
       if (svgPlotType === 'roof' && roofPolygons.length > 0) {
-        const ROOF_MARGIN = 0.5
         const roofFixedGridAngle = isGable && jjokOlrim
         const roofRowSpacing = isGable ? 0.1 : effectiveRowSpacing
         const commonRoofOpts = {
@@ -1258,7 +1273,7 @@ export default function MapTab() {
           const closed = (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
             ? ring : [...ring, ring[0]]
           const geoJson = turfPolygon([closed])
-          const safeGeoJson = turfBuffer(geoJson, -ROOF_MARGIN, { units: 'meters' })
+          const safeGeoJson = turfBuffer(geoJson, -effectiveMargin, { units: 'meters' })
           if (!safeGeoJson || safeGeoJson.geometry.type !== 'Polygon') return null
           const safeRing = safeGeoJson.geometry.coordinates[0] as number[][]
           const safePolygon = convertGeoRingToLocalPolygon(safeRing, apiCoords.lat, apiCoords.lon)
@@ -1306,9 +1321,6 @@ export default function MapTab() {
         if (result) mergedFeature = result as ReturnType<typeof turfPolygon>
       }
       // Polygon vs MultiPolygon 분기: union 결과에 따라 safe zone 계산
-      const margin = svgPlotType === 'roof'
-        ? 0.5
-        : 2.0
       const geomType = mergedFeature.geometry?.type
       const allRings: number[][][] = []
       let cadastreRing: number[][] = []
@@ -1316,7 +1328,7 @@ export default function MapTab() {
       if (geomType === 'Polygon') {
         // 인접 필지 → 단일 폴리곤, 내부 경계 마진 없음
         cadastreRing = mergedFeature.geometry.coordinates[0] as number[][]
-        const safeZone = turfBuffer(mergedFeature, -margin, { units: 'meters' })
+        const safeZone = turfBuffer(mergedFeature, -effectiveMargin, { units: 'meters' })
         if (safeZone?.geometry?.type === 'Polygon') {
           allRings.push(safeZone.geometry.coordinates[0] as number[][])
         }
@@ -1326,7 +1338,7 @@ export default function MapTab() {
         if (mpCoords[0]) cadastreRing = mpCoords[0][0]
         for (const polyCoords of mpCoords) {
           const singlePoly = turfPolygon(polyCoords as number[][][])
-          const safeZone = turfBuffer(singlePoly, -margin, { units: 'meters' })
+          const safeZone = turfBuffer(singlePoly, -effectiveMargin, { units: 'meters' })
           if (safeZone?.geometry?.type === 'Polygon') {
             allRings.push(safeZone.geometry.coordinates[0] as number[][])
           }
@@ -1361,7 +1373,7 @@ export default function MapTab() {
             const closed = (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
               ? ring : [...ring, ring[0]]
             const parcelGeoJson = turfPolygon([closed])
-            const safeGeoJson = turfBuffer(parcelGeoJson, -margin, { units: 'meters' })
+            const safeGeoJson = turfBuffer(parcelGeoJson, -effectiveMargin, { units: 'meters' })
             if (!safeGeoJson || safeGeoJson.geometry.type !== 'Polygon') return null
             const safeRing = safeGeoJson.geometry.coordinates[0] as number[][]
             const safePolygon = convertGeoRingToLocalPolygon(safeRing, apiCoords.lat, apiCoords.lon)
@@ -1424,7 +1436,7 @@ export default function MapTab() {
     }
   }, [apiCoords, parcels, roofPolygons, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
       autoSolarAngle, moduleIndex, tiltAngle, autoLandAngle, autoMargin,
-      workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap])
+      workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap, userBoundaryMargin])
 
   const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
@@ -1839,7 +1851,7 @@ export default function MapTab() {
                 {slopePercent > 0 ? ` × cos(arctan(${slopePercent}%))` : ''}
                 {apiSource === 'api' ? `  ·  VWorld ${parcels.length}개 필지` : ''}
                 {satTiles.length > 0 ? `  ·  ${mapMode === 'cadastral' ? '지적도' : '위성'}` : ''}
-                {`  ·  경계마진 ${BOUNDARY_MARGIN[installType] ?? 2}m`}
+                {`  ·  경계마진 ${(userBoundaryMargin ?? (BOUNDARY_MARGIN[installType] ?? 2)).toFixed(1)}m${userBoundaryMargin != null ? ' (사용자 지정)' : ''}`}
               </div>
             </div>
             {/* 수익성 연동 — 정밀분석 결과가 있으면 두 가지 선택 제공 */}
@@ -2071,11 +2083,13 @@ export default function MapTab() {
             </div>
             {drawingMode && (
               <p className="text-xs text-amber-700 bg-amber-100 rounded px-2 py-1.5 mb-2">
-                위성사진에서 지붕 외곽을 클릭으로 그려주세요.
-                더블클릭으로 닫기, Esc 취소, Backspace로 마지막 정점 삭제.
+                {roofPolygons.length > 0
+                  ? `건물 ${roofPolygons.length}개 완료. 다음 건물 외곽을 클릭으로 시작하세요.`
+                  : '위성사진에서 지붕 외곽을 클릭으로 그려주세요.'}
+                {" "}더블클릭으로 닫기, Esc 취소, Backspace로 마지막 정점 삭제.
                 {currentDrawingPoints.length > 0 && (
                   <span className="ml-1 font-semibold text-amber-900">
-                    ({currentDrawingPoints.length}개 정점)
+                    (현재 {currentDrawingPoints.length}개 정점)
                   </span>
                 )}
               </p>
@@ -2085,7 +2099,7 @@ export default function MapTab() {
                 {roofPolygons.map((poly, i) => (
                   <div key={poly.id}
                     className="flex items-center justify-between bg-white rounded px-2 py-1 text-xs border border-amber-100">
-                    <span className="text-gray-700">지붕 {i + 1}: {poly.areaM2.toFixed(1)} m²</span>
+                    <span className="text-gray-700">건물 {i + 1}: {poly.areaM2.toFixed(1)} m²</span>
                     <button
                       onClick={() => removePolygon(poly.id)}
                       className="text-red-500 hover:text-red-700 ml-2 font-medium">
@@ -2146,9 +2160,44 @@ export default function MapTab() {
                   value={svgPlotType}
                   onChange={e => setSvgPlotType(e.target.value as PlotType)}
                   className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5">
-                  <option value="land">토지 (마진 2m)</option>
-                  <option value="roof">지붕 (마진 0.5m)</option>
+                  <option value="land">토지 (기본 마진 2.0m)</option>
+                  <option value="roof">지붕 (기본 마진 0.5m)</option>
                 </select>
+              </div>
+
+              {/* 경계 마진 사용자 입력 */}
+              <div className="col-span-2 rounded-md border border-gray-200 bg-gray-50 p-2.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs text-gray-600 font-medium">경계 마진 (m)</label>
+                  {userBoundaryMargin != null && (
+                    <button
+                      onClick={() => setUserBoundaryMargin(undefined)}
+                      className="text-[10px] text-gray-400 hover:text-red-500 transition-colors">
+                      리셋
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number" min={0} max={5} step={0.1}
+                    placeholder={svgPlotType === 'roof' ? '기본 0.5' : '기본 2.0'}
+                    value={userBoundaryMargin ?? ''}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value)
+                      setUserBoundaryMargin(isNaN(v) ? undefined : v)
+                    }}
+                    className="w-20 text-xs border border-gray-300 rounded px-2 py-1.5 text-right font-mono bg-white"
+                  />
+                  <span className="text-xs text-gray-400">m</span>
+                  {userBoundaryMargin != null ? (
+                    <span className="text-[11px] text-amber-600 font-semibold">✎ {userBoundaryMargin.toFixed(1)}m 적용 중</span>
+                  ) : (
+                    <span className="text-[11px] text-gray-400">기본값 ({svgPlotType === 'roof' ? '0.5' : '2.0'}m)</span>
+                  )}
+                </div>
+                <p className="mt-1.5 text-[10px] text-gray-400 leading-tight">
+                  부지/지붕 경계로부터 패널까지의 안전 거리. 소규모 부지에서는 줄여서 사용
+                </p>
               </div>
 
               {/* 패널 방향 (세로형/가로형) */}

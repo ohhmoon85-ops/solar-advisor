@@ -82,6 +82,8 @@ interface SolarStore {
   setSpacingPolicy: (policy: SpacingPolicy) => void
   constructionStdGap: number | undefined
   setConstructionStdGap: (gap: number | undefined) => void
+  userBoundaryMargin: number | undefined
+  setUserBoundaryMargin: (margin: number | undefined) => void
 
   // KIER 실측 일사량 데이터
   kierPvHours: number | null
@@ -182,6 +184,8 @@ export const useSolarStore = create<SolarStore>((set) => ({
   setSpacingPolicy: (policy) => set({ spacingPolicy: policy }),
   constructionStdGap: undefined,
   setConstructionStdGap: (gap) => set({ constructionStdGap: gap }),
+  userBoundaryMargin: undefined,
+  setUserBoundaryMargin: (margin) => set({ userBoundaryMargin: margin }),
 
   kierPvHours: null,
   setKierPvHours: (h) => set({ kierPvHours: h }),
