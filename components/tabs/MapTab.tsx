@@ -1032,6 +1032,14 @@ export default function MapTab() {
     // 복수 필지 초기화
     setParcels([])
     setLandInfo(null)
+    // 사용자 입력 전체 초기화 → R-new 기준점 복원
+    setUserBoundaryMargin(undefined)
+    setUserRowSpacing(undefined)
+    setConstructionStdGap(undefined)
+    setUserFirstStackGap(undefined)
+    setSpacingPolicy('construction_std')
+    setAutoMargin(0)
+    setWorkPathM(0)
   }
 
   const handleSendToRevenue = (source: 'quick' | 'precision' = 'quick') => {
