@@ -38,6 +38,8 @@ export interface EditorState {
   originalPlacements: PanelPlacement[]
   /** 행간 조정 후 경계 밖으로 제거된 패널 수 (UI 피드백용) */
   spreadRemovedCount: number
+  /** 수동 이동 후 빈 자리 자동 채움 패널 수 (UI 피드백용) */
+  moveFillCount: number
 }
 
 export type EditorAction =
@@ -75,6 +77,7 @@ export function initEditorState(placements: PanelPlacement[]): EditorState {
     isDirty: false,
     originalPlacements: deepCopyPlacements(placements),
     spreadRemovedCount: 0,
+    moveFillCount: 0,
   }
 }
 
@@ -326,6 +329,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case 'MOVE_SELECTED': {
       if (state.selectedIds.size === 0) return state
       const saved = pushHistory(state)
+      // 이동 전 선택 패널 위치 기억 (자동 채움용)
+      const originals = saved.placements.filter(p => state.selectedIds.has(p.id))
       const moved = saved.placements.map(p => {
         if (!state.selectedIds.has(p.id)) return p
         return {
@@ -340,7 +345,31 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ? moved.filter(p => isPanelInsidePolygon(p.corners, action.boundary!))
         : moved
       const spreadRemovedCount = moved.length - placements.length
-      return { ...saved, placements, spreadRemovedCount, isDirty: true }
+      // 빈 공간 자동 채움: 이동 전 위치 → 부지 안 + 현재 패널과 미겹침이면 새 패널 추가 (Phase K)
+      let moveFillCount = 0
+      if (action.boundary && action.boundary.length >= 3) {
+        const aabbOverlap = (a: PanelPlacement, b: PanelPlacement): boolean => {
+          const aXs = a.corners.map(c => c.x), aYs = a.corners.map(c => c.y)
+          const bXs = b.corners.map(c => c.x), bYs = b.corners.map(c => c.y)
+          const aw = Math.max(...aXs) - Math.min(...aXs)
+          const ah = Math.max(...aYs) - Math.min(...aYs)
+          const tol = Math.min(aw, ah) * 0.05
+          const overX = Math.min(Math.max(...aXs), Math.max(...bXs)) - Math.max(Math.min(...aXs), Math.min(...bXs))
+          const overY = Math.min(Math.max(...aYs), Math.max(...bYs)) - Math.max(Math.min(...aYs), Math.min(...bYs))
+          return overX > tol && overY > tol
+        }
+        let nextId = placements.length > 0 ? Math.max(...placements.map(p => p.id)) + 1 : 0
+        const fills: PanelPlacement[] = []
+        for (const orig of originals) {
+          if (!isPanelInsidePolygon(orig.corners, action.boundary)) continue
+          const allCurrent = [...placements, ...fills]
+          if (allCurrent.some(p => aabbOverlap(orig, p))) continue
+          fills.push({ ...orig, corners: [...orig.corners] as typeof orig.corners, id: nextId++ })
+        }
+        moveFillCount = fills.length
+        return { ...saved, placements: [...placements, ...fills], spreadRemovedCount, moveFillCount, isDirty: true }
+      }
+      return { ...saved, placements, spreadRemovedCount, moveFillCount, isDirty: true }
     }
 
     case 'SPREAD_ROWS': {

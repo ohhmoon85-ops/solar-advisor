@@ -1011,6 +1011,11 @@ export default function LayoutEditor({
                   <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0.1, dy: 0, boundary: result.safeZone.safeZonePolygon })}
                     className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">→</button>
                   <span className="text-[10px] text-slate-500 ml-0.5">0.1m</span>
+                  {state.moveFillCount > 0 && (
+                    <span className="text-[10px] text-emerald-400 ml-0.5" title="이동 후 빈 자리에 새 패널 자동 추가 (Ctrl+Z로 복구)">
+                      +{state.moveFillCount}채움
+                    </span>
+                  )}
                 </div>
               </div>
 
