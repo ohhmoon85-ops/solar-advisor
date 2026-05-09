@@ -280,6 +280,7 @@ function placeGridAtAngle(
   landStandard: boolean = false,
   spacingPolicy: SpacingPolicy = 'construction_std',
   constructionStdGap?: number,
+  firstStackGap?: number,
 ): { placements: PanelPlacement[]; fillCount: number } {
   const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
   const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
@@ -298,7 +299,8 @@ function placeGridAtAngle(
       groupPitch = groupHeight + stack * shadowGap  // 그늘 회피: 단수 비례
     } else {
       if (stack === 1) {
-        groupPitch = groupHeight + shadowGap        // 1단: 자동 계산
+        const firstGap = firstStackGap ?? shadowGap
+        groupPitch = groupHeight + firstGap         // 1단: Phase L 사용자 빈공간 또는 자동
       } else {
         const userGap = constructionStdGap ?? shadowGap
         groupPitch = groupHeight + userGap          // 2단+: 사용자 입력 빈공간
@@ -447,6 +449,8 @@ export function generateLayout(params: {
   spacingPolicy?: SpacingPolicy
   /** 2단+ 빈공간 (m) — construction_std 전용, 미지정 시 자동(shadowGap) */
   constructionStdGap?: number
+  /** 1단 빈공간 (m) — construction_std 전용, 미지정 시 자동(shadowGap) */
+  firstStackGap?: number
 }): LayoutResult {
   const {
     safeZonePolygon,
@@ -462,6 +466,7 @@ export function generateLayout(params: {
     landStandard = false,
     spacingPolicy = 'construction_std',
     constructionStdGap,
+    firstStackGap,
   } = params
 
   // 0°~175° 범위에서 5° 단위로 탐색하여 가장 많은 패널이 배치되는 그리드 각도 선택
@@ -472,7 +477,7 @@ export function generateLayout(params: {
   if (fixedGridAngle) {
     const r = placeGridAtAngle(
       safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
-      panelOrientation, excludeZones, azBase, rowStack, validPolygons, landStandard, spacingPolicy, constructionStdGap,
+      panelOrientation, excludeZones, azBase, rowStack, validPolygons, landStandard, spacingPolicy, constructionStdGap, firstStackGap,
     )
     bestPlacements = r.placements
     bestFillCount = r.fillCount
@@ -480,7 +485,7 @@ export function generateLayout(params: {
     for (let sweep = 0; sweep < 180; sweep += 5) {
       const r = placeGridAtAngle(
         safeZonePolygon, panelSpec, rowSpacing, tiltAngle,
-        panelOrientation, excludeZones, azBase + sweep, rowStack, validPolygons, landStandard, spacingPolicy, constructionStdGap,
+        panelOrientation, excludeZones, azBase + sweep, rowStack, validPolygons, landStandard, spacingPolicy, constructionStdGap, firstStackGap,
       )
       if (r.placements.length > bestPlacements.length) {
         bestPlacements = r.placements
@@ -601,6 +606,8 @@ export function runFullAnalysis(params: {
   spacingPolicy?: SpacingPolicy
   /** 2단+ 빈공간 (m) — construction_std 전용, 미지정 시 자동(shadowGap) */
   constructionStdGap?: number
+  /** 1단 빈공간 (m) — construction_std 전용, 미지정 시 자동(shadowGap) */
+  firstStackGap?: number
 }): FullAnalysisResult {
   const {
     cadastrePolygon,
@@ -623,6 +630,7 @@ export function runFullAnalysis(params: {
     workPath = 0,
     spacingPolicy = 'construction_std',
     constructionStdGap,
+    firstStackGap,
   } = params
 
   // 경사지 위도 보정 (import 시점 circular 방지를 위해 인라인)
@@ -680,6 +688,7 @@ export function runFullAnalysis(params: {
     fixedGridAngle,
     spacingPolicy,
     constructionStdGap,
+    firstStackGap,
   })
 
   // Step 4: 실증 크로스체크

@@ -257,6 +257,7 @@ export default function MapTab() {
     constructionStdGap, setConstructionStdGap,
     userBoundaryMargin, setUserBoundaryMargin,
     userRowSpacing, setUserRowSpacing,
+    userFirstStackGap, setUserFirstStackGap,
   } = useSolarStore()
   // SMP 단일 소스 — store의 실시간 KPX 응답값 (없으면 사용자 수동 설정값)
   const smpDisplay = liveSmp ?? priceOverride.smp
@@ -1300,6 +1301,7 @@ export default function MapTab() {
             workPath: 0,
             spacingPolicy,
             constructionStdGap,
+            firstStackGap: userFirstStackGap,
             ...commonRoofOpts,
           } as ZoneConfig
         }).filter((z): z is ZoneConfig => z !== null)
@@ -1401,6 +1403,7 @@ export default function MapTab() {
               workPath,
               spacingPolicy,
               constructionStdGap,
+              firstStackGap: userFirstStackGap,
               ...commonOpts,
             } as ZoneConfig
           })
@@ -1429,6 +1432,7 @@ export default function MapTab() {
           workPath,
           spacingPolicy,
           constructionStdGap,
+          firstStackGap: userFirstStackGap,
           ...commonOpts,
         })
         setSvgAnalysisResult(faResult)
@@ -1445,7 +1449,7 @@ export default function MapTab() {
     }
   }, [apiCoords, parcels, roofPolygons, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
       autoSolarAngle, moduleIndex, tiltAngle, autoLandAngle, autoMargin,
-      workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap, userBoundaryMargin, userRowSpacing])
+      workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap, userFirstStackGap, userBoundaryMargin, userRowSpacing])
 
   const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
@@ -2177,7 +2181,7 @@ export default function MapTab() {
               {/* 경계 마진 사용자 입력 */}
               <div className="col-span-2 rounded-md border border-gray-200 bg-gray-50 p-2.5">
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs text-gray-600 font-medium">경계 마진 (m)</label>
+                  <label className="text-xs text-gray-600 font-medium" title={svgPlotType === 'roof' ? '지붕 경계 안전 거리. 시공사 통상 0.3~1.0m' : '부지 경계 안전 거리. 시공사 통상 0.5~2.0m'}>경계 마진 (m)</label>
                   {userBoundaryMargin != null && (
                     <button
                       onClick={() => setUserBoundaryMargin(undefined)}
@@ -2288,8 +2292,14 @@ export default function MapTab() {
               const recommended = result.rowSpacing
               const isGablePanel = installType === '건물지붕형' && roofType === '박공'
               const workDisplay = isGablePanel ? 0 : workPathM
+              const projLen = moduleLen * Math.cos(tiltAngle * Math.PI / 180)
               const baseSpacing = Math.round(((userRowSpacing ?? recommended) + autoMargin) * 100) / 100
-              const finalSpacing = Math.round((baseSpacing + workDisplay) * 100) / 100
+              const effectiveSpacing = Math.round((baseSpacing + workDisplay) * 100) / 100
+              const sg = Math.max(effectiveSpacing - projLen, 0)
+              // Phase L: userFirstStackGap이 설정된 경우 1단 행간 = projLen + userFirstStackGap
+              const finalSpacing = (!isGablePanel && spacingPolicy === 'construction_std' && userFirstStackGap != null)
+                ? Math.round((projLen + userFirstStackGap) * 100) / 100
+                : effectiveSpacing
               return (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2 mb-3">
                   <div className="flex items-center justify-between">
@@ -2415,53 +2425,87 @@ export default function MapTab() {
                           </span>
                         </label>
                       ))}
-                      {/* 2단+ 빈공간 입력 (시공표준 전용) */}
+                      {/* 1단/2단+ 빈공간 입력 (시공표준 전용) */}
                       {spacingPolicy === 'construction_std' && (
-                        <div className="flex items-center gap-2 pt-1">
-                          <label className="text-[11px] text-gray-600 whitespace-nowrap">2단+ 빈공간</label>
-                          <input
-                            type="number"
-                            min={0.1}
-                            max={5}
-                            step={0.1}
-                            placeholder="자동"
-                            value={constructionStdGap ?? ''}
-                            onChange={e => {
-                              const v = parseFloat(e.target.value)
-                              setConstructionStdGap(isNaN(v) ? undefined : v)
-                            }}
-                            className="w-20 text-[11px] border border-gray-300 rounded px-1.5 py-0.5 text-right"
-                          />
-                          <span className="text-[11px] text-gray-500">m <span className="text-sky-600">(권장 2.4m)</span></span>
-                          {constructionStdGap != null && (
-                            <button onClick={() => setConstructionStdGap(undefined)}
-                              className="text-[10px] text-gray-400 hover:text-red-500">초기화</button>
-                          )}
+                        <div className="space-y-1 pt-1">
+                          <div className="flex items-center gap-2">
+                            <label className="text-[11px] text-gray-600 whitespace-nowrap w-16">1단 빈공간</label>
+                            <input
+                              type="number"
+                              min={0.1}
+                              max={5}
+                              step={0.1}
+                              placeholder={sg.toFixed(2)}
+                              value={userFirstStackGap ?? ''}
+                              onChange={e => {
+                                const v = parseFloat(e.target.value)
+                                setUserFirstStackGap(isNaN(v) ? undefined : v)
+                              }}
+                              title="1단은 그늘이 짧아 더 작게 잡아도 안전. 시공사 통상 2.0~2.4m"
+                              className="w-16 text-[11px] border border-gray-300 rounded px-1.5 py-0.5 text-right"
+                            />
+                            <span className="text-[11px] text-gray-500">m <span className="text-sky-600">(통상 2.0~2.4m)</span></span>
+                            {userFirstStackGap != null && (
+                              <button onClick={() => setUserFirstStackGap(undefined)}
+                                className="text-[10px] text-gray-400 hover:text-red-500">초기화</button>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="text-[11px] text-gray-600 whitespace-nowrap w-16">2단+ 빈공간</label>
+                            <input
+                              type="number"
+                              min={0.1}
+                              max={5}
+                              step={0.1}
+                              placeholder={sg.toFixed(2)}
+                              value={constructionStdGap ?? ''}
+                              onChange={e => {
+                                const v = parseFloat(e.target.value)
+                                setConstructionStdGap(isNaN(v) ? undefined : v)
+                              }}
+                              title="2단 이상 빈공간. 시공사 통상 2.4m 권장"
+                              className="w-16 text-[11px] border border-gray-300 rounded px-1.5 py-0.5 text-right"
+                            />
+                            <span className="text-[11px] text-gray-500">m <span className="text-sky-600">(통상 2.4m)</span></span>
+                            {constructionStdGap != null && (
+                              <button onClick={() => setConstructionStdGap(undefined)}
+                                className="text-[10px] text-gray-400 hover:text-red-500">초기화</button>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-gray-400 leading-tight">1단은 그늘이 짧으므로 빈공간을 더 작게 잡아도 안전. 2단+는 시공사 통상 2.4m 권장.</p>
                         </div>
                       )}
-                      {/* 정책별 행간 미리보기 */}
+                      {/* 행간/빈공간 미리보기 (시공표준 기준, 그늘회피는 주석 표시) */}
                       {(() => {
-                        const projLen = moduleLen * Math.cos(tiltAngle * Math.PI / 180)
-                        const D = finalSpacing  // 작업 통로 포함 — 최종 적용값과 정확히 일치
-                        const sg = Math.max(D - projLen, 0)
+                        // projLen, sg는 외부 IIFE 스코프에서 사용
+                        const firstGapStd = userFirstStackGap ?? sg
                         const rows = [1, 2, 3].map(n => {
                           const gh = n * projLen + (n - 1) * 0.02
-                          const std = n === 1 ? D : parseFloat((gh + (constructionStdGap ?? sg)).toFixed(2))
-                          const avoid = n === 1 ? D : parseFloat((gh + n * sg).toFixed(2))
-                          return { n, std, avoid }
+                          const stdGap = n === 1 ? firstGapStd : (constructionStdGap ?? sg)
+                          const stdSpacing = n === 1
+                            ? parseFloat((projLen + firstGapStd).toFixed(2))
+                            : parseFloat((gh + stdGap).toFixed(2))
+                          const avoidGap = n * sg
+                          const avoidSameAsStd = Math.abs(avoidGap - stdGap) < 0.005
+                          return { n, stdSpacing, stdGap, avoidGap, avoidSameAsStd }
                         })
                         return (
-                          <div className="mt-1 text-[10px] text-gray-500">
-                            <div className="grid grid-cols-3 gap-x-1 font-semibold text-[10px] border-b border-gray-100 pb-0.5 mb-0.5">
+                          <div className="mt-1 text-[10px]">
+                            <div className="grid grid-cols-3 gap-x-1 font-semibold border-b border-gray-100 pb-0.5 mb-0.5 text-gray-500">
                               <span>단수</span>
-                              <span className="text-sky-600 text-center">시공표준</span>
-                              <span className="text-violet-600 text-center">그늘회피</span>
+                              <span title="한 행 시작점부터 다음 행 시작점 (모듈 길이 + 빈공간)" className="text-sky-600 text-center cursor-help">행간 ↔</span>
+                              <span title="한 모듈 끝에서 다음 모듈 시작까지의 빈 공간" className="text-center cursor-help">빈공간</span>
                             </div>
                             {rows.map(r => (
-                              <div key={r.n} className={`grid grid-cols-3 gap-x-1 py-0.5 ${r.n === 1 ? 'text-gray-400' : ''}`}>
-                                <span>{r.n}단 행간</span>
-                                <span className={`text-center font-mono ${spacingPolicy === 'construction_std' ? 'text-sky-700 font-semibold' : 'text-gray-500'}`}>{r.std.toFixed(2)}m</span>
-                                <span className={`text-center font-mono ${spacingPolicy === 'shadow_avoid' ? 'text-violet-700 font-semibold' : 'text-gray-500'}`}>{r.avoid.toFixed(2)}m</span>
+                              <div key={r.n} className={`grid grid-cols-3 gap-x-1 py-0.5 ${r.n === 1 ? 'text-gray-400' : 'text-gray-600'}`}>
+                                <span>{r.n}단</span>
+                                <span className="text-center font-mono text-sky-700 font-semibold">{r.stdSpacing.toFixed(2)}m</span>
+                                <div className="text-right leading-tight">
+                                  <span className="font-mono">{r.stdGap.toFixed(2)}m</span>
+                                  <div className="text-[9px] text-gray-400">
+                                    {r.avoidSameAsStd ? '(회피동일)' : `(회피 ${r.avoidGap.toFixed(2)}m)`}
+                                  </div>
+                                </div>
                               </div>
                             ))}
                           </div>

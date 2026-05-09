@@ -45,6 +45,8 @@ export interface ZoneConfig {
   spacingPolicy?: SpacingPolicy
   /** 2단+ 빈공간 (m) — construction_std 전용, 미지정 시 자동 */
   constructionStdGap?: number
+  /** 1단 빈공간 (m) — construction_std 전용, 미지정 시 자동 */
+  firstStackGap?: number
 }
 
 export interface ZoneLayoutResult extends FullAnalysisResult {
@@ -253,6 +255,7 @@ export function runMultiZoneAnalysis(
       workPath: zone.workPath,
       spacingPolicy: zone.spacingPolicy,
       constructionStdGap: zone.constructionStdGap,
+      firstStackGap: zone.firstStackGap,
     })
     return {
       ...result,
