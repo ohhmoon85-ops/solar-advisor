@@ -6,7 +6,7 @@
 
 import React, { useReducer, useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import type { FullAnalysisResult, Point, PanelPlacement, Polygon, SpacingPolicy } from '@/lib/layoutEngine'
-import { generateLayout, isPointInPolygon } from '@/lib/layoutEngine'
+import { generateLayout, isPointInPolygon, isPanelInsidePolygon } from '@/lib/layoutEngine'
 import type { PanelSpec } from '@/lib/panelConfig'
 import type { ZoneLayoutResult } from '@/lib/multiZoneLayout'
 import {
@@ -274,10 +274,11 @@ export default function LayoutEditor({
       if (e.key === ']') { e.preventDefault(); dispatch({ type: 'ROTATE_SELECTED', angleDeg: e.shiftKey ? 15 : 5 }) }
       // 선택된 패널 이동: 화살표 (기본 0.1m, Shift = 0.5m)
       const step = e.shiftKey ? 0.5 : 0.1
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: -step, dy: 0 }) }
-      if (e.key === 'ArrowRight') { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx:  step, dy: 0 }) }
-      if (e.key === 'ArrowUp')    { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: 0, dy:  step }) }
-      if (e.key === 'ArrowDown')  { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: -step }) }
+      const bnd = safeZoneRef.current
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: -step, dy: 0, boundary: bnd }) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx:  step, dy: 0, boundary: bnd }) }
+      if (e.key === 'ArrowUp')    { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: 0, dy:  step, boundary: bnd }) }
+      if (e.key === 'ArrowDown')  { e.preventDefault(); dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: -step, boundary: bnd }) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -292,6 +293,10 @@ export default function LayoutEditor({
   useEffect(() => {
     onCountChangeRef.current?.(state.placements.length)
   }, [state.placements.length])
+
+  // 경계 검사용 safeZone ref — 키보드 핸들러 stale closure 방지
+  const safeZoneRef = useRef(result.safeZone.safeZonePolygon)
+  useEffect(() => { safeZoneRef.current = result.safeZone.safeZonePolygon }, [result.safeZone.safeZonePolygon])
 
   // ── 드래그 중 SVG 밖에서 마우스 버튼을 놓았을 때 정리 ────────────
   useEffect(() => {
@@ -340,6 +345,9 @@ export default function LayoutEditor({
     ]
     const rowCols = state.placements.filter(p => p.row === nearest!.row).map(p => p.col)
     const newCol = rowCols.length > 0 ? Math.max(...rowCols) + 1 : 0
+    // 경계 밖 추가 거부 — 꼭짓점 전체 IN 기준
+    const bz = safeZoneRef.current
+    if (bz.length >= 3 && !isPanelInsidePolygon(corners as [{ x: number; y: number }, { x: number; y: number }, { x: number; y: number }, { x: number; y: number }], bz)) return
     dispatch({
       type: 'ADD_PANEL',
       placement: { row: nearest.row, col: newCol, centerX: worldPt.x, centerY: worldPt.y, corners },
@@ -432,7 +440,7 @@ export default function LayoutEditor({
     if (tool === 'select') {
       dispatch({ type: 'SELECT_PANEL', id: panel.id, additive: e.shiftKey || e.ctrlKey || e.metaKey })
     } else if (tool === 'stack') {
-      dispatch({ type: 'SET_ROW_STACK', rowIndex: panel.row, stackCount: stackTarget })
+      dispatch({ type: 'SET_ROW_STACK', rowIndex: panel.row, stackCount: stackTarget, boundary: safeZoneRef.current })
     } else if (tool === 'spacing') {
       const v = parseFloat(spacingInput)
       if (!isNaN(v) && v > 0) {
@@ -696,7 +704,7 @@ export default function LayoutEditor({
                       )]
                     : [...new Set(state.placements.map(p => p.row))]
                   rowIndices.forEach(rowIndex => {
-                    dispatch({ type: 'SET_ROW_STACK', rowIndex, stackCount: n })
+                    dispatch({ type: 'SET_ROW_STACK', rowIndex, stackCount: n, boundary: result.safeZone.safeZonePolygon })
                   })
                 }}
                 className={[
@@ -992,15 +1000,15 @@ export default function LayoutEditor({
               <div className="bg-slate-800/95 border border-slate-600 rounded px-2 py-1.5">
                 <div className="text-[10px] text-slate-400 mb-1">이동 ← ↑ ↓ → · Shift=0.5m</div>
                 <div className="flex gap-1 items-center">
-                  <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: -0.1, dy: 0 })}
+                  <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: -0.1, dy: 0, boundary: result.safeZone.safeZonePolygon })}
                     className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">←</button>
                   <div className="flex flex-col gap-0.5">
-                    <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: 0.1 })}
+                    <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: 0.1, boundary: result.safeZone.safeZonePolygon })}
                       className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">↑</button>
-                    <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: -0.1 })}
+                    <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0, dy: -0.1, boundary: result.safeZone.safeZonePolygon })}
                       className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">↓</button>
                   </div>
-                  <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0.1, dy: 0 })}
+                  <button onClick={() => dispatch({ type: 'MOVE_SELECTED', dx: 0.1, dy: 0, boundary: result.safeZone.safeZonePolygon })}
                     className="w-7 h-6 rounded text-xs bg-slate-700 text-slate-200 hover:bg-slate-500">→</button>
                   <span className="text-[10px] text-slate-500 ml-0.5">0.1m</span>
                 </div>

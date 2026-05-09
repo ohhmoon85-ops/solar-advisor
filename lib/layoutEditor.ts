@@ -50,10 +50,10 @@ export type EditorAction =
   | { type: 'ADD_CORRIDOR'; corridor: Omit<Corridor, 'id'> }
   | { type: 'REMOVE_CORRIDOR'; id: number }
   | { type: 'REMOVE_ALL_CORRIDORS' }
-  | { type: 'SET_ROW_STACK'; rowIndex: number; stackCount: 1 | 2 | 3 }
+  | { type: 'SET_ROW_STACK'; rowIndex: number; stackCount: 1 | 2 | 3; boundary?: Polygon }
   | { type: 'SET_ROW_SPACING'; rowIndex: number; spacingM: number | undefined }
   | { type: 'ROTATE_SELECTED'; angleDeg: number }
-  | { type: 'MOVE_SELECTED'; dx: number; dy: number }
+  | { type: 'MOVE_SELECTED'; dx: number; dy: number; boundary?: Polygon }
   | { type: 'UNDO' }
   | { type: 'RESET' }
   | { type: 'APPLY_QUICK'; preset: 'dense' | 'standard' | 'corridors' | 'stack3'; baseSpacing: number }
@@ -284,8 +284,15 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           })
         }
       }
+      // 경계 밖으로 나간 단수 패널 제거 (꼭짓점 전체 IN 기준)
+      const clippedPlacements = action.boundary && action.boundary.length >= 3
+        ? [
+            ...newPlacements.filter(p => p.row !== action.rowIndex),
+            ...newPlacements.filter(p => p.row === action.rowIndex && isPanelInsidePolygon(p.corners, action.boundary!))
+          ]
+        : newPlacements
       return upsertRowConfig(
-        { ...saved, placements: newPlacements, isDirty: true },
+        { ...saved, placements: clippedPlacements, isDirty: true },
         { ...rowCfg, stackCount: action.stackCount }
       )
     }
@@ -319,7 +326,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case 'MOVE_SELECTED': {
       if (state.selectedIds.size === 0) return state
       const saved = pushHistory(state)
-      const placements = saved.placements.map(p => {
+      const moved = saved.placements.map(p => {
         if (!state.selectedIds.has(p.id)) return p
         return {
           ...p,
@@ -328,7 +335,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           corners: p.corners.map(c => ({ x: c.x + action.dx, y: c.y + action.dy })) as typeof p.corners,
         }
       })
-      return { ...saved, placements, isDirty: true }
+      // 경계 밖으로 이동한 패널 자동 제거 — 꼭짓점 전체 IN 기준 (Phase F 정책)
+      const placements = action.boundary && action.boundary.length >= 3
+        ? moved.filter(p => isPanelInsidePolygon(p.corners, action.boundary!))
+        : moved
+      const spreadRemovedCount = moved.length - placements.length
+      return { ...saved, placements, spreadRemovedCount, isDirty: true }
     }
 
     case 'SPREAD_ROWS': {

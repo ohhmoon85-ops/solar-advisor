@@ -2293,7 +2293,10 @@ export default function MapTab() {
               return (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2 mb-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-sky-800">⚙ 행간거리 자동 계산</span>
+                    <div>
+                      <div className="text-xs font-semibold text-sky-800">⚙ 1단 행간 결정</div>
+                      <div className="text-[10px] text-sky-600 mt-0.5">1단 패널 사이의 거리. 모든 단수의 시작점.</div>
+                    </div>
                     <span className="text-[10px] bg-sky-100 text-sky-600 px-1.5 py-0.5 rounded font-medium">정밀 분석</span>
                   </div>
 
@@ -2380,10 +2383,15 @@ export default function MapTab() {
                     </div>
                   </div>
 
-                  {/* ── 단수별 그늘 정책 토글 ── */}
+                  {/* ── 2단 이상 단수 정책 ── */}
                   {!isGablePanel && (
-                    <div className="rounded-md border border-sky-200 bg-white p-2.5 space-y-2">
-                      <div className="text-xs font-semibold text-sky-800">단수별 그늘 정책</div>
+                    <>
+                      <div className="border-t border-sky-200 pt-0.5" />
+                      <div className="rounded-md border border-sky-200 bg-white p-2.5 space-y-2">
+                        <div>
+                          <div className="text-xs font-semibold text-sky-800">≡ 2단 이상 단수 정책</div>
+                          <div className="text-[10px] text-sky-600 mt-0.5">단수가 늘어날 때 그늘을 어떻게 처리할지</div>
+                        </div>
                       {(['construction_std', 'shadow_avoid'] as const).map(pol => (
                         <label key={pol} className="flex items-start gap-2 cursor-pointer">
                           <input
@@ -2430,7 +2438,7 @@ export default function MapTab() {
                       {/* 정책별 행간 미리보기 */}
                       {(() => {
                         const projLen = moduleLen * Math.cos(tiltAngle * Math.PI / 180)
-                        const D = baseSpacing
+                        const D = finalSpacing  // 작업 통로 포함 — 최종 적용값과 정확히 일치
                         const sg = Math.max(D - projLen, 0)
                         const rows = [1, 2, 3].map(n => {
                           const gh = n * projLen + (n - 1) * 0.02
@@ -2455,7 +2463,8 @@ export default function MapTab() {
                           </div>
                         )
                       })()}
-                    </div>
+                      </div>
+                    </>
                   )}
 
                   {/* 미니 단면도 */}
