@@ -537,7 +537,7 @@ export default function MapTab() {
           // WMS는 EPSG:4326 equirectangular — 타일 지리 높이를 정확히 계산
           const pxH = (origin.lat - originSouth.lat) * MPD_LAT / scale
           const bbox = tileToWgs84Bbox(wmsZ, tx18, ty18)
-          const src = `/api/vworld?type=wms&bbox=${encodeURIComponent(bbox)}&layers=lt_c_landinfobasemap&width=256&height=256&transparent=true`
+          const src = `/api/vworld?type=wms&bbox=${encodeURIComponent(bbox)}&layers=lp_pa_cbnd_bubun&width=256&height=256&transparent=true`
           cadTiles.push({ src, cx, cy, px, pxH })
         }
       }
