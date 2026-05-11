@@ -565,18 +565,21 @@ export default function MapTab() {
             const fetchTilePx = tilePixelScaleM(cLat, fetchZ) * 256 / scale
             // Mercator 타일 지리 높이 (equirectangular 기준) — cos 보정
             const fetchTilePxH = (origin.lat - originSouth.lat) * MPD_LAT / scale
+            // VWorld 위성 1순위 (한국 전역 커버리지 우수)
+            // ArcGIS는 한국 Z18에서 "Map data not yet available" 반환 사례 있어 폴백으로 처리
+            const vwUrl = `/api/vworld?type=satellite&z=${fetchZ}&x=${tx18}&y=${ty18}`
             const arcUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${fetchZ}/${ty18}/${tx18}`
             return await new Promise<SatTile | null>(resolve => {
               const img = new Image()
-              img.crossOrigin = 'anonymous'
               img.onload = () => resolve({ img, cx, cy, px: fetchTilePx, pxH: fetchTilePxH })
               img.onerror = () => {
-                const vwImg = new Image()
-                vwImg.onload = () => resolve({ img: vwImg, cx, cy, px: fetchTilePx, pxH: fetchTilePxH })
-                vwImg.onerror = () => resolve(null)
-                vwImg.src = `/api/vworld?type=satellite&z=${fetchZ}&x=${tx18}&y=${ty18}`
+                const arcImg = new Image()
+                arcImg.crossOrigin = 'anonymous'
+                arcImg.onload = () => resolve({ img: arcImg, cx, cy, px: fetchTilePx, pxH: fetchTilePxH })
+                arcImg.onerror = () => resolve(null)
+                arcImg.src = arcUrl
               }
-              img.src = arcUrl
+              img.src = vwUrl
             })
           } catch { return null }
         })())
