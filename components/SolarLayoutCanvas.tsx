@@ -25,6 +25,7 @@ interface Props {
   height?: number
   showLabels?: boolean
   activeZoneId?: string
+  geoOrigin?: { lat: number; lon: number }
 }
 
 // ── 좌표 변환 헬퍼 ─────────────────────────────────────────────────
@@ -109,6 +110,18 @@ function panelCenter(
   const cx = (corners[0].x + corners[2].x) / 2
   const cy = (corners[0].y + corners[2].y) / 2
   return toSvg({ x: cx, y: cy }, vb, svgW, svgH)
+}
+
+// ── 위성 타일 좌표 헬퍼 (Web Mercator / TMS) ───────────────────────
+function lonToTileX(lon: number, z: number) { return Math.floor((lon + 180) / 360 * (1 << z)) }
+function latToTileY(lat: number, z: number) {
+  const lr = lat * Math.PI / 180
+  return Math.floor((1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * (1 << z))
+}
+function tileToLon(tx: number, z: number) { return tx / (1 << z) * 360 - 180 }
+function tileToLat(ty: number, z: number) {
+  const n = Math.PI - 2 * Math.PI * ty / (1 << z)
+  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
 }
 
 // ── 단일 구역 레이어 ────────────────────────────────────────────────
@@ -234,6 +247,7 @@ export default function SolarLayoutCanvas({
   height = 460,
   showLabels = true,
   activeZoneId,
+  geoOrigin,
 }: Props) {
   const [hoveredPanel, setHoveredPanel] = useState<PanelPlacement | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -288,6 +302,45 @@ export default function SolarLayoutCanvas({
   }, [analysisItems])
 
   const vb = useMemo(() => buildViewBox(allPoints, svgW, drawH), [allPoints, svgW, drawH])
+
+  // 위성 + 도로 타일 (VWorld Hybrid WMTS) — geoOrigin 제공 시만
+  const bgTiles = useMemo(() => {
+    if (!geoOrigin || vb.rangeX <= 0 || vb.rangeY <= 0) return []
+    const latRad = geoOrigin.lat * Math.PI / 180
+    const mpdLon = 111319.9 * Math.cos(latRad)
+    // vb 전체 범위의 geo bounding box
+    const geoMinLat = geoOrigin.lat + vb.minY / 111319.9
+    const geoMaxLat = geoOrigin.lat + (vb.minY + vb.rangeY) / 111319.9
+    const geoMinLon = geoOrigin.lon + vb.minX / mpdLon
+    const geoMaxLon = geoOrigin.lon + (vb.minX + vb.rangeX) / mpdLon
+    // 자동 줌 레벨 — 넓은 쪽을 기준으로 ~5타일
+    const rangeM = Math.max(vb.rangeX, vb.rangeY)
+    const z = Math.max(13, Math.min(18, Math.round(
+      Math.log2(40075016.7 * Math.cos(latRad) * 5 / (256 * rangeM))
+    )))
+    const txMin = lonToTileX(geoMinLon, z)
+    const txMax = lonToTileX(geoMaxLon, z)
+    const tyMin = latToTileY(geoMaxLat, z) // 북쪽 = 작은 ty
+    const tyMax = latToTileY(geoMinLat, z)
+    const tiles: { key: string; url: string; x: number; y: number; w: number; h: number }[] = []
+    for (let tx = txMin; tx <= txMax; tx++) {
+      for (let ty = tyMin; ty <= tyMax; ty++) {
+        const lon0 = tileToLon(tx, z), lon1 = tileToLon(tx + 1, z)
+        const lat0 = tileToLat(ty, z), lat1 = tileToLat(ty + 1, z) // lat0 > lat1 (북>남)
+        const enu0 = { x: (lon0 - geoOrigin.lon) * mpdLon, y: (lat0 - geoOrigin.lat) * 111319.9 }
+        const enu1 = { x: (lon1 - geoOrigin.lon) * mpdLon, y: (lat1 - geoOrigin.lat) * 111319.9 }
+        const nw = toSvg(enu0, vb, svgW, drawH) // NW (북서) → SVG 상단-좌
+        const se = toSvg(enu1, vb, svgW, drawH) // SE (남동) → SVG 하단-우
+        tiles.push({
+          key: `${z}/${tx}/${ty}`,
+          url: `/api/vworld?type=hybridtile&z=${z}&x=${tx}&y=${ty}`,
+          x: nw.sx, y: nw.sy,
+          w: se.sx - nw.sx, h: se.sy - nw.sy,
+        })
+      }
+    }
+    return tiles
+  }, [geoOrigin, vb, svgW, drawH])
 
   // ── 줌/팬 핸들러 ─────────────────────────────────────────────────
 
@@ -420,7 +473,7 @@ export default function SolarLayoutCanvas({
         viewBox={`0 0 ${svgW} ${drawH}`}
         width={svgW}
         height={drawH}
-        className="bg-slate-900 rounded-lg border border-slate-700 select-none"
+        className={`${bgTiles.length > 0 ? 'bg-slate-600' : 'bg-slate-900'} rounded-lg border border-slate-700 select-none`}
         style={{ display: 'block', cursor: 'grab', touchAction: 'none' }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
@@ -433,6 +486,14 @@ export default function SolarLayoutCanvas({
       >
         {/* 줌/팬 변환 그룹 */}
         <g transform={`translate(${pan.x.toFixed(2)}, ${pan.y.toFixed(2)}) scale(${zoom.toFixed(4)})`}>
+          {/* 위성 + 도로 배경 타일 (VWorld Hybrid WMTS) */}
+          {bgTiles.map(t => (
+            <image key={t.key} href={t.url}
+              x={t.x} y={t.y} width={t.w} height={t.h}
+              preserveAspectRatio="none"
+            />
+          ))}
+
           {/* 구역별 레이어 */}
           {analysisItems.map((item, idx) => {
             const color = ZONE_COLORS[idx % ZONE_COLORS.length]

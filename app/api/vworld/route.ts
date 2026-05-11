@@ -155,6 +155,25 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    // VWorld WMTS 하이브리드 타일 (Hybrid 레이어 — 위성사진 위 도로·건물 투명 오버레이)
+    if (type === 'hybridtile') {
+      const z = searchParams.get('z')
+      const x = searchParams.get('x')
+      const y = searchParams.get('y')
+      if (!z || !x || !y) return NextResponse.json({ error: 'z,x,y required' }, { status: 400 })
+      const tileUrl = `https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Hybrid/${z}/${y}/${x}.png`
+      const tileRes = await vwFetch(tileUrl)
+      if (!tileRes.ok) return new Response(null, { status: 404 })
+      const buf = await tileRes.arrayBuffer()
+      const ct = tileRes.headers.get('content-type') ?? 'image/png'
+      return new Response(buf, {
+        headers: {
+          'Content-Type': ct,
+          'Cache-Control': 'public, max-age=86400',
+        },
+      })
+    }
+
     // VWorld WMTS 기본지도 타일 (Base 레이어 — 도로·건물)
     if (type === 'basetile') {
       const z = searchParams.get('z')

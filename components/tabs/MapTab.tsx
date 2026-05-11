@@ -296,6 +296,7 @@ export default function MapTab() {
   // ── 위성/지적도 오버레이 ──
   const [satTiles, setSatTiles] = useState<SatTile[]>([])
   const [cadImgTiles, setCadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
+  const [roadImgTiles, setRoadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
   const [satLoading, setSatLoading] = useState(false)
   const [satZoom, setSatZoom] = useState(0)
   const [mapMode, setMapMode] = useState<'satellite' | 'cadastral'>('satellite')
@@ -472,6 +473,7 @@ export default function MapTab() {
     setSatLoading(true)
     setSatTiles([])
     setCadImgTiles([])
+    setRoadImgTiles([])
     blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u))
     blobUrlsRef.current = []
 
@@ -522,6 +524,19 @@ export default function MapTab() {
     }
     const results = (await Promise.all(jobs)).filter(Boolean) as SatTile[]
     setSatTiles(results)
+
+    // VWorld Hybrid WMTS — 도로·건물 투명 오버레이 (위성사진 위 표시)
+    const hybridTiles: {src:string;cx:number;cy:number;px:number}[] = []
+    for (let dy2 = -R; dy2 <= R; dy2++) {
+      for (let dx2 = -R; dx2 <= R; dx2++) {
+        const tx2 = ctX + dx2, ty2 = ctY + dy2
+        const origin2 = tileOriginLonLat(tx2, ty2, z)
+        const { x: cx2, y: cy2 } = geoToCanvas(origin2.lon, origin2.lat, cLon, cLat, scale)
+        hybridTiles.push({ src: `/api/vworld?type=hybridtile&z=${z}&x=${tx2}&y=${ty2}`, cx: cx2, cy: cy2, px: tilePx })
+      }
+    }
+    setRoadImgTiles(hybridTiles)
+
     setSatLoading(false)
   }, [])
 
@@ -1989,6 +2004,20 @@ export default function MapTab() {
                 background: cadImgTiles.length > 0 ? 'transparent' : '#f8fafc',
               }}
             />
+            {/* VWorld Hybrid 도로 오버레이 (위성 모드) — canvas 위에 투명 레이어로 배치 */}
+            {roadImgTiles.map((t, i) => (
+              <img key={i} src={t.src} alt=""
+                style={{
+                  position: 'absolute',
+                  left: `${t.cx / CANVAS_W * 100}%`,
+                  top: `${t.cy / CANVAS_H * 100}%`,
+                  width: `${t.px / CANVAS_W * 100}%`,
+                  height: `${t.px / CANVAS_H * 100}%`,
+                  zIndex: 2,
+                  pointerEvents: 'none',
+                }}
+              />
+            ))}
             {/* Phase C-1: 지붕 그리기 SVG 오버레이 (svgPlotType==='roof' 시 항상 마운트) */}
             {svgPlotType === 'roof' && (
               <svg
@@ -2775,6 +2804,7 @@ export default function MapTab() {
                       height={Math.round(svgContainerWidth * 480 / 700)}
                       showLabels
                       activeZoneId={isMultiZoneResult(svgAnalysisResult) ? activeZoneId : undefined}
+                      geoOrigin={apiCoords ?? undefined}
                     />
                     {/* 단일 구역 — 검증 결과 */}
                     {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.validation && (
