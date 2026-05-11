@@ -552,6 +552,25 @@ export default function SolarLayoutCanvas({
             />
           ))}
 
+          {/* 구역 레이어 (경계선 + 패널) — cadBdTiles 위에 렌더 */}
+          {analysisItems.map((item, idx) => (
+            <ZoneLayer
+              key={`zone-${idx}`}
+              result={item}
+              vb={vb}
+              svgW={svgW}
+              svgH={drawH}
+              panelColor={ZONE_COLORS[idx % ZONE_COLORS.length]}
+              panelStroke={ZONE_STROKES[idx % ZONE_STROKES.length]}
+              zoneIndex={idx}
+              hoveredPanel={hoveredPanel}
+              onHover={setHoveredPanel}
+              showOriginal={true}
+              isActive={!activeZoneId || (item as ZoneLayoutResult).zoneLabel === activeZoneId + '구역'}
+              zoneLabel={isMulti ? (item as ZoneLayoutResult).zoneLabel : undefined}
+            />
+          ))}
+
           {/* 호버 툴팁 (줌 그룹 내부 — 패널과 같이 이동) */}
           {hoveredPanel && (() => {
             const ctr = panelCenter(hoveredPanel.corners, vb, svgW, drawH)

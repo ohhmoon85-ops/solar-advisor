@@ -29,6 +29,18 @@ const CORRIDOR_STROKE = '#eab308'
 
 type Tool = 'select' | 'add' | 'stack' | 'spacing'
 
+// ── 위성 타일 좌표 헬퍼 (Web Mercator / TMS) ───────────────────────
+function lonToTileX(lon: number, z: number) { return Math.floor((lon + 180) / 360 * (1 << z)) }
+function latToTileY(lat: number, z: number) {
+  const lr = lat * Math.PI / 180
+  return Math.floor((1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * (1 << z))
+}
+function tileToLon(tx: number, z: number) { return tx / (1 << z) * 360 - 180 }
+function tileToLat(ty: number, z: number) {
+  const n = Math.PI - 2 * Math.PI * ty / (1 << z)
+  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
+}
+
 // ── 좌표 변환 ───────────────────────────────────────────────────────
 
 interface ViewBox {
@@ -127,6 +139,7 @@ interface Props {
   onCountChange?: (count: number) => void
   /** 방위각 기반 그리드 재배치 옵션 — 없으면 회전 버튼 비활성 */
   reanalysisOptions?: { panelSpec: PanelSpec; rowStack?: number; validPolygons?: Polygon[]; landStandard?: boolean; rowSpacing?: number; spacingPolicy?: SpacingPolicy; constructionStdGap?: number }
+  geoOrigin?: { lat: number; lon: number }
 }
 
 export default function LayoutEditor({
@@ -139,6 +152,7 @@ export default function LayoutEditor({
   onCancel,
   onCountChange,
   reanalysisOptions,
+  geoOrigin,
 }: Props) {
   // ── 편집 상태 ─────────────────────────────────────────────────────
   const [state, dispatch] = useReducer(
@@ -242,6 +256,52 @@ export default function LayoutEditor({
   }, [result, backgroundZones])
 
   const vb = useMemo(() => buildViewBox(allPoints, SVG_W, SVG_H), [allPoints, SVG_W, SVG_H])
+  // ── 위성·도로 타일 (geoOrigin 제공 시) ──────────────────────────
+  const svgTileData = useMemo(() => {
+    if (!geoOrigin || vb.rangeX <= 0 || vb.rangeY <= 0) return []
+    const latRad = geoOrigin.lat * Math.PI / 180
+    const mpdLon = 111319.9 * Math.cos(latRad)
+    const geoMinLat = geoOrigin.lat + vb.minY / 111319.9
+    const geoMaxLat = geoOrigin.lat + (vb.minY + vb.rangeY) / 111319.9
+    const geoMinLon = geoOrigin.lon + vb.minX / mpdLon
+    const geoMaxLon = geoOrigin.lon + (vb.minX + vb.rangeX) / mpdLon
+    const rangeM = Math.max(vb.rangeX, vb.rangeY)
+    const displayMPerPx = rangeM / Math.min(SVG_W, SVG_H)
+    const z = Math.min(18, Math.max(15, Math.round(
+      Math.log2(40075016.7 * Math.cos(latRad) / (256 * displayMPerPx))
+    )))
+    const txMin = lonToTileX(geoMinLon, z)
+    const txMax = lonToTileX(geoMaxLon, z)
+    const tyMin = latToTileY(geoMaxLat, z)
+    const tyMax = latToTileY(geoMinLat, z)
+    const data: { key: string; z: number; tx: number; ty: number; x: number; y: number; w: number; h: number; bbox: string }[] = []
+    for (let tx = txMin; tx <= txMax; tx++) {
+      for (let ty = tyMin; ty <= tyMax; ty++) {
+        const lon0 = tileToLon(tx, z), lon1 = tileToLon(tx + 1, z)
+        const lat0 = tileToLat(ty, z), lat1 = tileToLat(ty + 1, z)
+        const enu0 = { x: (lon0 - geoOrigin.lon) * mpdLon, y: (lat0 - geoOrigin.lat) * 111319.9 }
+        const enu1 = { x: (lon1 - geoOrigin.lon) * mpdLon, y: (lat1 - geoOrigin.lat) * 111319.9 }
+        const nw = toSvg(enu0, vb, SVG_W, SVG_H)
+        const se = toSvg(enu1, vb, SVG_W, SVG_H)
+        const bbox = `${lat1.toFixed(6)},${lon0.toFixed(6)},${lat0.toFixed(6)},${lon1.toFixed(6)}`
+        data.push({ key: `${z}/${tx}/${ty}`, z, tx, ty, x: nw.sx, y: nw.sy, w: se.sx - nw.sx, h: se.sy - nw.sy, bbox })
+      }
+    }
+    return data
+  }, [geoOrigin, vb, SVG_W, SVG_H])
+
+  const bgTiles = useMemo(() =>
+    svgTileData.map(t => ({ ...t, url: `/api/vworld?type=satellite&z=${t.z}&x=${t.tx}&y=${t.ty}` }))
+  , [svgTileData])
+  const roadTiles = useMemo(() =>
+    svgTileData.map(t => ({ ...t, url: `/api/vworld?type=basetile&z=${t.z}&x=${t.tx}&y=${t.ty}` }))
+  , [svgTileData])
+  const topoTiles = useMemo(() =>
+    svgTileData.map(t => ({ ...t, url: `/api/vworld?type=wms&bbox=${encodeURIComponent(t.bbox)}&layers=lt_c_landinfobasemap&width=256&height=256&transparent=true` }))
+  , [svgTileData])
+  const cadBdTiles = useMemo(() =>
+    svgTileData.map(t => ({ ...t, url: `/api/vworld?type=wms&bbox=${encodeURIComponent(t.bbox)}&layers=lp_pa_cbnd_bubun&width=256&height=256&transparent=true` }))
+  , [svgTileData])
 
   const uniqueRows = useMemo(
     () => getUniqueRows(state.placements),
@@ -825,7 +885,7 @@ export default function LayoutEditor({
       {/* ── 본문: SVG + 사이드바 ── */}
       <div className="flex flex-1 min-h-0">
         {/* SVG 편집 캔버스 */}
-        <div className="relative flex-1 bg-slate-900">
+        <div className={svgTileData.length > 0 ? "relative flex-1 bg-stone-100" : "relative flex-1 bg-slate-900"}>
           <svg
             ref={svgRef}
             viewBox={`0 0 ${SVG_W} ${SVG_H}`}
@@ -838,6 +898,31 @@ export default function LayoutEditor({
             onMouseMove={handleSvgMouseMove}
             onMouseUp={handleSvgMouseUp}
           >
+            {/* 위성 배경 타일 */}
+            {svgTileData.length > 0 && <rect width={SVG_W} height={SVG_H} fill="white" />}
+            {topoTiles.map(t => (
+              <image key={"topo-" + t.key} href={t.url}
+                x={t.x} y={t.y} width={t.w} height={t.h}
+                preserveAspectRatio="none" opacity={0.9} />
+            ))}
+            {bgTiles.map(t => (
+              <image key={"sat-" + t.key} href={t.url}
+                x={t.x} y={t.y} width={t.w} height={t.h}
+                preserveAspectRatio="none"
+                style={{ mixBlendMode: "multiply" }} />
+            ))}
+            {roadTiles.map(t => (
+              <image key={"road-" + t.key} href={t.url}
+                x={t.x} y={t.y} width={t.w} height={t.h}
+                preserveAspectRatio="none"
+                style={{ mixBlendMode: "multiply" }} opacity={0.55} />
+            ))}
+            {cadBdTiles.map(t => (
+              <image key={"cad-" + t.key} href={t.url}
+                x={t.x} y={t.y} width={t.w} height={t.h}
+                preserveAspectRatio="none" opacity={0.85} />
+            ))}
+
             {/* 비활성 구역 배경 — 편집 불가, 흐리게 표시 */}
             {backgroundZones && backgroundZones.map((bz, bgIdx) => {
               const poly = bz.safeZone.safeZonePolygon
@@ -900,6 +985,14 @@ export default function LayoutEditor({
                 pointerEvents="none"
               />
             )}
+
+            {/* 도로 오버레이 — 지번경계·도로를 폴리곤 fill 위에 표시 (패널 배치 참조용) */}
+            {svgTileData.length > 0 && topoTiles.map(t => (
+              <image key={'overlay-' + t.key} href={t.url}
+                x={t.x} y={t.y} width={t.w} height={t.h}
+                preserveAspectRatio='none' opacity={0.45}
+                style={{ mixBlendMode: 'multiply' }} />
+            ))}
 
             {/* 통로 시각화 */}
             {renderCorridors(state.corridors)}

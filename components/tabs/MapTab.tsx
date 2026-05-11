@@ -2798,6 +2798,7 @@ export default function MapTab() {
                     }
                     width={svgContainerWidth}
                     height={Math.round(svgContainerWidth * 520 / 920)}
+                    geoOrigin={canvasCenter ?? undefined}
                     onCountChange={(count) => {
                       setEditingCount(count)
                       if (isMultiZoneResult(svgAnalysisResult)) {
