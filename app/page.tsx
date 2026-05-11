@@ -230,19 +230,6 @@ export default function Home() {
 
       {/* Main content */}
       <main className="flex-1 max-w-screen-2xl mx-auto w-full px-3 sm:px-4 py-4 pb-20 sm:pb-6">
-        {/* Demo guide */}
-        <div className="mb-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-3 text-white">
-          <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm">
-            <span className="font-bold flex-shrink-0">📍 5분 데모:</span>
-            {['① 지도→배치도', '② 수익성 계산', '③ 조례 확인', '④ 서류목록 PDF', '⑤ 계약 전환'].map((step, i) => (
-              <span key={i} className="flex items-center gap-1">
-                <span className="bg-white/20 px-2 py-0.5 rounded-full whitespace-nowrap">{step}</span>
-                {i < 4 && <span className="opacity-60 hidden sm:inline">→</span>}
-              </span>
-            ))}
-          </div>
-        </div>
-
         {/* Tab content — 탭 전환 시 언마운트 방지: CSS hidden으로 상태 유지 */}
         <div>
           <div className={activeTab !== 'map' ? 'hidden' : ''}><MapTab /></div>

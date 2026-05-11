@@ -229,9 +229,13 @@ function fillGridGlobal(
   // 그리드 원점: 최남단 행의 최서쪽 EW 투영
   const anchorUp = rowGroups[0].meanUp
   const anchorEw = Math.min(...rowGroups[0].ewList)
-  const maxRi = rowGroups.length - 1
-  const allEw = projs.map(p => p.ew)
-  const maxCi = Math.round((Math.max(...allEw) - anchorEw) / colPitch)
+  // 양방향 범위: 부지 꼭짓점을 EW/UP 축에 투영 (음수 인덱스 포함, Phase K-2-fix)
+  const bEws = boundary.map(bp => (bp.x - ref.centerX) * ewUx + (bp.y - ref.centerY) * ewUy)
+  const bUps = boundary.map(bp => (bp.x - ref.centerX) * upUx + (bp.y - ref.centerY) * upUy)
+  const riMin = Math.floor((Math.min(...bUps) - anchorUp) / rowPitch) - 1
+  const riMax = Math.ceil((Math.max(...bUps) - anchorUp) / rowPitch) + 1
+  const ciMin = Math.floor((Math.min(...bEws) - anchorEw) / colPitch) - 1
+  const ciMax = Math.ceil((Math.max(...bEws) - anchorEw) / colPitch) + 1
 
   // AABB 겹침 검사 헬퍼
   const tol = Math.min(ewLen, upLen) * 0.05
@@ -249,8 +253,8 @@ function fillGridGlobal(
   const fillBBoxes: BBox[] = []
   let nextId = startId
 
-  for (let ri = 0; ri <= maxRi; ri++) {
-    for (let ci = 0; ci <= maxCi; ci++) {
+  for (let ri = riMin; ri <= riMax; ri++) {
+    for (let ci = ciMin; ci <= ciMax; ci++) {
       const ewPos = anchorEw + ci * colPitch
       const upPos = anchorUp + ri * rowPitch
       const cx = ref.centerX + ewPos * ewUx + upPos * upUx

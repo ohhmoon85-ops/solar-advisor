@@ -342,6 +342,9 @@ export default function MapTab() {
   const [svgPanelOrientation, setSvgPanelOrientation] = useState<'portrait' | 'landscape'>('portrait')
   // 분석 실행마다 증가 → LayoutEditor key로 사용해 이전 편집 상태 완전 초기화
   const [analysisKey, setAnalysisKey] = useState(0)
+  // 정밀 분석 버튼 통합 — 입력 변경 감지
+  const analysisHasRunRef = useRef(false)
+  const [analysisStale, setAnalysisStale] = useState(false)
   // 다구역 편집 시 선택된 구역 ('A', 'B', ...)
   const [activeZoneId, setActiveZoneId] = useState<string>('A')
   // Phase C-1: 지붕 그리기 마우스 미리보기 위치 (canvas 내부 픽셀 좌표)
@@ -838,6 +841,14 @@ export default function MapTab() {
       window.removeEventListener('resize', measure)
     }
   }, [showSvgCanvas, svgAnalysisResult])
+
+  // 주요 분석 입력 변경 시 "재분석 필요" 표시 (분석을 한 번이라도 실행한 이후만)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (analysisHasRunRef.current) setAnalysisStale(true)
+  }, [tiltAngle, autoMargin, workPathM, rowStack, svgPanelType, svgPanelOrientation,
+      svgAzimuthDeg, userRowSpacing, spacingPolicy, constructionStdGap, userFirstStackGap,
+      svgZoneMode, svgPlotType])
 
   // ── KIER API ──
   const fetchKierData = useCallback(async (lat: number, lon: number, tilt: number) => {
@@ -1454,10 +1465,27 @@ export default function MapTab() {
       console.error('SVG 분석 오류:', err)
     } finally {
       setSvgAnalyzing(false)
+      analysisHasRunRef.current = true
+      setAnalysisStale(false)
     }
   }, [apiCoords, parcels, roofPolygons, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
       autoSolarAngle, moduleIndex, tiltAngle, autoLandAngle, autoMargin,
       workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap, userFirstStackGap, userBoundaryMargin, userRowSpacing])
+
+  // 통합 버튼 라벨·간이 연동용 — 현재 설정 기준 최종 1단 행간거리
+  const displayFinalSpacing = (() => {
+    const solarAng = autoSolarAngle ?? getSolarAngleByLocation(effectiveLatitude)
+    const moduleLen = MODULES[moduleIndex].h
+    const { rowSpacing: recommended } = calculateRowSpacing(solarAng, tiltAngle, autoLandAngle, moduleLen)
+    const isGablePanel = installType === '건물지붕형' && roofType === '박공'
+    const workDisplay = isGablePanel ? 0 : workPathM
+    const projLen = moduleLen * Math.cos(tiltAngle * Math.PI / 180)
+    const base = Math.round(((userRowSpacing ?? recommended) + autoMargin) * 100) / 100
+    const effective = Math.round((base + workDisplay) * 100) / 100
+    return (!isGablePanel && spacingPolicy === 'construction_std' && userFirstStackGap != null)
+      ? Math.round((projLen + userFirstStackGap) * 100) / 100
+      : effective
+  })()
 
   const step1Done = addresses.some(a => a.trim().length > 0)
   const step2Done = installType !== ''
@@ -2548,38 +2576,26 @@ export default function MapTab() {
                     <span className="text-[10px] text-gray-500">간이 분석에도 동시 적용</span>
                   </label>
 
-                  {/* 자동 적용 버튼 */}
-                  <button
-                    onClick={() => {
-                      if (applyToQuick) setSpacingValue(finalSpacing)
-                      runSVGAnalysis({ rowSpacing: baseSpacing })
-                      if (applyToQuick) {
-                        showToast('✓ 간이·정밀 모두 반영됨')
-                      } else if (showSvgCanvas) {
-                        showToast('✓ 자동 계산값으로 재실행')
-                      } else {
-                        showToast('다음 정밀 분석 시 반영됩니다')
-                      }
-                    }}
-                    className="w-full py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
-                  >
-                    ✓ 이 설정으로 적용 — 정밀 분석 ({finalSpacing.toFixed(2)}m)
-                  </button>
-                  <p className="text-[10px] text-emerald-700 text-center -mt-1 italic">
-                    ↑ 입력값(경사·마진·통로) 변경 후 사용
-                  </p>
                 </div>
               )
             })()}
 
-            {/* 실행 버튼 */}
-            <div className="space-y-1">
+            {/* 정밀 분석 실행 버튼 (통합) */}
+            <div className="space-y-1.5">
+              {analysisStale && (
+                <div className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1 text-center">
+                  ⚠ 설정 변경됨 — 재분석 필요
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
-                  onClick={() => runSVGAnalysis()}
+                  onClick={() => {
+                    if (applyToQuick) setSpacingValue(displayFinalSpacing)
+                    runSVGAnalysis()
+                  }}
                   disabled={svgAnalyzing}
                   className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors">
-                  {svgAnalyzing ? '분석 중...' : '▶ 정밀 분석 실행'}
+                  {svgAnalyzing ? '분석 중...' : `▶ 정밀 분석 실행 (${displayFinalSpacing.toFixed(2)}m 적용)`}
                 </button>
                 {svgAnalysisResult && (
                   <button
@@ -2589,9 +2605,6 @@ export default function MapTab() {
                   </button>
                 )}
               </div>
-              <p className="text-[10px] text-gray-500 text-center italic">
-                현재 설정 그대로 분석 (자동 계산값 자동 적용)
-              </p>
             </div>
 
             {/* 결과 표시 */}
