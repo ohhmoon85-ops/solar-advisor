@@ -64,7 +64,7 @@ const BOUNDARY_MARGIN: Record<string, number> = {
 
 interface Point { x: number; y: number }
 interface PanelRect { x: number; y: number; w: number; h: number }
-interface SatTile { img: HTMLImageElement; cx: number; cy: number; px: number }
+interface SatTile { img: HTMLImageElement; cx: number; cy: number; px: number; pxH: number }
 
 // 복수 필지 데이터
 interface ParcelInfo {
@@ -295,9 +295,9 @@ export default function MapTab() {
 
   // ── 위성/지적도 오버레이 ──
   const [satTiles, setSatTiles] = useState<SatTile[]>([])
-  const [cadImgTiles, setCadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
-  const [roadImgTiles, setRoadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
-  const [baseTiles, setBaseTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
+  const [cadImgTiles, setCadImgTiles] = useState<{src:string;cx:number;cy:number;px:number;pxH:number}[]>([])
+  const [roadImgTiles, setRoadImgTiles] = useState<{src:string;cx:number;cy:number;px:number;pxH:number}[]>([])
+  const [baseTiles, setBaseTiles] = useState<{src:string;cx:number;cy:number;px:number;pxH:number}[]>([])
   const [satLoading, setSatLoading] = useState(false)
   const [satFailed, setSatFailed] = useState(false)
   const [satZoom, setSatZoom] = useState(0)
@@ -312,6 +312,8 @@ export default function MapTab() {
   const [parcelLabel, setParcelLabel] = useState('')
   const [apiSource, setApiSource] = useState<'none' | 'api'>('none')
   const [apiCoords, setApiCoords] = useState<{ lat: number; lon: number } | null>(null)
+  // 지도 캔버스 좌표계 원점 (전체 필지 정점 무게중심) — apiCoords(첫 필지 coord API)와 구분
+  const [canvasCenter, setCanvasCenter] = useState<{ lat: number; lon: number } | null>(null)
   const [autoAzimuth, setAutoAzimuth] = useState<number | null>(null)
 
   // ── KIER ──
@@ -402,13 +404,13 @@ export default function MapTab() {
 
   // canvas px → 경위도 변환 (geoToCanvas 역함수)
   const canvasPxToGeo = useCallback((cx: number, cy: number) => {
-    if (!apiCoords || pixelScale <= 0) return null
-    const { lat, lon } = apiCoords
+    if (!canvasCenter || pixelScale <= 0) return null
+    const { lat, lon } = canvasCenter
     return {
       lng: lon + (cx - CANVAS_W / 2) * pixelScale / mpdLon(lat),
       lat: lat + (CANVAS_H / 2 - cy) * pixelScale / MPD_LAT,
     }
-  }, [apiCoords, pixelScale])
+  }, [canvasCenter, pixelScale])
 
   const handleDrawingSvgClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (!drawingMode) return
@@ -489,8 +491,9 @@ export default function MapTab() {
     const R = 2
 
     // VWorld 기본지도 타일 헬퍼 (두 모드 공용)
+    // pxH: Mercator 타일 지리 높이를 equirectangular 캔버스 픽셀로 변환 (cos 보정)
     const buildBaseTiles = () => {
-      const tiles: {src:string;cx:number;cy:number;px:number}[] = []
+      const tiles: {src:string;cx:number;cy:number;px:number;pxH:number}[] = []
       const seen = new Set<string>()
       for (let dy = -R; dy <= R; dy++) {
         for (let dx = -R; dx <= R; dx++) {
@@ -501,9 +504,11 @@ export default function MapTab() {
           if (seen.has(key)) continue
           seen.add(key)
           const origin = tileOriginLonLat(tx18, ty18, fetchZ)
+          const originSouth = tileOriginLonLat(tx18, ty18 + 1, fetchZ)
           const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
           const px = tilePixelScaleM(cLat, fetchZ) * 256 / scale
-          tiles.push({ src: `/api/vworld?type=basetile&z=${fetchZ}&x=${tx18}&y=${ty18}`, cx, cy, px })
+          const pxH = (origin.lat - originSouth.lat) * MPD_LAT / scale
+          tiles.push({ src: `/api/vworld?type=basetile&z=${fetchZ}&x=${tx18}&y=${ty18}`, cx, cy, px, pxH })
         }
       }
       return tiles
@@ -515,7 +520,7 @@ export default function MapTab() {
 
       const wmsZ = Math.min(z, 18)
       const wmsRatio = Math.pow(2, z - wmsZ)
-      const cadTiles: {src:string;cx:number;cy:number;px:number}[] = []
+      const cadTiles: {src:string;cx:number;cy:number;px:number;pxH:number}[] = []
       const seenWms = new Set<string>()
       for (let dy = -R; dy <= R; dy++) {
         for (let dx = -R; dx <= R; dx++) {
@@ -526,11 +531,14 @@ export default function MapTab() {
           if (seenWms.has(key)) continue
           seenWms.add(key)
           const origin = tileOriginLonLat(tx18, ty18, wmsZ)
+          const originSouth = tileOriginLonLat(tx18, ty18 + 1, wmsZ)
           const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
           const px = tilePixelScaleM(cLat, wmsZ) * 256 / scale
+          // WMS는 EPSG:4326 equirectangular — 타일 지리 높이를 정확히 계산
+          const pxH = (origin.lat - originSouth.lat) * MPD_LAT / scale
           const bbox = tileToWgs84Bbox(wmsZ, tx18, ty18)
           const src = `/api/vworld?type=wms&bbox=${encodeURIComponent(bbox)}&layers=lt_c_landinfobasemap&width=256&height=256&transparent=true`
-          cadTiles.push({ src, cx, cy, px })
+          cadTiles.push({ src, cx, cy, px, pxH })
         }
       }
       setCadImgTiles(cadTiles)
@@ -552,16 +560,19 @@ export default function MapTab() {
         jobs.push((async () => {
           try {
             const origin = tileOriginLonLat(tx18, ty18, fetchZ)
+            const originSouth = tileOriginLonLat(tx18, ty18 + 1, fetchZ)
             const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
             const fetchTilePx = tilePixelScaleM(cLat, fetchZ) * 256 / scale
+            // Mercator 타일 지리 높이 (equirectangular 기준) — cos 보정
+            const fetchTilePxH = (origin.lat - originSouth.lat) * MPD_LAT / scale
             const arcUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${fetchZ}/${ty18}/${tx18}`
             return await new Promise<SatTile | null>(resolve => {
               const img = new Image()
               img.crossOrigin = 'anonymous'
-              img.onload = () => resolve({ img, cx, cy, px: fetchTilePx })
+              img.onload = () => resolve({ img, cx, cy, px: fetchTilePx, pxH: fetchTilePxH })
               img.onerror = () => {
                 const vwImg = new Image()
-                vwImg.onload = () => resolve({ img: vwImg, cx, cy, px: fetchTilePx })
+                vwImg.onload = () => resolve({ img: vwImg, cx, cy, px: fetchTilePx, pxH: fetchTilePxH })
                 vwImg.onerror = () => resolve(null)
                 vwImg.src = `/api/vworld?type=satellite&z=${fetchZ}&x=${tx18}&y=${ty18}`
               }
@@ -592,7 +603,7 @@ export default function MapTab() {
 
     // ❶ 배경: 위성사진 / 기본 그리드
     if (satTiles.length > 0) {
-      satTiles.forEach(t => ctx.drawImage(t.img, t.cx, t.cy, t.px, t.px))
+      satTiles.forEach(t => ctx.drawImage(t.img, t.cx, t.cy, t.px, t.pxH))
       ctx.strokeStyle = 'rgba(255,255,255,0.12)'
       ctx.lineWidth = 0.5
       for (let x = 0; x < CANVAS_W; x += 40) {
@@ -1069,6 +1080,7 @@ export default function MapTab() {
       setAutoAzimuth(calcAutoAzimuth(first.canvasPoints))
       setLocationCoords({ lat: first.lat, lon: first.lon })
       setApiCoords({ lat: first.lat, lon: first.lon })
+      setCanvasCenter({ lat: cLat, lon: cLon })
       setParcelLabel(converted.map(p => p.label).join(' · '))
 
       // 패널 계산은 recalculatePanels useEffect가 parcels/pixelScale 변경 시 자동 처리
@@ -1095,7 +1107,7 @@ export default function MapTab() {
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
     setApiSource('none'); setParcelLabel(''); setSearchError('')
     setPixelScale(0.1); setSatTiles([]); setSatZoom(0); setSatFailed(false); setBaseTiles([])
-    setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
+    setKierResult(null); setApiCoords(null); setCanvasCenter(null); setAutoAzimuth(null)
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
     // 복수 필지 초기화
     setParcels([])
@@ -2037,7 +2049,7 @@ export default function MapTab() {
                   left: `${t.cx / CANVAS_W * 100}%`,
                   top: `${t.cy / CANVAS_H * 100}%`,
                   width: `${t.px / CANVAS_W * 100}%`,
-                  height: `${t.px / CANVAS_H * 100}%`,
+                  height: `${t.pxH / CANVAS_H * 100}%`,
                   zIndex: 0,
                   pointerEvents: 'none',
                 }}
@@ -2051,7 +2063,7 @@ export default function MapTab() {
                   left: `${t.cx / CANVAS_W * 100}%`,
                   top: `${t.cy / CANVAS_H * 100}%`,
                   width: `${t.px / CANVAS_W * 100}%`,
-                  height: `${t.px / CANVAS_H * 100}%`,
+                  height: `${t.pxH / CANVAS_H * 100}%`,
                   zIndex: 1,
                   pointerEvents: 'none',
                 }}
@@ -2074,7 +2086,7 @@ export default function MapTab() {
                   left: `${t.cx / CANVAS_W * 100}%`,
                   top: `${t.cy / CANVAS_H * 100}%`,
                   width: `${t.px / CANVAS_W * 100}%`,
-                  height: `${t.px / CANVAS_H * 100}%`,
+                  height: `${t.pxH / CANVAS_H * 100}%`,
                   zIndex: 3,
                   pointerEvents: 'none',
                   mixBlendMode: 'multiply',
@@ -2113,9 +2125,9 @@ export default function MapTab() {
 
                 {/* 완성된 지붕 폴리곤들 */}
                 {roofPolygons.map(poly => {
-                  if (!apiCoords) return null
+                  if (!canvasCenter) return null
                   const svgPts = poly.points.map(p =>
-                    geoToCanvas(p.lng, p.lat, apiCoords.lon, apiCoords.lat, pixelScale)
+                    geoToCanvas(p.lng, p.lat, canvasCenter.lon, canvasCenter.lat, pixelScale)
                   )
                   if (svgPts.length < 2) return null
                   const cx = svgPts.reduce((s, p) => s + p.x, 0) / svgPts.length
@@ -2136,9 +2148,9 @@ export default function MapTab() {
 
                 {/* 현재 그리는 중인 폴리곤 */}
                 {(() => {
-                  if (!apiCoords || currentDrawingPoints.length === 0) return null
+                  if (!canvasCenter || currentDrawingPoints.length === 0) return null
                   const pts = currentDrawingPoints.map(p =>
-                    geoToCanvas(p.lng, p.lat, apiCoords.lon, apiCoords.lat, pixelScale)
+                    geoToCanvas(p.lng, p.lat, canvasCenter.lon, canvasCenter.lat, pixelScale)
                   )
                   return (
                     <g>
