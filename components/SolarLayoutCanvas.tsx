@@ -314,14 +314,17 @@ export default function SolarLayoutCanvas({
     const geoMinLon = geoOrigin.lon + vb.minX / mpdLon
     const geoMaxLon = geoOrigin.lon + (vb.minX + vb.rangeX) / mpdLon
     const rangeM = Math.max(vb.rangeX, vb.rangeY)
-    const z = Math.max(13, Math.min(18, Math.round(
-      Math.log2(40075016.7 * Math.cos(latRad) * 5 / (256 * rangeM))
+    // 소형 필지(~60m)에서 z=14 산출 -> 타일 8000% 스트레칭 문제 수정.
+    // SVG 표시 밀도(m/px) 역산으로 z=17-18 확보 (한국 소형 필지 최적).
+    const displayMPerPx = rangeM / Math.min(svgW, drawH)
+    const z = Math.min(18, Math.max(15, Math.round(
+      Math.log2(40075016.7 * Math.cos(latRad) / (256 * displayMPerPx))
     )))
     const txMin = lonToTileX(geoMinLon, z)
     const txMax = lonToTileX(geoMaxLon, z)
     const tyMin = latToTileY(geoMaxLat, z) // 북쪽 = 작은 ty
     const tyMax = latToTileY(geoMinLat, z)
-    const data: { key: string; z: number; tx: number; ty: number; x: number; y: number; w: number; h: number }[] = []
+    const data: { key: string; z: number; tx: number; ty: number; x: number; y: number; w: number; h: number; bbox: string }[] = []
     for (let tx = txMin; tx <= txMax; tx++) {
       for (let ty = tyMin; ty <= tyMax; ty++) {
         const lon0 = tileToLon(tx, z), lon1 = tileToLon(tx + 1, z)
@@ -330,7 +333,9 @@ export default function SolarLayoutCanvas({
         const enu1 = { x: (lon1 - geoOrigin.lon) * mpdLon, y: (lat1 - geoOrigin.lat) * 111319.9 }
         const nw = toSvg(enu0, vb, svgW, drawH) // NW → SVG 상단-좌
         const se = toSvg(enu1, vb, svgW, drawH) // SE → SVG 하단-우
-        data.push({ key: `${z}/${tx}/${ty}`, z, tx, ty, x: nw.sx, y: nw.sy, w: se.sx - nw.sx, h: se.sy - nw.sy })
+        // WMS bbox: latS,west,latN,east (WMS 1.3.0 EPSG:4326)
+        const bbox = `${lat1.toFixed(6)},${lon0.toFixed(6)},${lat0.toFixed(6)},${lon1.toFixed(6)}`
+        data.push({ key: `${z}/${tx}/${ty}`, z, tx, ty, x: nw.sx, y: nw.sy, w: se.sx - nw.sx, h: se.sy - nw.sy, bbox })
       }
     }
     return data
@@ -341,10 +346,27 @@ export default function SolarLayoutCanvas({
     svgTileData.map(t => ({ ...t, url: `/api/vworld?type=satellite&z=${t.z}&x=${t.tx}&y=${t.ty}` }))
   , [svgTileData])
 
-  // Layer 2: 도로 오버레이 타일 (VWorld Base WMTS, mix-blend-mode: multiply)
-  // 흰 배경 × 위성 = 위성 투과, 검은 도로 × 위성 = 도로 강조 → 투명 효과
+  // Layer 2: 도로 오버레이 타일 (VWorld Base WMTS, multiply -- 도로 라벨)
   const roadTiles = useMemo(() =>
     svgTileData.map(t => ({ ...t, url: `/api/vworld?type=basetile&z=${t.z}&x=${t.tx}&y=${t.ty}` }))
+  , [svgTileData])
+
+  // Layer 3: VWorld WMS 지적 경계 오버레이 (lp_pa_cbnd_bubun -- 투명 PNG)
+  // 지번 경계선 참조 (위성/도로 위에 표시)
+  const cadBdTiles = useMemo(() =>
+    svgTileData.map(t => ({
+      ...t,
+      url: `/api/vworld?type=wms&bbox=${encodeURIComponent(t.bbox)}&layers=lp_pa_cbnd_bubun&width=256&height=256&transparent=true`,
+    }))
+  , [svgTileData])
+
+  // Layer 4: VWorld WMS 지형도 (lt_c_landinfobasemap -- 도로+지번)
+  // 위성 없을 때도 도로 확인 가능한 지도 배경
+  const topoTiles = useMemo(() =>
+    svgTileData.map(t => ({
+      ...t,
+      url: `/api/vworld?type=wms&bbox=${encodeURIComponent(t.bbox)}&layers=lt_c_landinfobasemap&width=256&height=256&transparent=true`,
+    }))
   , [svgTileData])
 
   // ── 줌/팬 핸들러 ─────────────────────────────────────────────────
@@ -478,7 +500,7 @@ export default function SolarLayoutCanvas({
         viewBox={`0 0 ${svgW} ${drawH}`}
         width={svgW}
         height={drawH}
-        className={`${bgTiles.length > 0 ? 'bg-slate-600' : 'bg-slate-900'} rounded-lg border border-slate-700 select-none`}
+        className={`${svgTileData.length > 0 ? 'bg-stone-100' : 'bg-slate-900'} rounded-lg border border-slate-700 select-none`}
         style={{ display: 'block', cursor: 'grab', touchAction: 'none' }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
@@ -491,49 +513,44 @@ export default function SolarLayoutCanvas({
       >
         {/* 줌/팬 변환 그룹 */}
         <g transform={`translate(${pan.x.toFixed(2)}, ${pan.y.toFixed(2)}) scale(${zoom.toFixed(4)})`}>
-          {/* Layer 1: 위성 배경 타일 (VWorld Satellite WMTS) */}
-          {bgTiles.map(t => (
-            <image key={t.key} href={t.url}
+          {/* Layer 0: VWorld 지형도 (lt_c_landinfobasemap) — 도로+지번 기본 배경 */}
+          {/* 위성 없을 때도 도로 위치 확인 가능; 위성 있을 때는 multiply로 합성됨 */}
+          {topoTiles.map(t => (
+            <image key={"topo-" + t.key} href={t.url}
               x={t.x} y={t.y} width={t.w} height={t.h}
               preserveAspectRatio="none"
+              opacity={0.9}
             />
           ))}
 
-          {/* Layer 2: 도로 오버레이 타일 (VWorld Base WMTS, multiply — 도로·지번 라벨) */}
-          {roadTiles.map(t => (
-            <image key={"road-" + t.key} href={t.url}
+          {/* Layer 1: 위성 타일 (multiply — 지형도 위에 위성 합성) */}
+          {bgTiles.map(t => (
+            <image key={t.key} href={t.url}
               x={t.x} y={t.y} width={t.w} height={t.h}
               preserveAspectRatio="none"
               style={{ mixBlendMode: "multiply" }}
             />
           ))}
 
-          {/* 구역별 레이어 */}
-          {analysisItems.map((item, idx) => {
-            const color = ZONE_COLORS[idx % ZONE_COLORS.length]
-            const stroke = ZONE_STROKES[idx % ZONE_STROKES.length]
-            const zoneLabel = isMulti
-              ? (item as ZoneLayoutResult).zoneLabel
-              : undefined
+          {/* Layer 2: VWorld Base 도로 오버레이 (multiply, opacity 0.55) */}
+          {roadTiles.map(t => (
+            <image key={"road-" + t.key} href={t.url}
+              x={t.x} y={t.y} width={t.w} height={t.h}
+              preserveAspectRatio="none"
+              style={{ mixBlendMode: "multiply" }}
+              opacity={0.55}
+            />
+          ))}
 
-            return (
-              <ZoneLayer
-                key={idx}
-                result={item}
-                vb={vb}
-                svgW={svgW}
-                svgH={drawH}
-                panelColor={color}
-                panelStroke={stroke}
-                zoneIndex={idx}
-                hoveredPanel={hoveredPanel}
-                onHover={setHoveredPanel}
-                showOriginal={true}
-                isActive={!activeZoneId || zoneLabel === activeZoneId + '구역'}
-                zoneLabel={zoneLabel}
-              />
-            )
-          })}
+          {/* Layer 3: VWorld WMS 지번 경계선 (lp_pa_cbnd_bubun — 투명 PNG) */}
+          {/* 실제 지번 경계·도로 위치 참조 — 도로 위 패널 수동 삭제 시 활용 */}
+          {cadBdTiles.map(t => (
+            <image key={"cad-" + t.key} href={t.url}
+              x={t.x} y={t.y} width={t.w} height={t.h}
+              preserveAspectRatio="none"
+              opacity={0.85}
+            />
+          ))}
 
           {/* 호버 툴팁 (줌 그룹 내부 — 패널과 같이 이동) */}
           {hoveredPanel && (() => {
