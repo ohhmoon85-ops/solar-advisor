@@ -303,17 +303,16 @@ export default function SolarLayoutCanvas({
 
   const vb = useMemo(() => buildViewBox(allPoints, svgW, drawH), [allPoints, svgW, drawH])
 
-  // 위성 + 도로 타일 (VWorld Hybrid WMTS) — geoOrigin 제공 시만
-  const bgTiles = useMemo(() => {
+  // 위성 + 도로 타일 공통 지오메트리 (geoOrigin 제공 시만)
+  // SVG viewBox는 equirectangular → tileToLat/tileToLon으로 정확한 지리 높이 계산
+  const svgTileData = useMemo(() => {
     if (!geoOrigin || vb.rangeX <= 0 || vb.rangeY <= 0) return []
     const latRad = geoOrigin.lat * Math.PI / 180
     const mpdLon = 111319.9 * Math.cos(latRad)
-    // vb 전체 범위의 geo bounding box
     const geoMinLat = geoOrigin.lat + vb.minY / 111319.9
     const geoMaxLat = geoOrigin.lat + (vb.minY + vb.rangeY) / 111319.9
     const geoMinLon = geoOrigin.lon + vb.minX / mpdLon
     const geoMaxLon = geoOrigin.lon + (vb.minX + vb.rangeX) / mpdLon
-    // 자동 줌 레벨 — 넓은 쪽을 기준으로 ~5타일
     const rangeM = Math.max(vb.rangeX, vb.rangeY)
     const z = Math.max(13, Math.min(18, Math.round(
       Math.log2(40075016.7 * Math.cos(latRad) * 5 / (256 * rangeM))
@@ -322,25 +321,31 @@ export default function SolarLayoutCanvas({
     const txMax = lonToTileX(geoMaxLon, z)
     const tyMin = latToTileY(geoMaxLat, z) // 북쪽 = 작은 ty
     const tyMax = latToTileY(geoMinLat, z)
-    const tiles: { key: string; url: string; x: number; y: number; w: number; h: number }[] = []
+    const data: { key: string; z: number; tx: number; ty: number; x: number; y: number; w: number; h: number }[] = []
     for (let tx = txMin; tx <= txMax; tx++) {
       for (let ty = tyMin; ty <= tyMax; ty++) {
         const lon0 = tileToLon(tx, z), lon1 = tileToLon(tx + 1, z)
         const lat0 = tileToLat(ty, z), lat1 = tileToLat(ty + 1, z) // lat0 > lat1 (북>남)
         const enu0 = { x: (lon0 - geoOrigin.lon) * mpdLon, y: (lat0 - geoOrigin.lat) * 111319.9 }
         const enu1 = { x: (lon1 - geoOrigin.lon) * mpdLon, y: (lat1 - geoOrigin.lat) * 111319.9 }
-        const nw = toSvg(enu0, vb, svgW, drawH) // NW (북서) → SVG 상단-좌
-        const se = toSvg(enu1, vb, svgW, drawH) // SE (남동) → SVG 하단-우
-        tiles.push({
-          key: `${z}/${tx}/${ty}`,
-          url: `/api/vworld?type=hybridtile&z=${z}&x=${tx}&y=${ty}`,
-          x: nw.sx, y: nw.sy,
-          w: se.sx - nw.sx, h: se.sy - nw.sy,
-        })
+        const nw = toSvg(enu0, vb, svgW, drawH) // NW → SVG 상단-좌
+        const se = toSvg(enu1, vb, svgW, drawH) // SE → SVG 하단-우
+        data.push({ key: `${z}/${tx}/${ty}`, z, tx, ty, x: nw.sx, y: nw.sy, w: se.sx - nw.sx, h: se.sy - nw.sy })
       }
     }
-    return tiles
+    return data
   }, [geoOrigin, vb, svgW, drawH])
+
+  // Layer 1: 위성 배경 타일 (VWorld Satellite WMTS)
+  const bgTiles = useMemo(() =>
+    svgTileData.map(t => ({ ...t, url: `/api/vworld?type=satellite&z=${t.z}&x=${t.tx}&y=${t.ty}` }))
+  , [svgTileData])
+
+  // Layer 2: 도로 오버레이 타일 (VWorld Base WMTS, mix-blend-mode: multiply)
+  // 흰 배경 × 위성 = 위성 투과, 검은 도로 × 위성 = 도로 강조 → 투명 효과
+  const roadTiles = useMemo(() =>
+    svgTileData.map(t => ({ ...t, url: `/api/vworld?type=basetile&z=${t.z}&x=${t.tx}&y=${t.ty}` }))
+  , [svgTileData])
 
   // ── 줌/팬 핸들러 ─────────────────────────────────────────────────
 
@@ -486,11 +491,20 @@ export default function SolarLayoutCanvas({
       >
         {/* 줌/팬 변환 그룹 */}
         <g transform={`translate(${pan.x.toFixed(2)}, ${pan.y.toFixed(2)}) scale(${zoom.toFixed(4)})`}>
-          {/* 위성 + 도로 배경 타일 (VWorld Hybrid WMTS) */}
+          {/* Layer 1: 위성 배경 타일 (VWorld Satellite WMTS) */}
           {bgTiles.map(t => (
             <image key={t.key} href={t.url}
               x={t.x} y={t.y} width={t.w} height={t.h}
               preserveAspectRatio="none"
+            />
+          ))}
+
+          {/* Layer 2: 도로 오버레이 타일 (VWorld Base WMTS, multiply — 도로·지번 라벨) */}
+          {roadTiles.map(t => (
+            <image key={"road-" + t.key} href={t.url}
+              x={t.x} y={t.y} width={t.w} height={t.h}
+              preserveAspectRatio="none"
+              style={{ mixBlendMode: "multiply" }}
             />
           ))}
 
