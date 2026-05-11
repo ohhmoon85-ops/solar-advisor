@@ -776,8 +776,9 @@ export default function MapTab() {
     const marginPx = marginM / scale
 
     // turf union으로 인접 필지 병합 → 내부 경계 마진 제거
-    const cLon = apiCoords?.lon ?? 0
-    const cLat = apiCoords?.lat ?? 0
+    // canvasCenter(ring 무게중심) 기반으로 통일 — canvasPoints·타일과 동일 원점
+    const cLon = canvasCenter?.lon ?? 0
+    const cLat = canvasCenter?.lat ?? 0
     const parcelFeats = currentParcels
       .filter(p => p.ring.length >= 3)
       .map(p => {
@@ -830,7 +831,7 @@ export default function MapTab() {
       totalPanelRects = [...totalPanelRects, ...rects]
       totalCount += rects.length
     }
-    // 필지별 패널 수 — recalculatePanels 로컬 cLon/cLat/scale로 재변환 (canvasPoints는 원점 다름)
+    // 필지별 패널 수 — canvasCenter 동일 원점으로 통일되어 canvasPoints와 동일 좌표계
     const perParcelCounts = currentParcels.map(p => {
       if (!p.ring || p.ring.length < 3) return 0
       const pts = p.ring.map(([lon, lat]: number[]) =>
@@ -849,7 +850,7 @@ export default function MapTab() {
     const cap = (totalCount * MODULES[moduleIndex].watt) / 1000
     setCapacityKwp(Math.round(cap * 100) / 100)
     setAnnualKwh(Math.round(cap * GENERATION_HOURS * 365))
-  }, [installType, moduleIndex, tiltAngle, spacingValue, panelOrientation, rowStack, slopePercent])
+  }, [installType, moduleIndex, tiltAngle, spacingValue, panelOrientation, rowStack, slopePercent, canvasCenter])
 
   // SMP는 app/page.tsx 에서 단일 fetch (store.liveSmp) — 여기서 중복 호출 안 함
 
