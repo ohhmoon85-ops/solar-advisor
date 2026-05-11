@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 // VWorld 호출은 모두 /api/vworld 서버 프록시 경유 (Edge Runtime, icn1 PoP)
 // → 브라우저는 키 노출 없이 사용, Vercel IP 차단 회피
@@ -1318,7 +1318,7 @@ export default function MapTab() {
     rowStack?: 1 | 2 | 3
     rowSpacing?: number
   }) => {
-    if (!apiCoords) return
+    if (!apiCoords || !canvasCenter) return
     if (svgPlotType !== 'roof' && parcels.length === 0) return
     if (svgPlotType === 'roof' && roofPolygons.length === 0) {
       showToast('지붕을 먼저 그려주세요')
@@ -1375,8 +1375,8 @@ export default function MapTab() {
           const safeGeoJson = turfBuffer(geoJson, -effectiveMargin, { units: 'meters' })
           if (!safeGeoJson || safeGeoJson.geometry.type !== 'Polygon') return null
           const safeRing = safeGeoJson.geometry.coordinates[0] as number[][]
-          const safePolygon = convertGeoRingToLocalPolygon(safeRing, apiCoords.lat, apiCoords.lon)
-          const cadastrePolyLocal = convertGeoRingToLocalPolygon(closed, apiCoords.lat, apiCoords.lon)
+          const safePolygon = convertGeoRingToLocalPolygon(safeRing, canvasCenter.lat, canvasCenter.lon)
+          const cadastrePolyLocal = convertGeoRingToLocalPolygon(closed, canvasCenter.lat, canvasCenter.lon)
           return {
             label: `${String.fromCharCode(65 + idx)}구역`,
             polygon: cadastrePolyLocal,
@@ -1446,10 +1446,10 @@ export default function MapTab() {
       }
 
       const allPolygons = allRings
-        .map(ring => convertGeoRingToLocalPolygon(ring, apiCoords.lat, apiCoords.lon))
+        .map(ring => convertGeoRingToLocalPolygon(ring, canvasCenter.lat, canvasCenter.lon))
         .filter(p => p.length >= 3)
       if (allPolygons.length === 0) return
-      const cadastrePolygon = convertGeoRingToLocalPolygon(cadastreRing, apiCoords.lat, apiCoords.lon)
+      const cadastrePolygon = convertGeoRingToLocalPolygon(cadastreRing, canvasCenter.lat, canvasCenter.lon)
       const commonOpts = {
         azimuthDeg: svgAzimuthDeg,
         slopeAngleDeg: 0,
@@ -1476,8 +1476,8 @@ export default function MapTab() {
             const safeGeoJson = turfBuffer(parcelGeoJson, -effectiveMargin, { units: 'meters' })
             if (!safeGeoJson || safeGeoJson.geometry.type !== 'Polygon') return null
             const safeRing = safeGeoJson.geometry.coordinates[0] as number[][]
-            const safePolygon = convertGeoRingToLocalPolygon(safeRing, apiCoords.lat, apiCoords.lon)
-            const cadastrePolyLocal = convertGeoRingToLocalPolygon(closed, apiCoords.lat, apiCoords.lon)
+            const safePolygon = convertGeoRingToLocalPolygon(safeRing, canvasCenter.lat, canvasCenter.lon)
+            const cadastrePolyLocal = convertGeoRingToLocalPolygon(closed, canvasCenter.lat, canvasCenter.lon)
             return {
               label: `${String.fromCharCode(65 + idx)}구역`,
               polygon: cadastrePolyLocal,
@@ -1538,7 +1538,7 @@ export default function MapTab() {
       analysisHasRunRef.current = true
       setAnalysisStale(false)
     }
-  }, [apiCoords, parcels, roofPolygons, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
+  }, [canvasCenter, parcels, roofPolygons, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
       autoSolarAngle, moduleIndex, tiltAngle, autoLandAngle, autoMargin,
       workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap, userFirstStackGap, userBoundaryMargin, userRowSpacing])
 
@@ -2880,7 +2880,7 @@ export default function MapTab() {
                       height={Math.round(svgContainerWidth * 480 / 700)}
                       showLabels
                       activeZoneId={isMultiZoneResult(svgAnalysisResult) ? activeZoneId : undefined}
-                      geoOrigin={apiCoords ?? undefined}
+                      geoOrigin={canvasCenter ?? undefined}
                     />
                     {/* 단일 구역 — 검증 결과 */}
                     {!isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.validation && (
