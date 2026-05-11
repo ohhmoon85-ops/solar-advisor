@@ -297,6 +297,7 @@ export default function MapTab() {
   const [satTiles, setSatTiles] = useState<SatTile[]>([])
   const [cadImgTiles, setCadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
   const [roadImgTiles, setRoadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
+  const [baseTiles, setBaseTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
   const [satLoading, setSatLoading] = useState(false)
   const [satFailed, setSatFailed] = useState(false)
   const [satZoom, setSatZoom] = useState(0)
@@ -475,39 +476,69 @@ export default function MapTab() {
     setSatTiles([])
     setCadImgTiles([])
     setRoadImgTiles([])
+    setBaseTiles([])
     setSatFailed(false)
     blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u))
     blobUrlsRef.current = []
 
-    const { tx: ctX, ty: ctY } = lonLatToTile(cLon, cLat, z)
-    const tileMeter = tilePixelScaleM(cLat, z) * 256
-    const tilePx = tileMeter / scale
-    const R = 2
-
-    if (mode === 'cadastral') {
-      // 지적도: VWorld WMS → CORS 없이 <img>로 로드 (인접 필지 포함)
-      const tiles: {src:string;cx:number;cy:number;px:number}[] = []
-      for (let dy = -R; dy <= R; dy++) {
-        for (let dx = -R; dx <= R; dx++) {
-          const tx = ctX + dx, ty = ctY + dy
-          const origin = tileOriginLonLat(tx, ty, z)
-          const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
-          const bbox = tileToWgs84Bbox(z, tx, ty)
-          // /api/vworld 서버 프록시 경유 (브라우저 키 노출 없음, Vercel IP 차단 회피)
-          const src = `/api/vworld?type=wms&bbox=${encodeURIComponent(bbox)}&layers=lt_c_landinfobasemap&width=256&height=256&transparent=true`
-          tiles.push({ src, cx, cy, px: tilePx })
-        }
-      }
-      setCadImgTiles(tiles)
-      setSatLoading(false)
-      return
-    }
-
-    // 위성사진: ArcGIS CORS 허용 → canvas drawImage
     // fetchZ ≤ 18: 한국 농촌 z=19~20 타일 미지원 → 오버줌으로 표시
     const fetchZ = Math.min(z, 18)
     const zoomRatio = Math.pow(2, z - fetchZ) // z=20→4, z=19→2, z≤18→1
 
+    const { tx: ctX, ty: ctY } = lonLatToTile(cLon, cLat, z)
+    const R = 2
+
+    // VWorld 기본지도 타일 헬퍼 (두 모드 공용)
+    const buildBaseTiles = () => {
+      const tiles: {src:string;cx:number;cy:number;px:number}[] = []
+      const seen = new Set<string>()
+      for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+          const tx = ctX + dx, ty = ctY + dy
+          const tx18 = Math.floor(tx / zoomRatio)
+          const ty18 = Math.floor(ty / zoomRatio)
+          const key = `${tx18},${ty18}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          const origin = tileOriginLonLat(tx18, ty18, fetchZ)
+          const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
+          const px = tilePixelScaleM(cLat, fetchZ) * 256 / scale
+          tiles.push({ src: `/api/vworld?type=basetile&z=${fetchZ}&x=${tx18}&y=${ty18}`, cx, cy, px })
+        }
+      }
+      return tiles
+    }
+
+    if (mode === 'cadastral') {
+      // 지적도: VWorld Base 기본지도(도로) 배경 + WMS 지적도(지번·경계) 투명 오버레이
+      setBaseTiles(buildBaseTiles())
+
+      const wmsZ = Math.min(z, 18)
+      const wmsRatio = Math.pow(2, z - wmsZ)
+      const cadTiles: {src:string;cx:number;cy:number;px:number}[] = []
+      const seenWms = new Set<string>()
+      for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+          const tx = ctX + dx, ty = ctY + dy
+          const tx18 = Math.floor(tx / wmsRatio)
+          const ty18 = Math.floor(ty / wmsRatio)
+          const key = `${tx18},${ty18}`
+          if (seenWms.has(key)) continue
+          seenWms.add(key)
+          const origin = tileOriginLonLat(tx18, ty18, wmsZ)
+          const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
+          const px = tilePixelScaleM(cLat, wmsZ) * 256 / scale
+          const bbox = tileToWgs84Bbox(wmsZ, tx18, ty18)
+          const src = `/api/vworld?type=wms&bbox=${encodeURIComponent(bbox)}&layers=lt_c_landinfobasemap&width=256&height=256&transparent=true`
+          cadTiles.push({ src, cx, cy, px })
+        }
+      }
+      setCadImgTiles(cadTiles)
+      setSatLoading(false)
+      return
+    }
+
+    // 위성사진: ArcGIS CORS 허용 → canvas drawImage (VWorld Satellite fallback)
     const jobs: Promise<SatTile | null>[] = []
     const fetchedSat = new Set<string>()
     for (let dy = -R; dy <= R; dy++) {
@@ -529,7 +560,6 @@ export default function MapTab() {
               img.crossOrigin = 'anonymous'
               img.onload = () => resolve({ img, cx, cy, px: fetchTilePx })
               img.onerror = () => {
-                // VWorld Satellite fallback (동일 프록시 경유)
                 const vwImg = new Image()
                 vwImg.onload = () => resolve({ img: vwImg, cx, cy, px: fetchTilePx })
                 vwImg.onerror = () => resolve(null)
@@ -545,24 +575,9 @@ export default function MapTab() {
     setSatTiles(results)
     setSatFailed(results.length === 0)
 
-    // VWorld Hybrid WMTS — 도로·건물 투명 오버레이 (위성사진 위, 동일 fetchZ 오버줌)
-    const hybridTiles: {src:string;cx:number;cy:number;px:number}[] = []
-    const fetchedHybrid = new Set<string>()
-    for (let dy2 = -R; dy2 <= R; dy2++) {
-      for (let dx2 = -R; dx2 <= R; dx2++) {
-        const tx2 = ctX + dx2, ty2 = ctY + dy2
-        const tx18b = Math.floor(tx2 / zoomRatio)
-        const ty18b = Math.floor(ty2 / zoomRatio)
-        const key2 = `${tx18b},${ty18b}`
-        if (fetchedHybrid.has(key2)) continue
-        fetchedHybrid.add(key2)
-        const origin2 = tileOriginLonLat(tx18b, ty18b, fetchZ)
-        const { x: cx2, y: cy2 } = geoToCanvas(origin2.lon, origin2.lat, cLon, cLat, scale)
-        const fetchTilePx2 = tilePixelScaleM(cLat, fetchZ) * 256 / scale
-        hybridTiles.push({ src: `/api/vworld?type=hybridtile&z=${fetchZ}&x=${tx18b}&y=${ty18b}`, cx: cx2, cy: cy2, px: fetchTilePx2 })
-      }
-    }
-    setRoadImgTiles(hybridTiles)
+    // 도로 오버레이: VWorld 기본지도(Base) — mix-blend-mode:multiply로 위성 위에 도로 표시
+    // Hybrid는 불투명 타일(위성+도로 합성)이라 ArcGIS 위성을 가림 → Base로 대체
+    setRoadImgTiles(buildBaseTiles())
 
     setSatLoading(false)
   }, [])
@@ -586,8 +601,8 @@ export default function MapTab() {
       for (let y = 0; y < CANVAS_H; y += 40) {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_H, y); ctx.stroke()
       }
-    } else if (cadImgTiles.length === 0) {
-      // 기본 그리드 배경 (지적도 WMS img 없을 때만)
+    } else if (cadImgTiles.length === 0 && baseTiles.length === 0) {
+      // 기본 그리드 배경 (배경 타일 없을 때만)
       ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5
       for (let x = 0; x < CANVAS_W; x += 20) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke()
@@ -730,7 +745,7 @@ export default function MapTab() {
       ctx.fillText(badgeLabel, CANVAS_W - (bw + 4) / 2, 21)
     }
   }, [isComplete, area, panelRects, spacingValue, panelCount,
-      pixelScale, apiSource, satTiles, cadImgTiles, satZoom,
+      pixelScale, apiSource, satTiles, cadImgTiles, baseTiles, satZoom,
       parcels, mapMode])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
@@ -1079,7 +1094,7 @@ export default function MapTab() {
     setArea(0); setPanelRects([]); setPanelCount(0)
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
     setApiSource('none'); setParcelLabel(''); setSearchError('')
-    setPixelScale(0.1); setSatTiles([]); setSatZoom(0); setSatFailed(false)
+    setPixelScale(0.1); setSatTiles([]); setSatZoom(0); setSatFailed(false); setBaseTiles([])
     setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
     // 복수 필지 초기화
@@ -2014,8 +2029,8 @@ export default function MapTab() {
           </div>
 
           <div className="relative w-full overflow-hidden">
-            {/* VWorld 지적도 WMS 타일 — CORS 우회: <img>로 canvas 뒤에 배치 (인접 필지 경계 표시) */}
-            {cadImgTiles.map((t, i) => (
+            {/* z:0 — VWorld 기본지도(Base): 도로·건물 배경 (지적도 모드: 불투명 / 위성 모드: 미사용) */}
+            {baseTiles.map((t, i) => (
               <img key={i} src={t.src} alt=""
                 style={{
                   position: 'absolute',
@@ -2028,15 +2043,30 @@ export default function MapTab() {
                 }}
               />
             ))}
+            {/* z:1 — VWorld WMS 지적도(투명 PNG): 지번·필지 경계 오버레이 (지적도 모드) */}
+            {cadImgTiles.map((t, i) => (
+              <img key={i} src={t.src} alt=""
+                style={{
+                  position: 'absolute',
+                  left: `${t.cx / CANVAS_W * 100}%`,
+                  top: `${t.cy / CANVAS_H * 100}%`,
+                  width: `${t.px / CANVAS_W * 100}%`,
+                  height: `${t.px / CANVAS_H * 100}%`,
+                  zIndex: 1,
+                  pointerEvents: 'none',
+                }}
+              />
+            ))}
+            {/* z:2 — Canvas: 위성사진(satellite) 또는 투명(cadastral) + 필지 polygon 드로잉 */}
             <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}
               className="relative w-full h-auto border border-gray-200 rounded-lg cursor-default"
               style={{
-                zIndex: 1,
+                zIndex: 2,
                 maxHeight: '500px',
-                background: cadImgTiles.length > 0 ? 'transparent' : '#f8fafc',
+                background: (baseTiles.length > 0 || cadImgTiles.length > 0) ? 'transparent' : '#f8fafc',
               }}
             />
-            {/* VWorld Hybrid 도로 오버레이 (위성 모드) — canvas 위에 투명 레이어로 배치 */}
+            {/* z:3 — VWorld Base 도로 오버레이 (위성 모드 전용, mix-blend-mode:multiply로 도로만 표시) */}
             {roadImgTiles.map((t, i) => (
               <img key={i} src={t.src} alt=""
                 style={{
@@ -2045,12 +2075,13 @@ export default function MapTab() {
                   top: `${t.cy / CANVAS_H * 100}%`,
                   width: `${t.px / CANVAS_W * 100}%`,
                   height: `${t.px / CANVAS_H * 100}%`,
-                  zIndex: 2,
+                  zIndex: 3,
                   pointerEvents: 'none',
+                  mixBlendMode: 'multiply',
                 }}
               />
             ))}
-            {/* Phase C-1: 지붕 그리기 SVG 오버레이 (svgPlotType==='roof' 시 항상 마운트) */}
+            {/* z:6 — 지붕 그리기 SVG 오버레이 (svgPlotType==='roof' 시 항상 마운트) */}
             {svgPlotType === 'roof' && (
               <svg
                 viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
@@ -2063,7 +2094,7 @@ export default function MapTab() {
                   position: 'absolute',
                   top: 0, left: 0,
                   width: '100%', height: '100%',
-                  zIndex: 5,
+                  zIndex: 6,
                   cursor: drawingMode ? 'crosshair' : 'default',
                   pointerEvents: drawingMode ? 'auto' : 'none',
                 }}
