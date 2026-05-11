@@ -136,6 +136,25 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    // VWorld WMTS 위성영상 타일 (Satellite 레이어 — ArcGIS fallback 용)
+    if (type === 'satellite') {
+      const z = searchParams.get('z')
+      const x = searchParams.get('x')
+      const y = searchParams.get('y')
+      if (!z || !x || !y) return NextResponse.json({ error: 'z,x,y required' }, { status: 400 })
+      const tileUrl = `https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Satellite/${z}/${y}/${x}.jpeg`
+      const tileRes = await vwFetch(tileUrl)
+      if (!tileRes.ok) return new Response(null, { status: 404 })
+      const buf = await tileRes.arrayBuffer()
+      const ct = tileRes.headers.get('content-type') ?? 'image/jpeg'
+      return new Response(buf, {
+        headers: {
+          'Content-Type': ct,
+          'Cache-Control': 'public, max-age=86400',
+        },
+      })
+    }
+
     // VWorld WMTS 지적도 타일 (LP 레이어 — 연속지적도)
     if (type === 'cadtile') {
       const z = searchParams.get('z')

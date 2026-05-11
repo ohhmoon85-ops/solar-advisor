@@ -298,6 +298,7 @@ export default function MapTab() {
   const [cadImgTiles, setCadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
   const [roadImgTiles, setRoadImgTiles] = useState<{src:string;cx:number;cy:number;px:number}[]>([])
   const [satLoading, setSatLoading] = useState(false)
+  const [satFailed, setSatFailed] = useState(false)
   const [satZoom, setSatZoom] = useState(0)
   const [mapMode, setMapMode] = useState<'satellite' | 'cadastral'>('satellite')
 
@@ -474,6 +475,7 @@ export default function MapTab() {
     setSatTiles([])
     setCadImgTiles([])
     setRoadImgTiles([])
+    setSatFailed(false)
     blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u))
     blobUrlsRef.current = []
 
@@ -502,21 +504,38 @@ export default function MapTab() {
     }
 
     // 위성사진: ArcGIS CORS 허용 → canvas drawImage
+    // fetchZ ≤ 18: 한국 농촌 z=19~20 타일 미지원 → 오버줌으로 표시
+    const fetchZ = Math.min(z, 18)
+    const zoomRatio = Math.pow(2, z - fetchZ) // z=20→4, z=19→2, z≤18→1
+
     const jobs: Promise<SatTile | null>[] = []
+    const fetchedSat = new Set<string>()
     for (let dy = -R; dy <= R; dy++) {
       for (let dx = -R; dx <= R; dx++) {
         const tx = ctX + dx, ty = ctY + dy
+        const tx18 = Math.floor(tx / zoomRatio)
+        const ty18 = Math.floor(ty / zoomRatio)
+        const key = `${tx18},${ty18}`
+        if (fetchedSat.has(key)) continue
+        fetchedSat.add(key)
         jobs.push((async () => {
           try {
-            const origin = tileOriginLonLat(tx, ty, z)
+            const origin = tileOriginLonLat(tx18, ty18, fetchZ)
             const { x: cx, y: cy } = geoToCanvas(origin.lon, origin.lat, cLon, cLat, scale)
-            const tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`
+            const fetchTilePx = tilePixelScaleM(cLat, fetchZ) * 256 / scale
+            const arcUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${fetchZ}/${ty18}/${tx18}`
             return await new Promise<SatTile | null>(resolve => {
               const img = new Image()
               img.crossOrigin = 'anonymous'
-              img.onload = () => resolve({ img, cx, cy, px: tilePx })
-              img.onerror = () => resolve(null)
-              img.src = tileUrl
+              img.onload = () => resolve({ img, cx, cy, px: fetchTilePx })
+              img.onerror = () => {
+                // VWorld Satellite fallback (동일 프록시 경유)
+                const vwImg = new Image()
+                vwImg.onload = () => resolve({ img: vwImg, cx, cy, px: fetchTilePx })
+                vwImg.onerror = () => resolve(null)
+                vwImg.src = `/api/vworld?type=satellite&z=${fetchZ}&x=${tx18}&y=${ty18}`
+              }
+              img.src = arcUrl
             })
           } catch { return null }
         })())
@@ -524,15 +543,23 @@ export default function MapTab() {
     }
     const results = (await Promise.all(jobs)).filter(Boolean) as SatTile[]
     setSatTiles(results)
+    setSatFailed(results.length === 0)
 
-    // VWorld Hybrid WMTS — 도로·건물 투명 오버레이 (위성사진 위 표시)
+    // VWorld Hybrid WMTS — 도로·건물 투명 오버레이 (위성사진 위, 동일 fetchZ 오버줌)
     const hybridTiles: {src:string;cx:number;cy:number;px:number}[] = []
+    const fetchedHybrid = new Set<string>()
     for (let dy2 = -R; dy2 <= R; dy2++) {
       for (let dx2 = -R; dx2 <= R; dx2++) {
         const tx2 = ctX + dx2, ty2 = ctY + dy2
-        const origin2 = tileOriginLonLat(tx2, ty2, z)
+        const tx18b = Math.floor(tx2 / zoomRatio)
+        const ty18b = Math.floor(ty2 / zoomRatio)
+        const key2 = `${tx18b},${ty18b}`
+        if (fetchedHybrid.has(key2)) continue
+        fetchedHybrid.add(key2)
+        const origin2 = tileOriginLonLat(tx18b, ty18b, fetchZ)
         const { x: cx2, y: cy2 } = geoToCanvas(origin2.lon, origin2.lat, cLon, cLat, scale)
-        hybridTiles.push({ src: `/api/vworld?type=hybridtile&z=${z}&x=${tx2}&y=${ty2}`, cx: cx2, cy: cy2, px: tilePx })
+        const fetchTilePx2 = tilePixelScaleM(cLat, fetchZ) * 256 / scale
+        hybridTiles.push({ src: `/api/vworld?type=hybridtile&z=${fetchZ}&x=${tx18b}&y=${ty18b}`, cx: cx2, cy: cy2, px: fetchTilePx2 })
       }
     }
     setRoadImgTiles(hybridTiles)
@@ -1052,7 +1079,7 @@ export default function MapTab() {
     setArea(0); setPanelRects([]); setPanelCount(0)
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
     setApiSource('none'); setParcelLabel(''); setSearchError('')
-    setPixelScale(0.1); setSatTiles([]); setSatZoom(0)
+    setPixelScale(0.1); setSatTiles([]); setSatZoom(0); setSatFailed(false)
     setKierResult(null); setApiCoords(null); setAutoAzimuth(null)
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
     // 복수 필지 초기화
@@ -1646,6 +1673,11 @@ export default function MapTab() {
           {satTiles.length > 0 && !satLoading && (
             <div className="mt-1 text-xs text-indigo-600">
               {mapMode === 'cadastral' ? '🗺 지적도' : '🛰 위성사진'} 오버레이 완료 (Z{satZoom} · 1px={pixelScale.toFixed(3)}m)
+            </div>
+          )}
+          {satFailed && !satLoading && mapMode === 'satellite' && (
+            <div className="mt-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+              ⚠ 위성 이미지를 불러올 수 없습니다 (Z{satZoom}). 지적도 모드를 사용하거나 잠시 후 재시도해 주세요.
             </div>
           )}
 
