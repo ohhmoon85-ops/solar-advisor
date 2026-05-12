@@ -2681,23 +2681,53 @@ export default function MapTab() {
                     </>
                   )}
 
-                  {/* 미니 단면도 */}
-                  <svg viewBox="0 0 200 72" className="w-full" style={{ height: '120px' }}>
-                    <line x1="0" y1="56" x2="200" y2="56" stroke="#9ca3af" strokeWidth="2"/>
-                    <line x1="10" y1="56" x2="40" y2="34" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round"/>
-                    <rect x="40" y="34" width={Math.min(70, Math.round(result.moduleToModuleGap * 20))} height="22"
-                      fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.6)" strokeWidth="1" strokeDasharray="3,2"/>
-                    <line x1={Math.min(110, 40 + Math.round(result.moduleToModuleGap * 20))} y1="56"
-                      x2={Math.min(140, 70 + Math.round(result.moduleToModuleGap * 20))} y2="34"
-                      stroke="#3b82f6" strokeWidth="3" strokeLinecap="round"/>
-                    <line x1="40" y1="8" x2="18" y2="34" stroke="#f59e0b" strokeWidth="1.5"/>
-                    <text x="44" y="52" fontSize="9" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
-                    <text x="80" y="69" fontSize="9" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
-                    <text x="2" y="69" fontSize="9" fill="#3b82f6">모듈</text>
-                    <text x="43" y="14" fontSize="9" fill="#f59e0b">태양 {Math.round(solarAng)}°</text>
-                    <text x="162" y="53" fontSize="9" fill="#9ca3af">토지</text>
-                    <text x="143" y="69" fontSize="9" fill="#3b82f6">다음 모듈</text>
-                  </svg>
+                  {/* 미니 단면도 — 시공사 다이어그램 의도: 태양 광선이 좌측 모듈 상단에서
+                       다음 모듈 시작점으로 위→아래 방향. 광선과 토지면 사이 각도 = 태양 고도각 */}
+                  {(() => {
+                    const gapPx = Math.min(75, Math.max(20, Math.round(result.moduleToModuleGap * 20)))
+                    const nextModuleStartX = 40 + gapPx        // 다음 모듈 시작 (토지면)
+                    const nextModuleTopX = nextModuleStartX + 30  // 다음 모듈 상단 끝
+                    // 태양 광선: 좌측 모듈 상단 (40,34) → 다음 모듈 시작 (nextModuleStartX, 56)
+                    // 그림자 회피 = 광선이 정확히 다음 모듈 시작에 닿는 시점
+                    return (
+                      <svg viewBox="0 0 200 72" className="w-full" style={{ height: '120px' }}>
+                        <defs>
+                          <marker id="ray-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                            markerWidth="5" markerHeight="5" orient="auto">
+                            <path d="M0,0 L10,5 L0,10 z" fill="#f59e0b" />
+                          </marker>
+                        </defs>
+                        {/* 토지 수평선 */}
+                        <line x1="0" y1="56" x2="200" y2="56" stroke="#9ca3af" strokeWidth="2"/>
+                        {/* 좌측 모듈 (15° 경사) */}
+                        <line x1="10" y1="56" x2="40" y2="34" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round"/>
+                        {/* 빈공간 표시 */}
+                        <rect x="40" y="34" width={gapPx} height="22"
+                          fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.6)" strokeWidth="1" strokeDasharray="3,2"/>
+                        {/* 다음 모듈 */}
+                        <line x1={nextModuleStartX} y1="56" x2={nextModuleTopX} y2="34" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round"/>
+                        {/* ★ 태양 광선: 위→아래 (모듈 상단 → 다음 모듈 시작점), 화살표로 방향 명시 */}
+                        <line x1={40} y1={34} x2={nextModuleStartX} y2={56}
+                          stroke="#f59e0b" strokeWidth="1.6" strokeDasharray="3,2"
+                          markerEnd="url(#ray-arrow)" />
+                        {/* 태양각 호 (토지면과 광선 사이) — solarAng도 시각화 */}
+                        <path
+                          d={`M ${nextModuleStartX - 12} 56 A 12 12 0 0 0 ${nextModuleStartX - 12 * Math.cos(solarAng * Math.PI / 180)} ${56 - 12 * Math.sin(solarAng * Math.PI / 180)}`}
+                          fill="none" stroke="#f59e0b" strokeWidth="1"
+                        />
+                        {/* 라벨 */}
+                        <text x="44" y="52" fontSize="9" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
+                        <text x="80" y="69" fontSize="9" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
+                        <text x="2" y="69" fontSize="9" fill="#3b82f6">모듈</text>
+                        {/* 태양각 라벨: 광선 중간 위쪽 */}
+                        <text x={42 + gapPx / 2 - 18} y={42} fontSize="9" fill="#f59e0b" fontWeight="bold">
+                          ☀ 태양 {Math.round(solarAng)}°
+                        </text>
+                        <text x="162" y="53" fontSize="9" fill="#9ca3af">토지</text>
+                        <text x={Math.min(143, nextModuleTopX - 3)} y="69" fontSize="9" fill="#3b82f6">다음 모듈</text>
+                      </svg>
+                    )
+                  })()}
 
                   {/* 간이에도 적용 체크박스 */}
                   <label className="flex items-center gap-1.5 cursor-pointer">
