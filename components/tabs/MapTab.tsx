@@ -1151,7 +1151,8 @@ export default function MapTab() {
     const srcCanvas = canvasRef.current
     if (!srcCanvas) return
     const { jsPDF } = await import('jspdf')
-    const { default: html2canvas } = await import('html2canvas')
+    // html2canvas-pro: Tailwind v4 oklch/lab/oklab 색 함수 지원
+    const { default: html2canvas } = await import('html2canvas-pro')
     // 인접 체크 결과 — store에서 직접 조회 (PDF 생성 시점 스냅샷)
     const { useAdjacencyStore } = await import('@/store/useAdjacencyStore')
     const { ADJACENCY_RULES, ADJACENCY_DISCLAIMER, getRiskLevel } = await import('@/lib/adjacencyRules')

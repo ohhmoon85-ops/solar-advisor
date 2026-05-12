@@ -129,7 +129,9 @@ export default function RevenueTab() {
     setPdfLoading(true)
     try {
       const { jsPDF } = await import('jspdf')
-      const { default: html2canvas } = await import('html2canvas')
+      // html2canvas-pro: Tailwind v4 oklch/lab/oklab 색 함수 지원
+      // (기존 html2canvas@1.4.1은 lab() 파싱 실패 → "unsupported color function" 오류)
+      const { default: html2canvas } = await import('html2canvas-pro')
 
       // 오프스크린 합성 div — 헤더 + 메타 정보 + 캡처 영역 cloneNode
       const offDiv = document.createElement('div')
