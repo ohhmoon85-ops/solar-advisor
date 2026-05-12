@@ -2497,7 +2497,7 @@ export default function MapTab() {
                   <div className="bg-white rounded border border-sky-200 px-2 py-1.5 space-y-1">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-gray-500">
-                        권장 행간거리 <span className="text-gray-400 text-[10px]">(자동 {recommended.toFixed(3)}m · 최소 {projLen.toFixed(2)}m)</span>
+                        권장 행간거리 <span className="text-gray-400 text-[10px]" title="행간거리 = 모듈 앞끝~다음 모듈 앞끝 (전체 피치). 빈공간 = 행간 − 모듈 투영 길이">(자동 {recommended.toFixed(3)}m · 최소 {projLen.toFixed(2)}m)</span>
                       </span>
                       <div className="flex items-center gap-1">
                         <input
@@ -2508,7 +2508,7 @@ export default function MapTab() {
                             const v = parseFloat(e.target.value)
                             setUserRowSpacing(isNaN(v) ? undefined : v)
                           }}
-                          title="패널 각도에 따라 더 줄일 수 있음 — 입력값 그대로 적용 (괄호 안 최소값은 참고용)"
+                          title="행간거리 = 모듈 앞끝→다음 모듈 앞끝 (전체 피치). 패널 각도에 따라 자유 입력 가능"
                           className="w-20 text-xs border border-sky-300 rounded px-2 py-0.5 text-right font-mono bg-white"
                         />
                         <span className="text-gray-400">m</span>
@@ -2518,6 +2518,18 @@ export default function MapTab() {
                         )}
                       </div>
                     </div>
+                    {/* 실시간 빈공간 안내 — 사용자가 입력한 행간 의미를 명확히 인지하도록 */}
+                    {(() => {
+                      const currentSpacing = userRowSpacing ?? recommended
+                      const currentGap = currentSpacing - projLen
+                      const gapColor = currentGap < 0.3 ? 'text-red-600' : currentGap < 1.0 ? 'text-amber-600' : 'text-gray-500'
+                      return (
+                        <div className="text-[10px] text-gray-400 pl-1 leading-tight" title="행간 = 모듈 투영 길이 + 빈공간">
+                          → 현재 행간 = 모듈투영 {projLen.toFixed(2)}m + 빈공간 <span className={`font-bold ${gapColor}`}>{currentGap.toFixed(2)}m</span>
+                          {currentGap < 0.3 && <span className="ml-1 text-red-500">⚠ 패널이 거의 붙음</span>}
+                        </div>
+                      )
+                    })()}
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-gray-500" title="권장 행간거리에 그늘 회피 + 시공 여유 이미 포함. 추가 운영 통로 필요시 입력">작업 통로</span>
                       <div className="flex items-center gap-1">
@@ -2655,10 +2667,12 @@ export default function MapTab() {
                     </>
                   )}
 
-                  {/* 미니 단면도 — 시공사 다이어그램 의도: 태양 광선이 좌측 모듈 상단에서
-                       다음 모듈 시작점으로 위→아래 방향. 광선과 토지면 사이 각도 = 태양 고도각 */}
+                  {/* 미니 단면도 — 사용자 입력값 반영 (행간·빈공간 모두 finalSpacing 기준) */}
                   {(() => {
-                    const gapPx = Math.min(75, Math.max(20, Math.round(result.moduleToModuleGap * 20)))
+                    // 표시 기준: 사용자가 입력한 값(없으면 자동 권장)
+                    const displaySpacing = finalSpacing  // 행간 = 모듈 앞끝~다음 앞끝
+                    const displayGap = Math.max(displaySpacing - projLen, 0)  // 빈공간
+                    const gapPx = Math.min(75, Math.max(8, Math.round(displayGap * 20)))
                     const nextModuleStartX = 40 + gapPx        // 다음 모듈 시작 (토지면)
                     const nextModuleTopX = nextModuleStartX + 30  // 다음 모듈 상단 끝
                     // 태양 광선: 좌측 모듈 상단 (40,34) → 다음 모듈 시작 (nextModuleStartX, 56)
@@ -2689,9 +2703,9 @@ export default function MapTab() {
                           d={`M ${nextModuleStartX - 12} 56 A 12 12 0 0 0 ${nextModuleStartX - 12 * Math.cos(solarAng * Math.PI / 180)} ${56 - 12 * Math.sin(solarAng * Math.PI / 180)}`}
                           fill="none" stroke="#f59e0b" strokeWidth="1"
                         />
-                        {/* 라벨 */}
-                        <text x="44" y="52" fontSize="9" fill="#6b7280">빈공간 {result.moduleToModuleGap.toFixed(2)}m</text>
-                        <text x="80" y="69" fontSize="9" fill="#9ca3af">행간 {recommended.toFixed(2)}m</text>
+                        {/* 라벨 — 사용자 입력 반영 (변경 즉시 다이어그램 갱신) */}
+                        <text x="44" y="52" fontSize="9" fill="#6b7280">빈공간 {displayGap.toFixed(2)}m</text>
+                        <text x="80" y="69" fontSize="9" fill="#9ca3af">행간 {displaySpacing.toFixed(2)}m</text>
                         <text x="2" y="69" fontSize="9" fill="#3b82f6">모듈</text>
                         {/* 태양각 라벨: 광선 중간 위쪽 */}
                         <text x={42 + gapPx / 2 - 18} y={42} fontSize="9" fill="#f59e0b" fontWeight="bold">
