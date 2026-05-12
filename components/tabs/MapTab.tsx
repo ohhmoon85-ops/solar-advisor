@@ -664,22 +664,26 @@ export default function MapTab() {
       })
     }
 
-    // ❸ 패널 그리드
-    panelRects.forEach((rect, i) => {
-      ctx.fillStyle = 'rgba(59,130,246,0.70)'
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h)
-      ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 0.5
-      ctx.strokeRect(rect.x, rect.y, rect.w, rect.h)
-      if (panelRects.length <= 60) {
-        ctx.fillStyle = 'rgba(255,255,255,0.9)'
-        ctx.font = `bold ${rect.w < 12 ? 6 : 8}px sans-serif`
-        ctx.textAlign = 'center'
-        ctx.fillText(String(i + 1), rect.x + rect.w / 2, rect.y + rect.h / 2 + 3)
-      }
-    })
+    // ❸ 패널 그리드 — 건물지붕형은 사용자가 직접 그리므로 간이 배치 패널 미표시
+    //   (지붕 형태가 자동 패널에 가려지는 문제 회피)
+    const isBuildingType = installType === '건물지붕형'
+    if (!isBuildingType) {
+      panelRects.forEach((rect, i) => {
+        ctx.fillStyle = 'rgba(59,130,246,0.70)'
+        ctx.fillRect(rect.x, rect.y, rect.w, rect.h)
+        ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 0.5
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h)
+        if (panelRects.length <= 60) {
+          ctx.fillStyle = 'rgba(255,255,255,0.9)'
+          ctx.font = `bold ${rect.w < 12 ? 6 : 8}px sans-serif`
+          ctx.textAlign = 'center'
+          ctx.fillText(String(i + 1), rect.x + rect.w / 2, rect.y + rect.h / 2 + 3)
+        }
+      })
+    }
 
-    // ❹ 이격 거리 표시선
-    if (panelRects.length > 0) {
+    // ❹ 이격 거리 표시선 — 건물지붕형 제외 (패널 미표시이므로 의미 없음)
+    if (!isBuildingType && panelRects.length > 0) {
       const r0 = panelRects[0]
       ctx.strokeStyle = 'rgba(239,68,68,0.8)'; ctx.lineWidth = 1
       ctx.setLineDash([5, 4])
@@ -687,6 +691,14 @@ export default function MapTab() {
       ctx.setLineDash([])
       ctx.fillStyle = '#ef4444'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'
       ctx.fillText(`이격 ${spacingValue}m`, r0.x + r0.w * 2.5 + 3, r0.y + r0.h + 4)
+    }
+
+    // 건물지붕형 안내 텍스트 — 캔버스 중앙에 작게
+    if (isBuildingType && parcels.length > 0) {
+      ctx.fillStyle = 'rgba(220,38,38,0.85)'
+      ctx.font = 'bold 12px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('🏠 건물지붕형 — 정밀 분석에서 지붕을 직접 그려주세요', CANVAS_W / 2, 28)
     }
 
     // ❺ 중심 레이블
@@ -760,7 +772,7 @@ export default function MapTab() {
     }
   }, [isComplete, area, panelRects, spacingValue, panelCount,
       pixelScale, apiSource, satTiles, cadImgTiles, baseTiles, satZoom,
-      parcels, mapMode])
+      parcels, mapMode, installType])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
