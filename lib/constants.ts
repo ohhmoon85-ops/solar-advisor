@@ -14,7 +14,15 @@ export const REC_WEIGHT: Record<string, number> = {
 
 export const GENERATION_HOURS = 3.5 // h/일 (건물형/토지형 동일)
 export const DEGRADATION_RATE = 0.005 // 연간 0.5% 열화
-export const OP_COST_RATE = 0.02 // 운영비 총수익의 2%
+
+// [DEPRECATED] 2026-05 운영비 공식 변경 — 매출 × 2% → kW당 11,200원 + 연 3% 물가상승
+//   하위 호환을 위해 상수는 유지하되 calcYearlyTable에서 미사용
+export const OP_COST_RATE = 0.02 // (deprecated, 미사용)
+
+// 운영비 단가 (시공사 표준 2026) — 설비용량(kW)당 연간 운영비
+export const OP_COST_PER_KW = 11200       // 원/kW/년
+// 운영비 물가상승률 — 매년 3% 상승 (인건비·자재비 반영)
+export const OP_COST_INFLATION_RATE = 0.03
 
 // 검증값 (100kW 건물지붕형)
 // 연간발전량: 127,750 kWh

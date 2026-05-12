@@ -423,7 +423,7 @@ export default function RevenueTab() {
             <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white">
               <div className="text-xs opacity-80 mb-1">1년차 순이익</div>
               <div className="text-xl font-bold">{fmt(netIncome1st)}<span className="text-sm font-normal ml-1">만원</span></div>
-              <div className="text-xs opacity-70 mt-1">운영비 2% 제외</div>
+              <div className="text-xs opacity-70 mt-1">운영비 11,200원/kW·연 3% 상승</div>
             </div>
             <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white">
               <div className="text-xs opacity-80 mb-1">손익분기점</div>

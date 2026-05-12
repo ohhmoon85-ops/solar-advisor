@@ -1,4 +1,8 @@
-import { SMP, REC_PRICE, REC_WEIGHT, GENERATION_HOURS, DEGRADATION_RATE, OP_COST_RATE, type InstallationType } from './constants'
+import {
+  SMP, REC_PRICE, REC_WEIGHT, GENERATION_HOURS, DEGRADATION_RATE,
+  OP_COST_PER_KW, OP_COST_INFLATION_RATE,
+  type InstallationType,
+} from './constants'
 
 export interface Revenue {
   annualKwh: number
@@ -108,10 +112,12 @@ export function calcYearlyTable(
     const totalRevMan = totalRevWon / 10000
 
     const loanPaymentMan = year <= loanYears ? annualPayment / 10000 : 0
-    // 운영비 = 매출의 2% (lib/constants.ts OP_COST_RATE)
-    // 발전량 감소(DEGRADATION 0.5%/년)는 totalRevMan에 이미 반영 → 운영비도 자동 비례 감소
-    // 시공사 검증 케이스 (97.82kW, 2,537만원 매출): 2,537 × 0.02 ≈ 50.7만원 ≈ 51만원 ✓
-    const opCostMan = totalRevMan * OP_COST_RATE
+    // 운영비 = 설비용량(kW) × 11,200원/kW × (1.03)^(year-1)
+    //   2026-05 시공사 표준 — 매출 × 2% 공식에서 변경
+    //   매년 3% 물가상승률(인건비·자재비) 반영
+    //   예: 123.54 kW → 1년차 138만원, 2년차 142만원, 3년차 147만원...
+    const inflationFactor = Math.pow(1 + OP_COST_INFLATION_RATE, year - 1)
+    const opCostMan = (kW * OP_COST_PER_KW / 10000) * inflationFactor
     const netIncomeMan = totalRevMan - loanPaymentMan - opCostMan
 
     cumulative += netIncomeMan
