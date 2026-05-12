@@ -664,41 +664,19 @@ export default function MapTab() {
       })
     }
 
-    // ❸ 패널 그리드 — 건물지붕형은 사용자가 직접 그리므로 간이 배치 패널 미표시
-    //   (지붕 형태가 자동 패널에 가려지는 문제 회피)
-    const isBuildingType = installType === '건물지붕형'
-    if (!isBuildingType) {
-      panelRects.forEach((rect, i) => {
-        ctx.fillStyle = 'rgba(59,130,246,0.70)'
-        ctx.fillRect(rect.x, rect.y, rect.w, rect.h)
-        ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 0.5
-        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h)
-        if (panelRects.length <= 60) {
-          ctx.fillStyle = 'rgba(255,255,255,0.9)'
-          ctx.font = `bold ${rect.w < 12 ? 6 : 8}px sans-serif`
-          ctx.textAlign = 'center'
-          ctx.fillText(String(i + 1), rect.x + rect.w / 2, rect.y + rect.h / 2 + 3)
-        }
-      })
-    }
+    // ❸ 간이 배치 패널 — 모든 설치 유형에서 미표시
+    //   정밀 분석에서 정확하게 배치하므로 간이 캔버스에는 면적·패널수 라벨만 표시
+    //   (지붕형: 지붕 형태 확인 / 토지형: 위성영상 확인 — 모두 가려지지 않도록)
 
-    // ❹ 이격 거리 표시선 — 건물지붕형 제외 (패널 미표시이므로 의미 없음)
-    if (!isBuildingType && panelRects.length > 0) {
-      const r0 = panelRects[0]
-      ctx.strokeStyle = 'rgba(239,68,68,0.8)'; ctx.lineWidth = 1
-      ctx.setLineDash([5, 4])
-      ctx.beginPath(); ctx.moveTo(r0.x, r0.y + r0.h); ctx.lineTo(r0.x + r0.w * 2.5, r0.y + r0.h); ctx.stroke()
-      ctx.setLineDash([])
-      ctx.fillStyle = '#ef4444'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'
-      ctx.fillText(`이격 ${spacingValue}m`, r0.x + r0.w * 2.5 + 3, r0.y + r0.h + 4)
-    }
-
-    // 건물지붕형 안내 텍스트 — 캔버스 중앙에 작게
-    if (isBuildingType && parcels.length > 0) {
+    // ❹ 안내 텍스트 — 유형별 분기, 필지 표시 상태에서 캔버스 상단에 표시
+    if (parcels.length > 0) {
       ctx.fillStyle = 'rgba(220,38,38,0.85)'
       ctx.font = 'bold 12px sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText('🏠 건물지붕형 — 정밀 분석에서 지붕을 직접 그려주세요', CANVAS_W / 2, 28)
+      const guideText = installType === '건물지붕형'
+        ? '🏠 지붕 형태 확인 후, 정밀 분석에서 지붕을 직접 그려주세요'
+        : '🛠 정밀 분석에서 패널을 자세히 배치합니다'
+      ctx.fillText(guideText, CANVAS_W / 2, 28)
     }
 
     // ❺ 중심 레이블
