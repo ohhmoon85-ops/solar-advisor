@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
@@ -40,6 +40,9 @@ export default function RevenueTab() {
 
   const [activeView, setActiveView] = useState<'table' | 'chart' | 'compare'>('chart')
   const [useKierData, setUseKierData] = useState(true) // KIER 실측값 사용 여부
+  const [pdfLoading, setPdfLoading] = useState(false)
+  // Phase T: PDF 캡처 영역 (KPI + Revenue breakdown + Tabs, LCOE는 제외)
+  const pdfRegionRef = useRef<HTMLDivElement>(null)
 
   // 실제 계산에 사용할 발전 시간 (KIER 실측 or 기본 3.5h)
   const effectiveGenHours = useKierData && kierPvHours ? kierPvHours : GENERATION_HOURS
@@ -115,6 +118,116 @@ export default function RevenueTab() {
     ),
     [estimatedPanelCount, capacityKw, priceOverride]
   )
+
+  // ── Phase T: PDF 저장 ────────────────────────────────────────────
+  // 캡처 대상: pdfRegionRef (KPI 4 + Revenue breakdown + 현재 활성 탭)
+  // 패턴: html2canvas로 cloneNode 영역 + 헤더/메타 합성 캡처 → jsPDF A4 분할
+  const handleSavePDF = async () => {
+    const src = pdfRegionRef.current
+    if (!src) return
+    setPdfLoading(true)
+    try {
+      const { jsPDF } = await import('jspdf')
+      const { default: html2canvas } = await import('html2canvas')
+
+      // 오프스크린 합성 div — 헤더 + 메타 정보 + 캡처 영역 cloneNode
+      const offDiv = document.createElement('div')
+      offDiv.style.cssText = [
+        'position:fixed;left:-9999px;top:0;',
+        'background:white;padding:20px;',
+        'width:794px;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;',
+        'color:#1a1a1a;line-height:1.4;',
+      ].join('')
+
+      const today = new Date().toLocaleDateString('ko-KR')
+      const viewLabel = activeView === 'chart' ? '누적 손익 차트'
+        : activeView === 'table' ? '20년 상세 테이블' : '유형별 비교'
+      const addressLabel = mapResult?.address ?? '주소 미연동'
+
+      // 헤더 + 입력 메타 (PDF 단독으로 봐도 맥락 이해 가능하도록)
+      offDiv.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;border-bottom:2px solid #3b82f6;padding-bottom:10px">
+          <span style="font-size:22px">📊</span>
+          <div style="flex:1">
+            <div style="font-size:18px;font-weight:bold;color:#1e293b">수익성 시뮬레이션 결과</div>
+            <div style="font-size:11px;color:#64748b">SolarAdvisor v5.2 — ${today} 생성 · ${viewLabel}</div>
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:11px">
+          <tr style="background:#f8fafc">
+            <td style="padding:5px 10px;color:#64748b;width:90px;border:1px solid #e2e8f0">📍 주소</td>
+            <td style="padding:5px 10px;color:#1e293b;border:1px solid #e2e8f0">${addressLabel}</td>
+            <td style="padding:5px 10px;color:#64748b;width:90px;border:1px solid #e2e8f0">설비 용량</td>
+            <td style="padding:5px 10px;color:#1e293b;font-weight:bold;border:1px solid #e2e8f0">${capacityKw} kW</td>
+          </tr>
+          <tr>
+            <td style="padding:5px 10px;color:#64748b;border:1px solid #e2e8f0">설치 유형</td>
+            <td style="padding:5px 10px;color:#1e293b;border:1px solid #e2e8f0">${installationType}</td>
+            <td style="padding:5px 10px;color:#64748b;border:1px solid #e2e8f0">총 사업비</td>
+            <td style="padding:5px 10px;color:#1e293b;border:1px solid #e2e8f0">${fmt(totalCost)} 만원</td>
+          </tr>
+          <tr style="background:#f8fafc">
+            <td style="padding:5px 10px;color:#64748b;border:1px solid #e2e8f0">총 대출</td>
+            <td style="padding:5px 10px;color:#1e293b;border:1px solid #e2e8f0">${loanRatio}% (정책 ${Math.min(policyLoanRatio, loanRatio)}%@${policyLoanRate}% · 시중 ${Math.max(loanRatio - policyLoanRatio, 0)}%@${loanRate}%)</td>
+            <td style="padding:5px 10px;color:#64748b;border:1px solid #e2e8f0">대출 기간</td>
+            <td style="padding:5px 10px;color:#1e293b;border:1px solid #e2e8f0">${loanYears}년</td>
+          </tr>
+          <tr>
+            <td style="padding:5px 10px;color:#64748b;border:1px solid #e2e8f0">SMP</td>
+            <td style="padding:5px 10px;color:#1e293b;border:1px solid #e2e8f0">${priceOverride.smp.toFixed(2)} 원/kWh</td>
+            <td style="padding:5px 10px;color:#64748b;border:1px solid #e2e8f0">발전 시간</td>
+            <td style="padding:5px 10px;color:#1e293b;border:1px solid #e2e8f0">${effectiveGenHours} h/일${useKierData && kierPvHours ? ' (KIER 실측)' : ''}</td>
+          </tr>
+        </table>
+      `
+
+      // 캡처 영역 깊은 복제 (recharts SVG·table 포함)
+      const cloned = src.cloneNode(true) as HTMLElement
+      // 복제본의 button 등 인터랙티브 요소는 PDF에서 의미 없음 — 그대로 두되 가독성만 유지
+      offDiv.appendChild(cloned)
+      document.body.appendChild(offDiv)
+
+      try {
+        const captured = await html2canvas(offDiv, {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          logging: false,
+        })
+        const pdf = new jsPDF('p', 'mm', 'a4')
+        const pageW = pdf.internal.pageSize.getWidth()
+        const pageH = pdf.internal.pageSize.getHeight()
+        const margin = 8
+        const printW = pageW - margin * 2
+        const printH = (captured.height / captured.width) * printW
+
+        // 페이지 분할 (긴 콘텐츠 대응 — 20년 테이블은 분할 필요)
+        let yRemain = printH
+        let srcY = 0
+        while (yRemain > 0) {
+          const sliceH = Math.min(pageH - margin * 2, yRemain)
+          const slice = document.createElement('canvas')
+          slice.width = captured.width
+          slice.height = Math.round((sliceH / printW) * captured.width)
+          const ctx = slice.getContext('2d')!
+          ctx.drawImage(captured, 0, srcY, captured.width, slice.height, 0, 0, captured.width, slice.height)
+          pdf.addImage(slice.toDataURL('image/png'), 'PNG', margin, margin, printW, sliceH)
+          yRemain -= sliceH
+          srcY += slice.height
+          if (yRemain > 0) pdf.addPage()
+        }
+        const addrSafe = (addressLabel || 'site').replace(/[\\/:*?"<>|]/g, '_').slice(0, 30)
+        pdf.save(`수익성_${addrSafe}_${viewLabel}_${today.replace(/[.\s]/g, '')}.pdf`)
+      } finally {
+        document.body.removeChild(offDiv)
+      }
+    } catch (err) {
+      console.error('PDF 생성 실패:', err)
+      alert('PDF 생성 중 오류: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setPdfLoading(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -295,6 +408,8 @@ export default function RevenueTab() {
 
         {/* Results */}
         <div className="flex-1 min-w-0 space-y-4">
+          {/* Phase T: PDF 캡처 영역 — KPI + Revenue breakdown + Tabs (LCOE는 외부) */}
+          <div ref={pdfRegionRef} className="space-y-4">
           {/* KPI cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white">
@@ -343,7 +458,7 @@ export default function RevenueTab() {
 
           {/* Tabs */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="flex border-b border-gray-200">
+            <div className="flex border-b border-gray-200 items-stretch">
               {[
                 { key: 'chart', label: '누적 손익 차트' },
                 { key: 'table', label: '20년 상세 테이블' },
@@ -360,6 +475,15 @@ export default function RevenueTab() {
                   {tab.label}
                 </button>
               ))}
+              {/* Phase T: PDF 저장 — 활성 탭 + KPI 4개 함께 출력 */}
+              <button
+                onClick={handleSavePDF}
+                disabled={pdfLoading}
+                className="px-3 py-2.5 text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600 transition-colors disabled:opacity-60 flex items-center gap-1"
+                title="현재 활성 탭과 KPI 지표를 A4 PDF로 저장"
+              >
+                {pdfLoading ? '생성 중…' : '↓ PDF'}
+              </button>
             </div>
 
             <div className="p-4">
@@ -514,6 +638,7 @@ export default function RevenueTab() {
               )}
             </div>
           </div>
+          </div>{/* /pdfRegionRef — Phase T */}
         </div>
       </div>
 
