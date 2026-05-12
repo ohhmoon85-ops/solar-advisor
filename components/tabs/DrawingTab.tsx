@@ -452,7 +452,7 @@ export default function DrawingTab() {
                   {/* Safe zone — 위성지도 위에서도 경계 식별 가능하도록 반투명 채움 */}
                   {zone.safeZone.safeZonePolygon && zone.safeZone.safeZonePolygon.length >= 3 && (
                     <polygon points={toPts(zone.safeZone.safeZonePolygon)}
-                      fill={satTilesDT.length > 0 ? 'rgba(219,234,254,0.45)' : '#eff6ff'}
+                      fill={satTilesDT.length > 0 ? 'none' : '#eff6ff'}
                       stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="7 3" opacity="0.85" />
                   )}
                   {/* Boundary */}

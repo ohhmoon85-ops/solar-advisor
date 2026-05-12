@@ -964,8 +964,8 @@ export default function LayoutEditor({
               />
             )}
 
-            {/* Layer 2a: Safe Zone 흰색 덮개 — 마진 붉은 영역을 Safe Zone 내부에서 지움 */}
-            {result.safeZone.safeZonePolygon.length > 2 && (
+            {/* Layer 2a: Safe Zone 덮개 — 위성 배경 없을 때만 적용 */}
+            {result.safeZone.safeZonePolygon.length > 2 && svgTileData.length === 0 && (
               <polygon
                 points={polyToPoints(result.safeZone.safeZonePolygon, vb, SVG_W, SVG_H)}
                 fill="rgba(240,253,244,0.92)"
