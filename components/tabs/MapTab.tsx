@@ -1120,12 +1120,22 @@ export default function MapTab() {
 
   const handleSendToRevenue = (source: 'quick' | 'precision' = 'quick') => {
     const addressLabel = addresses.filter(Boolean).join(', ')
-    if (source === 'precision' && svgAnalysisResult && !isMultiZoneResult(svgAnalysisResult)) {
-      const genHours = kierResult?.pvHours ?? GENERATION_HOURS
-      const svgCount = svgAnalysisResult.layout.totalCount
-      const svgKwp = svgAnalysisResult.layout.totalKwp
-      const svgAnnualKwh = Math.round(svgKwp * genHours * 365)
-      setMapResult({ panelCount: svgCount, capacityKwp: svgKwp, annualKwh: svgAnnualKwh, area, address: addressLabel, tiltAngle, moduleIndex })
+    const genHours = kierResult?.pvHours ?? GENERATION_HOURS
+    if (source === 'precision' && svgAnalysisResult) {
+      if (isMultiZoneResult(svgAnalysisResult)) {
+        // 다구역: zones 합산값 전송
+        const mz = svgAnalysisResult as MultiZoneResult
+        const svgCount = mz.zones.reduce((s, z) => s + z.layout.totalCount, 0)
+        const svgKwp = parseFloat(mz.zones.reduce((s, z) => s + z.layout.totalKwp, 0).toFixed(2))
+        setMapResult({ panelCount: svgCount, capacityKwp: svgKwp, annualKwh: Math.round(svgKwp * genHours * 365), area, address: addressLabel, tiltAngle, moduleIndex })
+      } else {
+        // 단일 구역: editingCount 우선 반영
+        const res = svgAnalysisResult as FullAnalysisResult
+        const wpp = res.layout.totalCount > 0 ? res.layout.totalKwp / res.layout.totalCount : 0.71
+        const svgCount = editingCount ?? res.layout.totalCount
+        const svgKwp = editingCount !== null ? parseFloat((editingCount * wpp).toFixed(2)) : res.layout.totalKwp
+        setMapResult({ panelCount: svgCount, capacityKwp: svgKwp, annualKwh: Math.round(svgKwp * genHours * 365), area, address: addressLabel, tiltAngle, moduleIndex })
+      }
     } else {
       setMapResult({ panelCount, capacityKwp, annualKwh, area, address: addressLabel, tiltAngle, moduleIndex })
     }
@@ -2001,29 +2011,48 @@ export default function MapTab() {
                 {`  ·  경계마진 ${(userBoundaryMargin ?? (BOUNDARY_MARGIN[installType] ?? 2)).toFixed(1)}m${userBoundaryMargin != null ? ' (사용자 지정)' : ''}`}
               </div>
             </div>
-            {/* 수익성 연동 — 정밀분석 결과가 있으면 두 가지 선택 제공 */}
-            {svgAnalysisResult && !isMultiZoneResult(svgAnalysisResult) && svgAnalysisResult.layout.totalCount > 0 ? (
-              <div className="mt-3 space-y-2">
-                <div className="text-xs text-gray-500 text-center">수익성 시뮬레이터에 적용할 수량을 선택하세요</div>
-                <div className="grid grid-cols-2 gap-2">
+            {/* 수익성 연동 — 정밀분析 결과가 있으면 간이/정밀 두 버튼, 없으면 단일 버튼 */}
+            {(() => {
+              if (!svgAnalysisResult) {
+                return (
                   <button onClick={() => handleSendToRevenue('quick')}
-                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-xs font-semibold transition-colors border border-gray-300">
-                    <div className="text-[10px] text-gray-400 mb-0.5">간이분석</div>
-                    {panelCount.toLocaleString()}장 · {capacityKwp}kWp
+                    className="mt-3 w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold transition-colors">
+                    수익성 시뮬레이터로 연동 →
                   </button>
-                  <button onClick={() => handleSendToRevenue('precision')}
-                    className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-xs font-semibold transition-colors">
-                    <div className="text-[10px] text-blue-200 mb-0.5">정밀분석 ★권장</div>
-                    {(editingCount !== null ? editingCount : svgAnalysisResult.layout.totalCount).toLocaleString()}장 · {editingCount !== null ? ((editingCount * (svgAnalysisResult.layout.totalKwp / Math.max(1, svgAnalysisResult.layout.totalCount))).toFixed(2)) : svgAnalysisResult.layout.totalKwp}kWp
-                  </button>
+                )
+              }
+              const isMz = isMultiZoneResult(svgAnalysisResult)
+              let precCount: number
+              let precKwp: number
+              if (isMz) {
+                const mz = svgAnalysisResult as MultiZoneResult
+                precCount = mz.zones.reduce((s, z) => s + z.layout.totalCount, 0)
+                precKwp = parseFloat(mz.zones.reduce((s, z) => s + z.layout.totalKwp, 0).toFixed(2))
+              } else {
+                const res = svgAnalysisResult as FullAnalysisResult
+                const wpp = res.layout.totalCount > 0 ? res.layout.totalKwp / res.layout.totalCount : 0.71
+                precCount = editingCount !== null ? editingCount : res.layout.totalCount
+                precKwp = editingCount !== null ? parseFloat((editingCount * wpp).toFixed(2)) : res.layout.totalKwp
+              }
+              if (precCount === 0) return null
+              return (
+                <div className="mt-3 space-y-2">
+                  <div className="text-xs text-gray-500 text-center">수익성 시뮬레이터에 적용할 수량을 선택하세요</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => handleSendToRevenue('quick')}
+                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-xs font-semibold transition-colors border border-gray-300">
+                      <div className="text-[10px] text-gray-400 mb-0.5">간이분析</div>
+                      {panelCount.toLocaleString()}장 · {capacityKwp}kWp
+                    </button>
+                    <button onClick={() => handleSendToRevenue('precision')}
+                      className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-xs font-semibold transition-colors">
+                      <div className="text-[10px] text-blue-200 mb-0.5">정밀分析 ★권장</div>
+                      {precCount.toLocaleString()}장 · {precKwp}kWp
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <button onClick={() => handleSendToRevenue('quick')}
-                className="mt-3 w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold transition-colors">
-                수익성 시뮬레이터로 연동 →
-              </button>
-            )}
+              )
+            })()}
           </div>
         )}
 
@@ -2732,7 +2761,7 @@ export default function MapTab() {
                     // 태양 광선: 좌측 모듈 상단 (40,34) → 다음 모듈 시작 (nextModuleStartX, 56)
                     // 그림자 회피 = 광선이 정확히 다음 모듈 시작에 닿는 시점
                     return (
-                      <svg viewBox="0 0 200 72" className="w-full" style={{ height: '120px' }}>
+                      <svg viewBox="0 0 200 80" className="w-full" style={{ height: '160px' }}>
                         <defs>
                           <marker id="ray-arrow" viewBox="0 0 10 10" refX="9" refY="5"
                             markerWidth="5" markerHeight="5" orient="auto">
@@ -2758,15 +2787,15 @@ export default function MapTab() {
                           fill="none" stroke="#f59e0b" strokeWidth="1"
                         />
                         {/* 라벨 — 사용자 입력 반영 (변경 즉시 다이어그램 갱신) */}
-                        <text x="44" y="52" fontSize="9" fill="#6b7280">빈공간 {displayGap.toFixed(2)}m</text>
-                        <text x="80" y="69" fontSize="9" fill="#9ca3af">행간 {displaySpacing.toFixed(2)}m</text>
-                        <text x="2" y="69" fontSize="9" fill="#3b82f6">모듈</text>
+                        <text x="44" y="51" fontSize="11" fill="#6b7280">빈공간 {displayGap.toFixed(2)}m</text>
+                        <text x="70" y="73" fontSize="11" fill="#9ca3af">행간 {displaySpacing.toFixed(2)}m</text>
+                        <text x="2" y="73" fontSize="11" fill="#3b82f6">모듈</text>
                         {/* 태양각 라벨: 광선 중간 위쪽 */}
-                        <text x={42 + gapPx / 2 - 18} y={42} fontSize="9" fill="#f59e0b" fontWeight="bold">
+                        <text x={42 + gapPx / 2 - 20} y={41} fontSize="11" fill="#f59e0b" fontWeight="bold">
                           ☀ 태양 {Math.round(solarAng)}°
                         </text>
-                        <text x="162" y="53" fontSize="9" fill="#9ca3af">토지</text>
-                        <text x={Math.min(143, nextModuleTopX - 3)} y="69" fontSize="9" fill="#3b82f6">다음 모듈</text>
+                        <text x="158" y="52" fontSize="11" fill="#9ca3af">토지</text>
+                        <text x={Math.min(130, nextModuleTopX - 3)} y="73" fontSize="11" fill="#3b82f6">다음모듈</text>
                       </svg>
                     )
                   })()}
