@@ -248,7 +248,7 @@ export default function MapTab() {
   const {
     setMapResult, setActiveTab, setKierPvHours, setKierGhi, setLocationCoords,
     setLastFullAnalysisJson, setLastAnalysisAddress,
-    pendingRestore, setPendingRestore,
+    pendingRestore, setPendingRestore, setLastGeoOrigin,
     liveSmp, priceOverride,
     roofPolygons, drawingMode, currentDrawingPoints,
     setDrawingMode, addDrawingPoint, popDrawingPoint, clearDrawing, commitPolygon,
@@ -262,6 +262,7 @@ export default function MapTab() {
   // SMP 단일 소스 — store의 실시간 KPX 응답값 (없으면 사용자 수동 설정값)
   const smpDisplay = liveSmp ?? priceOverride.smp
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const roofSvgRef = useRef<SVGSVGElement>(null)
   const blobUrlsRef = useRef<string[]>([]) // cleanup용
 
   // ── 입력 ──
@@ -1075,6 +1076,7 @@ export default function MapTab() {
       setLocationCoords({ lat: first.lat, lon: first.lon })
       setApiCoords({ lat: first.lat, lon: first.lon })
       setCanvasCenter({ lat: cLat, lon: cLon })
+      setLastGeoOrigin({ lat: cLat, lon: cLon })
       setParcelLabel(converted.map(p => p.label).join(' · '))
 
       // 패널 계산은 recalculatePanels useEffect가 parcels/pixelScale 변경 시 자동 처리
@@ -1130,16 +1132,40 @@ export default function MapTab() {
     setActiveTab('revenue')
   }
 
-  const handleSavePNG = () => {
-    const canvas = canvasRef.current; if (!canvas) return
+  // 메인 canvas + SVG 오버레이(지붕 폴리곤)를 단일 dataURL로 합성
+  const getCompositeDataUrl = async (): Promise<string> => {
+    const src = canvasRef.current
+    if (!src) return ''
+    const roofSvg = roofSvgRef.current
+    if (!roofSvg || roofPolygons.length === 0) return src.toDataURL('image/png')
+    const composite = document.createElement('canvas')
+    composite.width = src.width
+    composite.height = src.height
+    const ctx = composite.getContext('2d')!
+    ctx.drawImage(src, 0, 0)
+    const svgData = new XMLSerializer().serializeToString(roofSvg)
+    await new Promise<void>(resolve => {
+      const img = new Image()
+      img.onload = () => { ctx.drawImage(img, 0, 0, composite.width, composite.height); resolve() }
+      img.onerror = () => resolve()
+      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
+    })
+    return composite.toDataURL('image/png')
+  }
+
+  const handleSavePNG = async () => {
+    if (!canvasRef.current) return
+    const dataUrl = await getCompositeDataUrl()
+    if (!dataUrl) return
     const link = document.createElement('a')
     link.download = `solar-layout-${addresses.filter(Boolean)[0] || 'site'}.png`
-    link.href = canvas.toDataURL(); link.click()
+    link.href = dataUrl; link.click()
   }
 
   const handleSavePDF = async () => {
-    const srcCanvas = canvasRef.current
-    if (!srcCanvas) return
+    if (!canvasRef.current) return
+    const compositeDataUrl = await getCompositeDataUrl()
+    if (!compositeDataUrl) return
     const { jsPDF } = await import('jspdf')
     // html2canvas-pro: Tailwind v4 oklch/lab/oklab 색 함수 지원
     const { default: html2canvas } = await import('html2canvas-pro')
@@ -1217,7 +1243,7 @@ export default function MapTab() {
           </tr>
         `).join('')}
       </table>
-      <img src="${srcCanvas.toDataURL('image/png')}" style="width:100%;border:1px solid #e2e8f0;border-radius:6px" />
+      <img src="${compositeDataUrl}" style="width:100%;border:1px solid #e2e8f0;border-radius:6px" />
       ${adjacencyHtml}
       <div style="margin-top:10px;font-size:10px;color:#94a3b8;text-align:center">
         생성: ${new Date().toLocaleDateString('ko-KR')} — SolarAdvisor v5.2 (SMP ${smpDisplay.toFixed(2)}원/kWh${liveSmp != null ? ' · KPX 실시간' : ''} · REC 건물 ${priceOverride.recBuilding.toLocaleString()}원/MWh · 발전시간 3.5h)
@@ -1988,7 +2014,7 @@ export default function MapTab() {
                   <button onClick={() => handleSendToRevenue('precision')}
                     className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-xs font-semibold transition-colors">
                     <div className="text-[10px] text-blue-200 mb-0.5">정밀분석 ★권장</div>
-                    {(editingCount !== null ? editingCount : svgAnalysisResult.layout.totalCount).toLocaleString()}장 · {isEditing && editingCount !== null ? ((editingCount * (svgAnalysisResult.layout.totalKwp / Math.max(1, svgAnalysisResult.layout.totalCount))).toFixed(2)) : svgAnalysisResult.layout.totalKwp}kWp
+                    {(editingCount !== null ? editingCount : svgAnalysisResult.layout.totalCount).toLocaleString()}장 · {editingCount !== null ? ((editingCount * (svgAnalysisResult.layout.totalKwp / Math.max(1, svgAnalysisResult.layout.totalCount))).toFixed(2)) : svgAnalysisResult.layout.totalKwp}kWp
                   </button>
                 </div>
               </div>
@@ -2027,11 +2053,11 @@ export default function MapTab() {
               )}
             </div>
             <div className="flex flex-wrap gap-1.5">
-              <button onClick={handleSavePNG} disabled={!isComplete}
+              <button onClick={handleSavePNG} disabled={!isComplete && roofPolygons.length === 0}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40">
                 PNG 저장
               </button>
-              <button onClick={handleSavePDF} disabled={!isComplete}
+              <button onClick={handleSavePDF} disabled={!isComplete && roofPolygons.length === 0}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-40">
                 PDF 출력
               </button>
@@ -2094,6 +2120,7 @@ export default function MapTab() {
             {/* z:6 — 지붕 그리기 SVG 오버레이 (svgPlotType==='roof' 시 항상 마운트) */}
             {svgPlotType === 'roof' && (
               <svg
+                ref={roofSvgRef}
                 viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
                 preserveAspectRatio="none"
                 onClick={handleDrawingSvgClick}
@@ -2875,15 +2902,19 @@ export default function MapTab() {
                         setSvgAnalysisResult(prev => {
                           if (!prev || !isMultiZoneResult(prev)) return prev
                           const zoneLabel = activeZoneId + '구역'
-                          const updatedZones = (prev as MultiZoneResult).zones.map(z =>
-                            z.zoneLabel === zoneLabel
-                              ? { ...z, layout: { ...z.layout, totalCount: count } }
-                              : z
-                          )
+                          const updatedZones = (prev as MultiZoneResult).zones.map(z => {
+                            if (z.zoneLabel !== zoneLabel) return z
+                            const wattPerPanel = z.layout.totalCount > 0
+                              ? z.layout.totalKwp / z.layout.totalCount
+                              : 0.71
+                            const newKwp = parseFloat((count * wattPerPanel).toFixed(2))
+                            return { ...z, layout: { ...z.layout, totalCount: count, totalKwp: newKwp } }
+                          })
                           return {
                             ...(prev as MultiZoneResult),
                             zones: updatedZones,
                             totalCount: updatedZones.reduce((s, z) => s + z.layout.totalCount, 0),
+                            totalKwp: parseFloat(updatedZones.reduce((s, z) => s + z.layout.totalKwp, 0).toFixed(2)),
                           }
                         })
                       }

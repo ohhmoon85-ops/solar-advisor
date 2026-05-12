@@ -131,6 +131,10 @@ interface SolarStore {
   historyCount: number
   setHistoryCount: (n: number) => void
 
+  /** MapTab 지번 로드 시 저장한 지도 중심 좌표 (DrawingTab 위성지도 배경용) */
+  lastGeoOrigin: { lat: number; lon: number } | null
+  setLastGeoOrigin: (o: { lat: number; lon: number } | null) => void
+
   // ── Phase C-1: 지붕 폴리곤 그리기 ────────────────────────────────
   roofPolygons: RoofPolygon[]
   drawingMode: boolean
@@ -229,6 +233,9 @@ export const useSolarStore = create<SolarStore>((set) => ({
 
   historyCount: 0,
   setHistoryCount: (n) => set({ historyCount: n }),
+
+  lastGeoOrigin: null,
+  setLastGeoOrigin: (o) => set({ lastGeoOrigin: o }),
 
   // ── Phase C-1: 지붕 폴리곤 그리기 ────────────────────────────────
   roofPolygons: [],

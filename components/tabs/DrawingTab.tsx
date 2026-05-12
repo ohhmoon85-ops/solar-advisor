@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { useSolarStore } from '@/store/useStore'
 import type { FullAnalysisResult } from '@/lib/layoutEngine'
 import type { MultiZoneResult, ZoneLayoutResult } from '@/lib/multiZoneLayout'
@@ -22,7 +22,7 @@ const PAPER: Record<PaperSize, PaperCfg> = {
 }
 
 // ── Layout constants ──────────────────────────────────────────────
-const NUM_ROWS = 12
+const NUM_ROWS = 13
 const STANDARD_SCALES = [50, 100, 150, 200, 250, 300, 500, 750, 1000, 1500, 2000, 3000, 5000]
 const NICE_BAR_M = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
 const FONT = 'Malgun Gothic, Apple SD Gothic Neo, NanumGothic, sans-serif'
@@ -85,11 +85,11 @@ export default function DrawingTab() {
   const svgRef = useRef<SVGSVGElement>(null)
   const [paperSize, setPaperSize] = useState<PaperSize>('A3L')
   const [authorName, setAuthorName] = useState('')
+  const [companyName, setCompanyName] = useState('')
   const [projectName, setProjectName] = useState('')
-  const [metaSaved, setMetaSaved] = useState(false)
   const [exporting, setExporting] = useState<'pdf' | null>(null)
   const [drawingNumber] = useState(genDrawingNumber)
-  const { lastFullAnalysisJson, lastAnalysisAddress, mapResult, setActiveTab } = useSolarStore()
+  const { lastFullAnalysisJson, lastAnalysisAddress, mapResult, setActiveTab, lastGeoOrigin } = useSolarStore()
 
   // Load saved form values from localStorage
   useEffect(() => {
@@ -97,20 +97,24 @@ export default function DrawingTab() {
     try {
       const raw = localStorage.getItem('solar_drawing_meta')
       if (raw) {
-        const { author = '', project = '' } = JSON.parse(raw)
+        const { author = '', company = '', project = '' } = JSON.parse(raw)
         setAuthorName(author)
+        setCompanyName(company)
         setProjectName(project)
       }
     } catch { /* ignore */ }
   }, [])
 
-  const handleSaveMeta = () => {
-    try {
-      localStorage.setItem('solar_drawing_meta', JSON.stringify({ author: authorName, project: projectName }))
-      setMetaSaved(true)
-      setTimeout(() => setMetaSaved(false), 2000)
-    } catch { /* ignore */ }
-  }
+  // 600ms debounce 자동 저장
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoSave = useCallback((author: string, company: string, project: string) => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem('solar_drawing_meta', JSON.stringify({ author, company, project }))
+      } catch { /* ignore */ }
+    }, 600)
+  }, [])
 
   // Parse analysis result — collect ALL zones
   let zones: FullAnalysisResult[] = []
@@ -171,6 +175,83 @@ export default function DrawingTab() {
     drawH - ((p.y - vb.minY) / vb.rangeY) * drawH,
   ]
 
+  // ── 위성지도 배경 타일 계산 ─────────────────────────────────────
+  // ENU 좌표(m) ↔ WGS84 변환 (lastGeoOrigin 기준)
+  const MPD_LAT_DT = 111319.9
+  interface SatTileDT { src: string; x: number; y: number; w: number; h: number }
+  const satTilesDT: SatTileDT[] = (() => {
+    if (!lastGeoOrigin) return []
+    const { lat: oLat, lon: oLon } = lastGeoOrigin
+    const mpdLonDT = MPD_LAT_DT * Math.cos(oLat * Math.PI / 180)
+    // ENU → WGS84
+    const enuToGeo = (x: number, y: number) => ({
+      lon: oLon + x / mpdLonDT,
+      lat: oLat + y / MPD_LAT_DT,
+    })
+    // WGS84 → 타일 좌표
+    const lonLatToTileDT = (lon: number, lat: number, z: number) => {
+      const n = Math.pow(2, z)
+      const tx = Math.floor((lon + 180) / 360 * n)
+      const lr = lat * Math.PI / 180
+      const ty = Math.floor((1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * n)
+      return { tx, ty }
+    }
+    // 타일 북서 모서리 WGS84
+    const tileOriginDT = (tx: number, ty: number, z: number) => {
+      const n = Math.pow(2, z)
+      return {
+        lon: tx / n * 360 - 180,
+        lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * ty / n))) * 180 / Math.PI,
+      }
+    }
+    // WGS84 → ENU
+    const geoToEnu = (lon: number, lat: number) => ({
+      x: (lon - oLon) * mpdLonDT,
+      y: (lat - oLat) * MPD_LAT_DT,
+    })
+    // ENU → SVG 픽셀
+    const enuToSvg = (x: number, y: number): [number, number] => [
+      ((x - vb.minX) / vb.rangeX) * drawW,
+      drawH - ((y - vb.minY) / vb.rangeY) * drawH,
+    ]
+    // 줌 레벨: m/px 기준으로 역산
+    const mPerPx = vb.rangeX / drawW
+    const rawZ = Math.log2(40075016.686 * Math.cos(oLat * Math.PI / 180) / (256 * mPerPx))
+    const z = Math.max(15, Math.min(20, Math.round(rawZ)))
+    // 뷰박스 코너의 WGS84 범위
+    const corners = [
+      enuToGeo(vb.minX, vb.minY),
+      enuToGeo(vb.minX + vb.rangeX, vb.minY + vb.rangeY),
+    ]
+    const minTile = lonLatToTileDT(
+      Math.min(corners[0].lon, corners[1].lon),
+      Math.max(corners[0].lat, corners[1].lat),
+      z,
+    )
+    const maxTile = lonLatToTileDT(
+      Math.max(corners[0].lon, corners[1].lon),
+      Math.min(corners[0].lat, corners[1].lat),
+      z,
+    )
+    const tiles: SatTileDT[] = []
+    for (let tx = minTile.tx; tx <= maxTile.tx; tx++) {
+      for (let ty = minTile.ty; ty <= maxTile.ty; ty++) {
+        const nw = tileOriginDT(tx, ty, z)
+        const se = tileOriginDT(tx + 1, ty + 1, z)
+        const enuNW = geoToEnu(nw.lon, nw.lat)
+        const enuSE = geoToEnu(se.lon, se.lat)
+        const [sx1, sy1] = enuToSvg(enuNW.x, enuNW.y)
+        const [sx2, sy2] = enuToSvg(enuSE.x, enuSE.y)
+        tiles.push({
+          src: `/api/vworld?type=satellite&z=${z}&x=${tx}&y=${ty}`,
+          x: sx1, y: sy1,
+          w: sx2 - sx1, h: sy2 - sy1,
+        })
+      }
+    }
+    return tiles
+  })()
+
   // ── Scale & bar ───────────────────────────────────────────────
   const scale = selectScale(vb.rangeX, drawWMM)
   const barM = niceBarM(vb.rangeX)
@@ -203,6 +284,7 @@ export default function DrawingTab() {
     { label: '배열 간격', val: `${refZone.rowSpacing.toFixed(2)} m` },
     { label: '축 척', val: `1 : ${scale.toLocaleString()}` },
     { label: '작 성 자', val: authorName || '—' },
+    { label: '회 사 명', val: companyName || '—' },
     { label: '작 성 일', val: today },
   ]
 
@@ -254,7 +336,7 @@ export default function DrawingTab() {
   // ── DXF export ────────────────────────────────────────────────
   const handleExportDXF = () => {
     const safe = addrPrimary.replace(/\s+/g, '_').replace(/[^\w가-힣]/g, '').slice(0, 20)
-    exportDXF(zones, `배치도_${drawingNumber}_${safe}.dxf`)
+    exportDXF(zones, `배치도_${drawingNumber}_${safe}.dxf`, { author: authorName, company: companyName })
   }
 
   // ── JSX ───────────────────────────────────────────────────────
@@ -264,14 +346,23 @@ export default function DrawingTab() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
         {/* Drawing info form */}
         <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-          <div className="text-sm font-semibold text-gray-700 mb-3">📝 도면 정보</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="text-sm font-semibold text-gray-700 mb-3">📝 도면 정보 <span className="text-xs font-normal text-gray-400">(입력 시 자동 저장)</span></div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">작성자</label>
               <input
                 value={authorName}
-                onChange={e => setAuthorName(e.target.value)}
-                placeholder="작성자 이름 (예: 이강물산 조영두)"
+                onChange={e => { setAuthorName(e.target.value); autoSave(e.target.value, companyName, projectName) }}
+                placeholder="예: 조영두"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">회사명</label>
+              <input
+                value={companyName}
+                onChange={e => { setCompanyName(e.target.value); autoSave(authorName, e.target.value, projectName) }}
+                placeholder="예: 이강물산"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
@@ -279,19 +370,14 @@ export default function DrawingTab() {
               <label className="text-xs text-gray-500 mb-1 block">사업명 (선택)</label>
               <input
                 value={projectName}
-                onChange={e => setProjectName(e.target.value)}
+                onChange={e => { setProjectName(e.target.value); autoSave(authorName, companyName, e.target.value) }}
                 placeholder="예: 진주시 부계리 태양광 발전"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
           </div>
-          <div className="flex items-center gap-3 mt-3">
-            <button onClick={handleSaveMeta}
-              className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs rounded-lg font-medium transition-colors">
-              💾 저장
-            </button>
-            {metaSaved && <span className="text-xs text-green-600 font-medium">✓ 저장됨</span>}
-            <span className="text-xs text-gray-400 ml-auto hidden sm:block">도면번호: {drawingNumber}</span>
+          <div className="flex items-center mt-2">
+            <span className="text-xs text-gray-400">도면번호: {drawingNumber}</span>
           </div>
         </div>
 
@@ -348,12 +434,20 @@ export default function DrawingTab() {
 
             {/* Drawing content */}
             <g clipPath="url(#dc)">
+              {/* 위성지도 배경 — lastGeoOrigin 있을 때만 렌더링 */}
+              {satTilesDT.map((t, i) => (
+                <image key={i} href={t.src}
+                  x={t.x} y={t.y} width={t.w} height={t.h}
+                  preserveAspectRatio="none" opacity="0.85" />
+              ))}
+
               {zones.map((zone, zi) => (
                 <g key={zi}>
-                  {/* Safe zone */}
+                  {/* Safe zone — 위성지도 위에서도 경계 식별 가능하도록 반투명 채움 */}
                   {zone.safeZone.safeZonePolygon && zone.safeZone.safeZonePolygon.length >= 3 && (
                     <polygon points={toPts(zone.safeZone.safeZonePolygon)}
-                      fill="#eff6ff" stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="7 3" opacity="0.85" />
+                      fill={satTilesDT.length > 0 ? 'rgba(219,234,254,0.45)' : '#eff6ff'}
+                      stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="7 3" opacity="0.85" />
                   )}
                   {/* Boundary */}
                   <polygon points={toPts(zone.safeZone.originalPolygon)}
