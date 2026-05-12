@@ -91,7 +91,10 @@ export function calcYearlyTable(
   const annualPayment = policyPayment + commercialPayment
 
   const rows: YearlyData[] = []
-  let cumulative = -equity
+  // Phase U: 누적 = 순이익의 합 (자기자본 차감 X).
+  // 시공사 검증 — 누적[1]은 1년 차 순이익과 동일해야 함.
+  // 손익분기점(isBreakeven)은 "누적 ≥ 자기자본" = 자기자본 회수 시점으로 재정의.
+  let cumulative = 0
 
   for (let year = 1; year <= 20; year++) {
     const degradationFactor = Math.pow(1 - DEGRADATION_RATE, year - 1)
@@ -105,12 +108,16 @@ export function calcYearlyTable(
     const totalRevMan = totalRevWon / 10000
 
     const loanPaymentMan = year <= loanYears ? annualPayment / 10000 : 0
+    // 운영비 = 매출의 2% (lib/constants.ts OP_COST_RATE)
+    // 발전량 감소(DEGRADATION 0.5%/년)는 totalRevMan에 이미 반영 → 운영비도 자동 비례 감소
+    // 시공사 검증 케이스 (97.82kW, 2,537만원 매출): 2,537 × 0.02 ≈ 50.7만원 ≈ 51만원 ✓
     const opCostMan = totalRevMan * OP_COST_RATE
     const netIncomeMan = totalRevMan - loanPaymentMan - opCostMan
 
     cumulative += netIncomeMan
 
-    const isBreakeven = cumulative >= 0 && (rows.length === 0 || rows[rows.length - 1].cumulative < 0)
+    // 손익분기 = 자기자본 회수 시점 (누적 순이익 ≥ 투입 자기자본인 첫 해)
+    const isBreakeven = cumulative >= equity && (rows.length === 0 || rows[rows.length - 1].cumulative < equity)
     const isLoanPaid = year === loanYears + 1
 
     rows.push({
@@ -129,14 +136,24 @@ export function calcYearlyTable(
   return rows
 }
 
+/**
+ * 20년 ROI (자기자본 기준) — 자기자본 대비 순수익률
+ * Phase U: cumulative가 순이익의 합으로 정의 변경됨에 따라 ROI 분자를
+ * (누적 - 자기자본) 으로 보정 → 의미(자기자본 대비 수익률) 보존
+ */
 export function calcROI(rows: YearlyData[], equity: number): number {
+  if (equity <= 0) return 0
   const totalNet = rows[rows.length - 1].cumulative
-  return Math.round((totalNet / equity) * 100)
+  return Math.round(((totalNet - equity) / equity) * 100)
 }
 
-export function findBreakevenYear(rows: YearlyData[]): number {
+/**
+ * 손익분기점 = 누적 순이익이 자기자본을 회수하는 첫 해
+ * Phase U: equity 파라미터 명시. 미지정 시 equity=0 으로 동작(레거시 호환)
+ */
+export function findBreakevenYear(rows: YearlyData[], equity = 0): number {
   for (const row of rows) {
-    if (row.cumulative >= 0) return row.year
+    if (row.cumulative >= equity) return row.year
   }
   return -1
 }

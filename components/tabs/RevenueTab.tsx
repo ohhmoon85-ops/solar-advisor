@@ -63,7 +63,8 @@ export default function RevenueTab() {
     [capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate]
   )
 
-  const breakevenYear = useMemo(() => findBreakevenYear(yearlyData), [yearlyData])
+  // Phase U: 손익분기 = 자기자본 회수 시점 (누적 순이익 ≥ equity)
+  const breakevenYear = useMemo(() => findBreakevenYear(yearlyData, equity), [yearlyData, equity])
   const roi = useMemo(() => calcROI(yearlyData, equity), [yearlyData, equity])
   const netIncome1st = useMemo(() => yearlyData[0]?.netIncome ?? 0, [yearlyData])
 
@@ -77,8 +78,8 @@ export default function RevenueTab() {
   const scenarioData = useMemo(() =>
     INTEREST_SCENARIOS.map(s => {
       const rows = calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, s.rate, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate)
-      return { label: s.label, rate: s.rate, breakeven: findBreakevenYear(rows) }
-    }), [capacityKw, installationType, totalCost, loanRatio, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate]
+      return { label: s.label, rate: s.rate, breakeven: findBreakevenYear(rows, equity) }
+    }), [capacityKw, installationType, totalCost, loanRatio, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate, equity]
   )
 
   // ── LCOE·NPV 분석 (roiAnalyzer — calculations.ts 20년 테이블과 중복 없이 추가 지표만) ──
@@ -371,7 +372,8 @@ export default function RevenueTab() {
                       <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${fmt(v)}`} />
                       <Tooltip formatter={(v) => [`${fmt(Number(v))}만원`, '']} />
                       <Legend />
-                      <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" label={{ value: '손익분기', position: 'right', fontSize: 11 }} />
+                      {/* Phase U: 손익분기 기준선 = 자기자본 (누적 순이익이 이 선을 넘는 해가 자기자본 회수 시점) */}
+                      <ReferenceLine y={equity} stroke="#ef4444" strokeDasharray="4 4" label={{ value: `자기자본 회수선 (${Math.round(equity)}만원)`, position: 'right', fontSize: 10 }} />
                       <Line type="monotone" dataKey="cumulative" name="누적 손익(만원)" stroke="#3b82f6" strokeWidth={2} dot={false} />
                       <Line type="monotone" dataKey="netIncome" name="연간 순이익(만원)" stroke="#10b981" strokeWidth={1.5} dot={false} />
                     </LineChart>
