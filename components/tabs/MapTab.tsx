@@ -2531,18 +2531,6 @@ export default function MapTab() {
                         <span className="text-gray-400">m</span>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500" title="측량 오차/시공 편차 추가 여유. 일반적으로 0m">안전 마진</span>
-                      <div className="flex items-center gap-1">
-                        <input type="number" min={0} max={3} step={0.1}
-                          value={autoMargin}
-                          placeholder="0"
-                          onChange={e => setAutoMargin(Number(e.target.value))}
-                          title="측량 오차/시공 편차 추가 여유. 일반적으로 0m"
-                          className="w-12 px-1 py-0.5 text-xs border border-gray-300 rounded text-center font-mono" />
-                        <span className="text-gray-400">m</span>
-                      </div>
-                    </div>
                     <div className="flex justify-between text-xs border-t border-sky-100 pt-1">
                       <span className="text-gray-700 font-medium">최종 적용값</span>
                       <span className="font-bold text-emerald-700 text-sm">{finalSpacing.toFixed(2)}m</span>
