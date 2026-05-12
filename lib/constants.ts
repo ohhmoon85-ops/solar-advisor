@@ -24,6 +24,7 @@ export const OP_COST_PER_KW = 11200       // 원/kW/년
 // 운영비 물가상승률 — 매년 3% 상승 (인건비·자재비 반영)
 export const OP_COST_INFLATION_RATE = 0.03
 
+
 // 검증값 (100kW 건물지붕형)
 // 연간발전량: 127,750 kWh
 // SMP수익: 1,405만원, REC수익: 2,012만원, 총수익: 3,417만원
