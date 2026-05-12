@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 // VWorld 호출은 모두 /api/vworld 서버 프록시 경유 (Edge Runtime, icn1 PoP)
 // → 브라우저는 키 노출 없이 사용, Vercel IP 차단 회피
@@ -2761,41 +2761,73 @@ export default function MapTab() {
                     // 태양 광선: 좌측 모듈 상단 (40,34) → 다음 모듈 시작 (nextModuleStartX, 56)
                     // 그림자 회피 = 광선이 정확히 다음 모듈 시작에 닿는 시점
                     return (
-                      <svg viewBox="0 0 200 80" className="w-full" style={{ height: '160px' }}>
+                      <svg viewBox="0 0 200 112" className="w-full" style={{ height: '200px' }}>
                         <defs>
                           <marker id="ray-arrow" viewBox="0 0 10 10" refX="9" refY="5"
                             markerWidth="5" markerHeight="5" orient="auto">
                             <path d="M0,0 L10,5 L0,10 z" fill="#f59e0b" />
                           </marker>
                         </defs>
+
+                        {/* 지면 채우기 */}
+                        <rect x="0" y="56" width="200" height="56" fill="#e5e7eb" opacity="0.45"/>
                         {/* 토지 수평선 */}
                         <line x1="0" y1="56" x2="200" y2="56" stroke="#9ca3af" strokeWidth="2"/>
-                        {/* 좌측 모듈 (15° 경사) */}
-                        <line x1="10" y1="56" x2="40" y2="34" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round"/>
-                        {/* 빈공간 표시 */}
+
+                        {/* 좌측 모듈 */}
+                        <line x1="10" y1="56" x2="40" y2="34" stroke="#3b82f6" strokeWidth="3.5" strokeLinecap="round"/>
+
+                        {/* 빈공간 박스 */}
                         <rect x="40" y="34" width={gapPx} height="22"
                           fill="rgba(251,191,36,0.15)" stroke="rgba(251,191,36,0.6)" strokeWidth="1" strokeDasharray="3,2"/>
+
                         {/* 다음 모듈 */}
-                        <line x1={nextModuleStartX} y1="56" x2={nextModuleTopX} y2="34" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round"/>
-                        {/* ★ 태양 광선: 위→아래 (모듈 상단 → 다음 모듈 시작점), 화살표로 방향 명시 */}
+                        <line x1={nextModuleStartX} y1="56" x2={nextModuleTopX} y2="34" stroke="#3b82f6" strokeWidth="3.5" strokeLinecap="round"/>
+
+                        {/* 태양 광선 */}
                         <line x1={40} y1={34} x2={nextModuleStartX} y2={56}
-                          stroke="#f59e0b" strokeWidth="1.6" strokeDasharray="3,2"
+                          stroke="#f59e0b" strokeWidth="1.8" strokeDasharray="3,2"
                           markerEnd="url(#ray-arrow)" />
-                        {/* 태양각 호 (토지면과 광선 사이) — solarAng도 시각화 */}
+
+                        {/* 태양각 호 */}
                         <path
                           d={`M ${nextModuleStartX - 12} 56 A 12 12 0 0 0 ${nextModuleStartX - 12 * Math.cos(solarAng * Math.PI / 180)} ${56 - 12 * Math.sin(solarAng * Math.PI / 180)}`}
-                          fill="none" stroke="#f59e0b" strokeWidth="1"
+                          fill="none" stroke="#f59e0b" strokeWidth="1.2"
                         />
-                        {/* 라벨 — 사용자 입력 반영 (변경 즉시 다이어그램 갱신) */}
-                        <text x="44" y="51" fontSize="11" fill="#6b7280">빈공간 {displayGap.toFixed(2)}m</text>
-                        <text x="70" y="73" fontSize="11" fill="#9ca3af">행간 {displaySpacing.toFixed(2)}m</text>
-                        <text x="2" y="73" fontSize="11" fill="#3b82f6">모듈</text>
-                        {/* 태양각 라벨: 광선 중간 위쪽 */}
-                        <text x={42 + gapPx / 2 - 20} y={41} fontSize="11" fill="#f59e0b" fontWeight="bold">
-                          ☀ 태양 {Math.round(solarAng)}°
-                        </text>
-                        <text x="158" y="52" fontSize="11" fill="#9ca3af">토지</text>
-                        <text x={Math.min(130, nextModuleTopX - 3)} y="73" fontSize="11" fill="#3b82f6">다음모듈</text>
+
+                        {/* ── 라벨 (겹침 없이 3개 영역 분리) ── */}
+
+                        {/* ① 빈공간: 갭 박스 위 하늘 영역 + 리더선 */}
+                        <line
+                          x1={Math.min(40 + gapPx / 2, 160)} y1="28"
+                          x2={Math.min(40 + gapPx / 2, 160)} y2="33"
+                          stroke="#d97706" strokeWidth="1" strokeDasharray="2,1"/>
+                        <rect
+                          x={Math.max(2, Math.min(40 + gapPx / 2 - 36, 126))} y="13"
+                          width="72" height="15" rx="3"
+                          fill="white" opacity="0.95" stroke="#fde68a" strokeWidth="0.8"/>
+                        <text
+                          x={Math.max(5, Math.min(40 + gapPx / 2 - 33, 129))} y="24"
+                          fontSize="10.5" fill="#d97706" fontWeight="bold">빈공간 {displayGap.toFixed(2)}m</text>
+
+                        {/* ② 태양각: 좌측 상단 고정 (모듈 좌측 빈 공간 활용) */}
+                        <text x="3" y="28" fontSize="10.5" fill="#f59e0b" fontWeight="bold">☀</text>
+                        <text x="3" y="41" fontSize="10" fill="#f59e0b" fontWeight="bold">태양 {Math.round(solarAng)}°</text>
+
+                        {/* ③ 토지 레이블 */}
+                        <text x="168" y="52" fontSize="10.5" fill="#9ca3af">토지</text>
+
+                        {/* ④ 모듈 · 다음모듈 (지면 바로 아래 첫째 줄 y=68) */}
+                        <text x="4" y="68" fontSize="10.5" fill="#3b82f6" fontWeight="bold">모듈</text>
+                        <text x={Math.min(nextModuleStartX + 2, 150)} y="68" fontSize="10.5" fill="#3b82f6" fontWeight="bold">다음모듈</text>
+
+                        {/* ⑤ 행간 치수선 + 라벨 (둘째 줄 y=79~95, 다른 라벨과 완전 분리) */}
+                        <line x1="11" y1="79" x2={nextModuleStartX - 1} y2="79" stroke="#9ca3af" strokeWidth="1"/>
+                        <line x1="11" y1="75" x2="11" y2="83" stroke="#9ca3af" strokeWidth="1.2"/>
+                        <line x1={nextModuleStartX - 1} y1="75" x2={nextModuleStartX - 1} y2="83" stroke="#9ca3af" strokeWidth="1.2"/>
+                        <text
+                          x={Math.max(13, (11 + nextModuleStartX) / 2 - 28)} y="95"
+                          fontSize="10.5" fill="#6b7280">행간 {displaySpacing.toFixed(2)}m</text>
                       </svg>
                     )
                   })()}
