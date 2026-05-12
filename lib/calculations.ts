@@ -116,8 +116,10 @@ export function calcYearlyTable(
 
     cumulative += netIncomeMan
 
-    // 손익분기 = 자기자본 회수 시점 (누적 순이익 ≥ 투입 자기자본인 첫 해)
-    const isBreakeven = cumulative >= equity && (rows.length === 0 || rows[rows.length - 1].cumulative < equity)
+    // Phase U 보완: 손익분기 = 총 사업비 회수 시점 (누적 순이익 ≥ 총 투자금 첫 해)
+    // 시공사 의도: "1.1억 투자금 만큼이 되는 해 = 5년 차 당시 1.1억 투자 대비 초과 누적이 된다"
+    // → equity(자기자본 3,300) 가 아니라 totalCost(총 사업비 11,000)와 비교
+    const isBreakeven = cumulative >= totalCost && (rows.length === 0 || rows[rows.length - 1].cumulative < totalCost)
     const isLoanPaid = year === loanYears + 1
 
     rows.push({
@@ -148,12 +150,14 @@ export function calcROI(rows: YearlyData[], equity: number): number {
 }
 
 /**
- * 손익분기점 = 누적 순이익이 자기자본을 회수하는 첫 해
- * Phase U: equity 파라미터 명시. 미지정 시 equity=0 으로 동작(레거시 호환)
+ * 손익분기점 = 누적 순이익이 임계값을 회수하는 첫 해
+ * Phase U 보완: threshold = 총 사업비 (totalCost) 또는 자기자본(equity) 등 호출처에서 결정
+ *   RevenueTab은 totalCost(총 투자금) 사용 — 시공사 의도 "투자금 회수 시점"
+ * 미지정 시 threshold=0 으로 동작 (레거시 호환)
  */
-export function findBreakevenYear(rows: YearlyData[], equity = 0): number {
+export function findBreakevenYear(rows: YearlyData[], threshold = 0): number {
   for (const row of rows) {
-    if (row.cumulative >= equity) return row.year
+    if (row.cumulative >= threshold) return row.year
   }
   return -1
 }
