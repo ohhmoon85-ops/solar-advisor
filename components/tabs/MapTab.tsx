@@ -2518,15 +2518,52 @@ export default function MapTab() {
                         )}
                       </div>
                     </div>
-                    {/* 실시간 빈공간 안내 — 사용자가 입력한 행간 의미를 명확히 인지하도록 */}
+                    {/* 실시간 빈공간 안내 — 신호등 3단계 시각화 */}
                     {(() => {
                       const currentSpacing = userRowSpacing ?? recommended
-                      const currentGap = currentSpacing - projLen
-                      const gapColor = currentGap < 0.3 ? 'text-red-600' : currentGap < 1.0 ? 'text-amber-600' : 'text-gray-500'
+                      const currentGap = Math.max(currentSpacing - projLen, 0)
+                      const stages = [
+                        { id: 'danger',  range: '< 0.3m',  label: '겹침 위험',
+                          base:   'bg-red-50 border-red-200 text-red-500',
+                          active: 'bg-red-500 border-red-600 text-white shadow-sm ring-1 ring-red-300' },
+                        { id: 'caution', range: '0.3~1.0m', label: '그늘 주의',
+                          base:   'bg-amber-50 border-amber-200 text-amber-500',
+                          active: 'bg-amber-500 border-amber-600 text-white shadow-sm ring-1 ring-amber-300' },
+                        { id: 'safe',    range: '≥ 1.0m',  label: '정상',
+                          base:   'bg-green-50 border-green-200 text-green-500',
+                          active: 'bg-green-500 border-green-600 text-white shadow-sm ring-1 ring-green-300' },
+                      ] as const
+                      const activeStageId =
+                        currentGap < 0.3 ? 'danger' :
+                        currentGap < 1.0 ? 'caution' : 'safe'
+                      const active = stages.find(s => s.id === activeStageId)!
                       return (
-                        <div className="text-[10px] text-gray-400 pl-1 leading-tight" title="행간 = 모듈 투영 길이 + 빈공간">
-                          → 현재 행간 = 모듈투영 {projLen.toFixed(2)}m + 빈공간 <span className={`font-bold ${gapColor}`}>{currentGap.toFixed(2)}m</span>
-                          {currentGap < 0.3 && <span className="ml-1 text-red-500">⚠ 패널이 거의 붙음</span>}
+                        <div className="pl-1 space-y-1">
+                          {/* 1행: 현재 값 + 활성 단계 배지 */}
+                          <div className="text-[10px] leading-tight flex items-center gap-1.5 flex-wrap">
+                            <span className="text-gray-400">→ 행간 =</span>
+                            <span className="text-gray-500">모듈투영 {projLen.toFixed(2)}m</span>
+                            <span className="text-gray-400">+ 빈공간</span>
+                            <span className={`${active.active} border rounded px-1.5 py-0.5 font-mono font-bold inline-flex items-center gap-1 leading-none`}>
+                              {currentGap.toFixed(2)}m · {active.label}
+                            </span>
+                          </div>
+                          {/* 2행: 신호등 3단계 — 현재 단계 강조, 나머지는 흐리게 */}
+                          <div className="grid grid-cols-3 gap-1 text-[9px]">
+                            {stages.map(s => {
+                              const isActive = s.id === activeStageId
+                              return (
+                                <div key={s.id}
+                                  className={`border rounded px-1.5 py-1 transition-all text-center leading-tight ${
+                                    isActive ? s.active : s.base + ' opacity-60'
+                                  }`}
+                                >
+                                  <div className="font-bold">{s.label}</div>
+                                  <div className={`text-[8px] ${isActive ? '' : 'opacity-80'}`}>빈공간 {s.range}</div>
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
                       )
                     })()}
