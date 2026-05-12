@@ -1345,7 +1345,11 @@ export default function MapTab() {
         const solarAng = autoSolarAngle ?? getSolarAngleByLocation(effectiveLatitude)
         const moduleLen = MODULES[moduleIndex].h
         const calcResult = calculateRowSpacing(solarAng, tiltAngle, autoLandAngle, moduleLen)
-        const baseRecommended = userRowSpacing ?? calcResult.rowSpacing
+        // Phase S 가드: rowSpacing 최소값 = 모듈 투영 길이 (projLen)
+        // rowSpacing 정의는 "모듈 앞끝~다음 모듈 앞끝(전체 피치)"이므로
+        // projLen 미만이면 다음 행 앞끝이 이전 행 안에 들어가 패널 겹침 발생
+        const projLen = moduleLen * Math.cos(tiltAngle * Math.PI / 180)
+        const baseRecommended = Math.max(userRowSpacing ?? calcResult.rowSpacing, projLen)
         autoCalcRowSpacing = Math.round((baseRecommended + autoMargin) * 100) / 100
       }
 
@@ -1553,7 +1557,9 @@ export default function MapTab() {
     const isGablePanel = installType === '건물지붕형' && roofType === '박공'
     const workDisplay = isGablePanel ? 0 : workPathM
     const projLen = moduleLen * Math.cos(tiltAngle * Math.PI / 180)
-    const base = Math.round(((userRowSpacing ?? recommended) + autoMargin) * 100) / 100
+    // Phase S 가드: userRowSpacing < projLen 시 projLen으로 강제 (패널 겹침 방지)
+    const clampedUser = userRowSpacing != null ? Math.max(userRowSpacing, projLen) : null
+    const base = Math.round(((clampedUser ?? recommended) + autoMargin) * 100) / 100
     const effective = Math.round((base + workDisplay) * 100) / 100
     return (!isGablePanel && spacingPolicy === 'construction_std' && userFirstStackGap != null)
       ? Math.round((projLen + userFirstStackGap) * 100) / 100
@@ -2437,7 +2443,9 @@ export default function MapTab() {
               const isGablePanel = installType === '건물지붕형' && roofType === '박공'
               const workDisplay = isGablePanel ? 0 : workPathM
               const projLen = moduleLen * Math.cos(tiltAngle * Math.PI / 180)
-              const baseSpacing = Math.round(((userRowSpacing ?? recommended) + autoMargin) * 100) / 100
+              // Phase S 가드: userRowSpacing < projLen 시 projLen으로 강제 (UI 표시 일관성)
+              const clampedUserRowSpacing = userRowSpacing != null ? Math.max(userRowSpacing, projLen) : null
+              const baseSpacing = Math.round(((clampedUserRowSpacing ?? recommended) + autoMargin) * 100) / 100
               const effectiveSpacing = Math.round((baseSpacing + workDisplay) * 100) / 100
               const sg = Math.max(effectiveSpacing - projLen, 0)
               // Phase L: userFirstStackGap이 설정된 경우 1단 행간 = projLen + userFirstStackGap
@@ -2491,17 +2499,25 @@ export default function MapTab() {
                   {/* 계산 결과 */}
                   <div className="bg-white rounded border border-sky-200 px-2 py-1.5 space-y-1">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500">권장 행간거리 <span className="text-gray-400 text-[10px]">(자동 {recommended.toFixed(3)}m)</span></span>
+                      <span className="text-gray-500">
+                        권장 행간거리 <span className="text-gray-400 text-[10px]">(자동 {recommended.toFixed(3)}m · 최소 {projLen.toFixed(2)}m)</span>
+                      </span>
                       <div className="flex items-center gap-1">
                         <input
-                          type="number" min={0.5} max={15} step={0.05}
+                          type="number" min={projLen.toFixed(2)} max={15} step={0.05}
                           placeholder={recommended.toFixed(2)}
                           value={userRowSpacing ?? ''}
                           onChange={e => {
                             const v = parseFloat(e.target.value)
                             setUserRowSpacing(isNaN(v) ? undefined : v)
                           }}
-                          className="w-20 text-xs border border-sky-300 rounded px-2 py-0.5 text-right font-mono bg-white"
+                          title={`모듈 투영 길이(${projLen.toFixed(2)}m) 미만 입력 시 패널이 겹치므로 자동 보정됩니다`}
+                          className={[
+                            'w-20 text-xs border rounded px-2 py-0.5 text-right font-mono bg-white',
+                            userRowSpacing != null && userRowSpacing < projLen
+                              ? 'border-red-400 text-red-600'
+                              : 'border-sky-300',
+                          ].join(' ')}
                         />
                         <span className="text-gray-400">m</span>
                         {userRowSpacing != null && (
@@ -2510,6 +2526,11 @@ export default function MapTab() {
                         )}
                       </div>
                     </div>
+                    {userRowSpacing != null && userRowSpacing < projLen && (
+                      <div className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">
+                        ⚠ {userRowSpacing.toFixed(2)}m는 모듈 투영 길이({projLen.toFixed(2)}m) 미만 — 패널 겹침 방지를 위해 <strong>{projLen.toFixed(2)}m로 자동 보정</strong>됩니다 (정밀 분석 실행 시 적용)
+                      </div>
+                    )}
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-gray-500" title="권장 행간거리에 그늘 회피 + 시공 여유 이미 포함. 추가 운영 통로 필요시 입력">작업 통로</span>
                       <div className="flex items-center gap-1">
