@@ -139,13 +139,14 @@ interface ZoneLayerProps {
   showOriginal: boolean
   isActive: boolean
   zoneLabel?: string
+  hasSatBg?: boolean
 }
 
 function ZoneLayer({
   result, vb, svgW, svgH,
   panelColor, panelStroke, zoneIndex,
   hoveredPanel, onHover, showOriginal, zoneLabel,
-  isActive,
+  isActive, hasSatBg = false,
 }: ZoneLayerProps) {
   const { safeZone, layout } = result
   const { originalPolygon, safeZonePolygon } = safeZone
@@ -169,8 +170,8 @@ function ZoneLayer({
         />
       )}
 
-      {/* Layer 2a: Safe Zone 흰색 덮개 — 마진 붉은 영역을 Safe Zone 내부에서 지움 */}
-      {showOriginal && safeZonePolygon.length > 2 && (
+      {/* Layer 2a: Safe Zone 덮개 — 위성 배경 없을 때만 불투명 흰 덮개 적용 */}
+      {showOriginal && safeZonePolygon.length > 2 && !hasSatBg && (
         <polygon
           points={polygonToSvgPoints(safeZonePolygon, vb, svgW, svgH)}
           fill="rgba(240,253,244,0.92)"
@@ -568,6 +569,7 @@ export default function SolarLayoutCanvas({
               showOriginal={true}
               isActive={!activeZoneId || (item as ZoneLayoutResult).zoneLabel === activeZoneId + '구역'}
               zoneLabel={isMulti ? (item as ZoneLayoutResult).zoneLabel : undefined}
+              hasSatBg={svgTileData.length > 0}
             />
           ))}
 

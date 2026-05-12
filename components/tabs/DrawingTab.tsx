@@ -1,11 +1,10 @@
-'use client'
+﻿'use client'
 
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { useSolarStore } from '@/store/useStore'
 import type { FullAnalysisResult } from '@/lib/layoutEngine'
 import type { MultiZoneResult, ZoneLayoutResult } from '@/lib/multiZoneLayout'
 import { isMultiZoneResult } from '@/lib/multiZoneLayout'
-import { exportDXF } from '@/lib/dxfExport'
 
 // ── Paper size configs ────────────────────────────────────────────
 type PaperSize = 'A3L' | 'A4L' | 'A4P'
@@ -299,7 +298,25 @@ export default function DrawingTab() {
     if (!svgRef.current || exporting) return
     setExporting('pdf')
     try {
-      const xml = new XMLSerializer().serializeToString(svgRef.current)
+      // Clone SVG and pre-fetch external image URLs (satellite tiles) as data URLs
+      // so that they render correctly when the SVG is rasterized via canvas.
+      const clone = svgRef.current.cloneNode(true) as SVGSVGElement
+      const imgEls = Array.from(clone.querySelectorAll('image'))
+      await Promise.allSettled(imgEls.map(async (el) => {
+        const href = el.getAttribute('href') ?? ''
+        if (!href || href.startsWith('data:')) return
+        try {
+          const res = await fetch(href)
+          const blob = await res.blob()
+          const dataUrl = await new Promise<string>(r => {
+            const reader = new FileReader()
+            reader.onload = () => r(reader.result as string)
+            reader.readAsDataURL(blob)
+          })
+          el.setAttribute('href', dataUrl)
+        } catch { /* skip failed tiles — they'll appear as white gaps */ }
+      }))
+      const xml = new XMLSerializer().serializeToString(clone)
       const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       await new Promise<void>((resolve, reject) => {
@@ -332,13 +349,6 @@ export default function DrawingTab() {
       setExporting(null)
     }
   }
-
-  // ── DXF export ────────────────────────────────────────────────
-  const handleExportDXF = () => {
-    const safe = addrPrimary.replace(/\s+/g, '_').replace(/[^\w가-힣]/g, '').slice(0, 20)
-    exportDXF(zones, `배치도_${drawingNumber}_${safe}.dxf`, { author: authorName, company: companyName })
-  }
-
   // ── JSX ───────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
@@ -406,10 +416,6 @@ export default function DrawingTab() {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
                 PDF 생성 중…</>
             ) : `📄 PDF (${cfg.label.split(' ')[0]} ${cfg.label.split(' ')[1]})`}
-          </button>
-          <button onClick={handleExportDXF} disabled={!!exporting}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors">
-            📐 DXF (AutoCAD)
           </button>
         </div>
       </div>
@@ -562,13 +568,6 @@ export default function DrawingTab() {
             })}
           </svg>
         </div>
-      </div>
-
-      {/* DXF usage hint */}
-      <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-xs text-emerald-700 space-y-1">
-        <div className="font-semibold">📐 DXF 파일 활용 안내</div>
-        <div>AutoCAD, ZWCAD, DraftSight, 무료 뷰어(eDrawings, A360 Viewer)에서 열 수 있습니다.</div>
-        <div>레이어: <span className="font-mono bg-white/60 px-1 rounded">BOUNDARY</span>(부지경계) · <span className="font-mono bg-white/60 px-1 rounded">SAFE_ZONE</span>(설치구역) · <span className="font-mono bg-white/60 px-1 rounded">PANELS</span>(패널) — 좌표 단위: 미터</div>
       </div>
 
       {/* Disclaimer */}
