@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 // components/SolarLayoutCanvas.tsx — 지리 미터 좌표 기반 SVG 배치 시각화 (v5.2)
 // v5.2: FullAnalysisResult | MultiZoneResult 지원, 방위각 회전 패널(polygon), 검증 배지
@@ -514,9 +514,8 @@ export default function SolarLayoutCanvas({
       >
         {/* 줌/팬 변환 그룹 */}
         <g transform={`translate(${pan.x.toFixed(2)}, ${pan.y.toFixed(2)}) scale(${zoom.toFixed(4)})`}>
-          {/* Layer 0: VWorld 지형도 (lt_c_landinfobasemap) — 도로+지번 기본 배경 */}
-          {/* 위성 없을 때도 도로 위치 확인 가능; 위성 있을 때는 multiply로 합성됨 */}
-          {topoTiles.map(t => (
+          {/* Layer 0: VWorld 지형도 — 위성 없을 때만 표시 */}
+          {svgTileData.length === 0 && topoTiles.map(t => (
             <image key={"topo-" + t.key} href={t.url}
               x={t.x} y={t.y} width={t.w} height={t.h}
               preserveAspectRatio="none"
@@ -524,12 +523,11 @@ export default function SolarLayoutCanvas({
             />
           ))}
 
-          {/* Layer 1: 위성 타일 (multiply — 지형도 위에 위성 합성) */}
+          {/* Layer 1: 위성 타일 */}
           {bgTiles.map(t => (
             <image key={t.key} href={t.url}
               x={t.x} y={t.y} width={t.w} height={t.h}
               preserveAspectRatio="none"
-              style={{ mixBlendMode: "multiply" }}
             />
           ))}
 

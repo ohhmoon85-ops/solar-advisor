@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 // components/LayoutEditor.tsx — 인터랙티브 패널 배치 편집기 (v5.2)
 // SolarLayoutCanvas 위에 올라가는 편집 레이어
@@ -900,7 +900,7 @@ export default function LayoutEditor({
           >
             {/* 위성 배경 타일 */}
             {svgTileData.length > 0 && <rect width={SVG_W} height={SVG_H} fill="white" />}
-            {topoTiles.map(t => (
+            {svgTileData.length === 0 && topoTiles.map(t => (
               <image key={"topo-" + t.key} href={t.url}
                 x={t.x} y={t.y} width={t.w} height={t.h}
                 preserveAspectRatio="none" opacity={0.9} />
@@ -908,8 +908,7 @@ export default function LayoutEditor({
             {bgTiles.map(t => (
               <image key={"sat-" + t.key} href={t.url}
                 x={t.x} y={t.y} width={t.w} height={t.h}
-                preserveAspectRatio="none"
-                style={{ mixBlendMode: "multiply" }} />
+                preserveAspectRatio="none" />
             ))}
             {roadTiles.map(t => (
               <image key={"road-" + t.key} href={t.url}

@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { useSolarStore } from '@/store/useStore'
@@ -216,7 +216,7 @@ export default function DrawingTab() {
     // 줌 레벨: m/px 기준으로 역산
     const mPerPx = vb.rangeX / drawW
     const rawZ = Math.log2(40075016.686 * Math.cos(oLat * Math.PI / 180) / (256 * mPerPx))
-    const z = Math.max(15, Math.min(20, Math.round(rawZ)))
+    const z = Math.max(15, Math.min(19, Math.round(rawZ)))
     // 뷰박스 코너의 WGS84 범위
     const corners = [
       enuToGeo(vb.minX, vb.minY),
@@ -436,7 +436,7 @@ export default function DrawingTab() {
 
             {/* Backgrounds */}
             <rect width={svgW} height={svgH} fill="#e8edf5" />
-            <rect x={0} y={0} width={drawW} height={drawH} fill="#ffffff" />
+            {satTilesDT.length === 0 && <rect x={0} y={0} width={drawW} height={drawH} fill="#ffffff" />}
 
             {/* Drawing content */}
             <g clipPath="url(#dc)">
