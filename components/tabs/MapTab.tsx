@@ -515,10 +515,10 @@ export default function MapTab() {
       return tiles
     }
 
-    // WMS 지적도(지번·경계) 투명 오버레이 빌더 — 두 모드 공용
-    //   지적도 모드: 기본지도 위에 단독 오버레이 (z:1)
-    //   위성사진 모드: 위성 이미지 위에 오버레이 (z:4, JSX에서 mapMode로 분기)
-    const buildCadTiles = () => {
+    if (mode === 'cadastral') {
+      // 지적도: VWorld Base 기본지도(도로) 배경 + WMS 지적도(지번·경계) 투명 오버레이
+      setBaseTiles(buildBaseTiles())
+
       const wmsZ = Math.min(z, 18)
       const wmsRatio = Math.pow(2, z - wmsZ)
       const cadTiles: {src:string;cx:number;cy:number;px:number;pxH:number}[] = []
@@ -542,13 +542,7 @@ export default function MapTab() {
           cadTiles.push({ src, cx, cy, px, pxH })
         }
       }
-      return cadTiles
-    }
-
-    if (mode === 'cadastral') {
-      // 지적도: VWorld Base 기본지도(도로) 배경 + WMS 지적도(지번·경계) 투명 오버레이
-      setBaseTiles(buildBaseTiles())
-      setCadImgTiles(buildCadTiles())
+      setCadImgTiles(cadTiles)
       setSatLoading(false)
       return
     }
@@ -599,10 +593,6 @@ export default function MapTab() {
     // 도로 오버레이: VWorld 기본지도(Base) — mix-blend-mode:multiply로 위성 위에 도로 표시
     // Hybrid는 불투명 타일(위성+도로 합성)이라 ArcGIS 위성을 가림 → Base로 대체
     setRoadImgTiles(buildBaseTiles())
-
-    // VWorld WMS 지적경계 오버레이 — 위성 모드에서도 부지 경계 식별 가능하도록 동시 로드
-    // JSX 렌더 시 z-index를 위성 위(z:4)로 올려 오버레이로 표시
-    setCadImgTiles(buildCadTiles())
 
     setSatLoading(false)
   }, [])
@@ -2083,9 +2073,7 @@ export default function MapTab() {
                 }}
               />
             ))}
-            {/* VWorld WMS 지적도(투명 PNG): 지번·필지 경계 오버레이
-                - 지적도 모드: z:1 — 기본지도(z:0) 위 / 캔버스 스케일바·배지(z:2) 아래
-                - 위성사진 모드: z:4 — 캔버스 위성타일(z:2)·도로 오버레이(z:3) 위 (오버레이로 표시) */}
+            {/* z:1 — VWorld WMS 지적도(투명 PNG): 지번·필지 경계 오버레이 (지적도 모드) */}
             {cadImgTiles.map((t, i) => (
               <img key={i} src={t.src} alt=""
                 style={{
@@ -2094,7 +2082,7 @@ export default function MapTab() {
                   top: `${t.cy / CANVAS_H * 100}%`,
                   width: `${t.px / CANVAS_W * 100}%`,
                   height: `${t.pxH / CANVAS_H * 100}%`,
-                  zIndex: mapMode === 'satellite' ? 4 : 1,
+                  zIndex: 1,
                   pointerEvents: 'none',
                 }}
               />
