@@ -296,7 +296,7 @@ export function isMultiZoneResult(
 /**
  * Andrew's Monotone Chain — 점 집합의 CCW 볼록 껍질
  * 인접한 두 필지를 합쳐 단일 폴리곤으로 근사
- * (인접 필지 가정: 凸 근사 오차는 모서리 부분 소량에 불과)
+ * (인접 필지 가정: 볼록 근사 오차는 모서리 부분 소량에 불과)
  */
 function computeConvexHull(points: Point[]): Point[] {
   if (points.length < 3) return [...points]

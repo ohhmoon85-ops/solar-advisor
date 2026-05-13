@@ -2011,7 +2011,7 @@ export default function MapTab() {
                 {`  ·  경계마진 ${(userBoundaryMargin ?? (BOUNDARY_MARGIN[installType] ?? 2)).toFixed(1)}m${userBoundaryMargin != null ? ' (사용자 지정)' : ''}`}
               </div>
             </div>
-            {/* 수익성 연동 — 정밀분析 결과가 있으면 간이/정밀 두 버튼, 없으면 단일 버튼 */}
+            {/* 수익성 연동 — 정밀분석 결과가 있으면 간이/정밀 두 버튼, 없으면 단일 버튼 */}
             {(() => {
               if (!svgAnalysisResult) {
                 return (
@@ -2041,12 +2041,12 @@ export default function MapTab() {
                   <div className="grid grid-cols-2 gap-2">
                     <button onClick={() => handleSendToRevenue('quick')}
                       className="bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-xs font-semibold transition-colors border border-gray-300">
-                      <div className="text-[10px] text-gray-400 mb-0.5">간이분析</div>
+                      <div className="text-[10px] text-gray-400 mb-0.5">간이분석</div>
                       {panelCount.toLocaleString()}장 · {capacityKwp}kWp
                     </button>
                     <button onClick={() => handleSendToRevenue('precision')}
                       className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-xs font-semibold transition-colors">
-                      <div className="text-[10px] text-blue-200 mb-0.5">정밀分析 ★권장</div>
+                      <div className="text-[10px] text-blue-200 mb-0.5">정밀분석 ★권장</div>
                       {precCount.toLocaleString()}장 · {precKwp}kWp
                     </button>
                   </div>
