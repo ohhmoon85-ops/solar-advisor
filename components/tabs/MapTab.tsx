@@ -638,32 +638,10 @@ export default function MapTab() {
       return
     }
 
-    // ❷ 복수 필지 경계 — API에서 가져온 경우
-    if (hasParcelData) {
-      parcels.forEach((parcel, pi) => {
-        const pts = parcel.canvasPoints
-        if (pts.length < 2) return
-        ctx.beginPath()
-        ctx.moveTo(pts[0].x, pts[0].y)
-        pts.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
-        ctx.closePath()
-        // 각 필지별 색상으로 채우기
-        const hexColor = parcel.color
-        ctx.fillStyle = hexColor + '22' // 투명도 ~13%
-        ctx.fill()
-        ctx.strokeStyle = hexColor
-        ctx.lineWidth = 2.5
-        ctx.stroke()
-        // 필지 번호 레이블
-        const lcx = pts.reduce((s, p) => s + p.x, 0) / pts.length
-        const lcy = pts.reduce((s, p) => s + p.y, 0) / pts.length
-        ctx.fillStyle = hexColor
-        ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'
-        ctx.fillText(`필지${pi + 1}`, lcx, lcy - 14)
-        ctx.font = '9px sans-serif'
-        ctx.fillText(parcel.label || '', lcx, lcy - 2)
-      })
-    }
+    // ❷ 부지 폴리곤 시각화 제거 — VWorld 지적도 주황 경계선과 정합 안 되어 혼란
+    //   ⚠ parcels 데이터 자체는 유지 (parcel.canvasPoints/areaSqm/ring은
+    //   하단 지표 카드, 패널 배치 경계, 정밀분석 입력 등 다른 곳에서 그대로 사용)
+    //   여기서는 캔버스 그리기(녹색 폴리곤·필지 라벨)만 스킵
 
     // ❸ 간이 배치 패널 — 모든 설치 유형에서 미표시
     //   정밀 분석에서 정확하게 배치하므로 간이 캔버스에는 면적·패널수 라벨만 표시
@@ -680,21 +658,8 @@ export default function MapTab() {
       ctx.fillText(guideText, CANVAS_W / 2, 28)
     }
 
-    // ❺ 중심 레이블
-    if (isComplete && area > 0 && parcels.length > 0) {
-      const firstPts = parcels[0].canvasPoints
-      const cx = firstPts.reduce((s, p) => s + p.x, 0) / firstPts.length
-      const cy = firstPts.reduce((s, p) => s + p.y, 0) / firstPts.length
-      const label = `${area.toFixed(1)}m²  ·  ${panelCount}장`
-      ctx.font = 'bold 12px sans-serif'
-      const tw = ctx.measureText(label).width
-      ctx.fillStyle = 'rgba(255,255,255,0.92)'
-      ctx.fillRect(cx - tw / 2 - 6, cy - 12, tw + 12, 22)
-      ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1
-      ctx.strokeRect(cx - tw / 2 - 6, cy - 12, tw + 12, 22)
-      ctx.fillStyle = '#1e293b'; ctx.textAlign = 'center'
-      ctx.fillText(label, cx, cy + 4)
-    }
+    // ❺ 중심 면적·패널수 라벨 제거 — 폴리곤 시각화와 함께 사라짐.
+    //   동일 수치(부지면적·패널수)는 하단 지표 카드 4종에서 계속 제공됨
 
     // ❻ 축척 텍스트 (왼쪽 하단)
     const scaleLabel = satZoom > 0
