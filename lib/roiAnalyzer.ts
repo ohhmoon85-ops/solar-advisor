@@ -23,6 +23,12 @@ export interface RoiInput {
   analysisYears?: number
   /** 할인율 (%) — NPV 계산 기준, 기본 4% */
   discountRatePct?: number
+  /** 연간 발전 시간 (h/yr) — 기본 1400.
+   *  화면 안내(GENERATION_HOURS × 365 = 1277.5)와 일치시키려면 호출 측에서 명시. */
+  annualPeakHours?: number
+  /** 시스템 효율 (0~1) — 기본 0.8.
+   *  연간 발전 시간이 이미 유효 발전시간이면 1.0으로 호출. */
+  systemEfficiency?: number
 }
 
 export interface RoiResult {
@@ -80,6 +86,8 @@ export function calculateRoi(input: RoiInput): RoiResult {
     annualDegradationPct = DEFAULTS.annualDegradationPct,
     analysisYears = DEFAULTS.analysisYears,
     discountRatePct = DEFAULTS.discountRatePct,
+    annualPeakHours = DEFAULTS.annualPeakHours,
+    systemEfficiency = DEFAULTS.systemEfficiency,
   } = input
 
   const totalKwp = (panelCount * wattNominal) / 1000
@@ -97,8 +105,7 @@ export function calculateRoi(input: RoiInput): RoiResult {
       : totalCostWon * 0.01
 
   // 1년차 발전량·수익
-  const annualKwh =
-    totalKwp * DEFAULTS.annualPeakHours * DEFAULTS.systemEfficiency
+  const annualKwh = totalKwp * annualPeakHours * systemEfficiency
   const annualRevenueWon = annualKwh * electricityPriceKrw
   const annualRevenueMan = annualRevenueWon / 10000
 
@@ -178,6 +185,8 @@ export function findOptimalPanelCount(
     costPerPanel: number
     installCostPerKwp: number
     electricityPriceKrw: number
+    annualPeakHours?: number
+    systemEfficiency?: number
   }
 ): { results: OptimalResult[]; optimalMode: OptimizationMode } {
   const totalPanels = layoutResult.totalCount

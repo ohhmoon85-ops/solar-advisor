@@ -6,7 +6,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import { useSolarStore } from '@/store/useStore'
-import { INSTALLATION_TYPES, GENERATION_HOURS } from '@/lib/constants'
+import { INSTALLATION_TYPES, GENERATION_HOURS, REC_WEIGHT } from '@/lib/constants'
 import { calcAnnual, calcYearlyTable, calcROI, findBreakevenYear } from '@/lib/calculations'
 import type { InstallationType } from '@/lib/constants'
 import { calculateRoi, findOptimalPanelCount, ROI_DEFAULTS } from '@/lib/roiAnalyzer'
@@ -96,15 +96,32 @@ export default function RevenueTab() {
     return Math.round((capacityKw * 1000) / 550)
   }, [mapResult, capacityKw])
 
+  // P0 fix #1: REC 가중치 분기 — 건물지붕형 ×1.5 / 일반토지형 ×1.2 (REC_WEIGHT 사용)
+  //   기존엔 토지형에도 건물형 단가(×1.5 + recBuilding)가 적용돼 LCOE/NPV가
+  //   비현실적으로 낙관 표시되던 버그 수정
+  const electricityPriceKrw = useMemo(() => {
+    const isBuilding = installationType === '건물지붕형'
+    const recPriceWonPerMwh = isBuilding ? priceOverride.recBuilding : priceOverride.recLand
+    const recWeight = isBuilding ? REC_WEIGHT.건물지붕형 : REC_WEIGHT.일반토지형
+    return priceOverride.smp + (recPriceWonPerMwh / 1000) * recWeight
+  }, [installationType, priceOverride])
+
+  // P0 fix #2: 발전시간 단일 소스화 — 화면 안내(effectiveGenHours × 365)를 그대로
+  //   RoiAnalyzer에 전달. systemEfficiency=1.0 (GENERATION_HOURS는 이미 유효 발전시간)
+  //   기존: 화면 3.5h vs 계산 1400×0.8(=1120h 등가) 불일치
+  const annualPeakHours = useMemo(() => effectiveGenHours * 365, [effectiveGenHours])
+
   const roiResult = useMemo(() =>
     calculateRoi({
       panelCount: estimatedPanelCount,
       wattNominal: 550,
       costPerPanel: ROI_DEFAULTS.costPerPanelTypeA,
       installCostPerKwp: ROI_DEFAULTS.installCostPerKwp,
-      electricityPriceKrw: priceOverride.smp + (priceOverride.recBuilding / 1000) * 1.5,
+      electricityPriceKrw,
+      annualPeakHours,
+      systemEfficiency: 1.0,
     }),
-    [estimatedPanelCount, priceOverride]
+    [estimatedPanelCount, electricityPriceKrw, annualPeakHours]
   )
 
   const { results: optimizationResults, optimalMode } = useMemo(() =>
@@ -114,10 +131,12 @@ export default function RevenueTab() {
         wattNominal: 550,
         costPerPanel: ROI_DEFAULTS.costPerPanelTypeA,
         installCostPerKwp: ROI_DEFAULTS.installCostPerKwp,
-        electricityPriceKrw: priceOverride.smp + (priceOverride.recBuilding / 1000) * 1.5,
+        electricityPriceKrw,
+        annualPeakHours,
+        systemEfficiency: 1.0,
       }
     ),
-    [estimatedPanelCount, capacityKw, priceOverride]
+    [estimatedPanelCount, capacityKw, electricityPriceKrw, annualPeakHours]
   )
 
   // ── Phase T: PDF 저장 ────────────────────────────────────────────
