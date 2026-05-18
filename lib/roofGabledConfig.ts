@@ -23,6 +23,10 @@ export interface GabledRoofConfig {
   ridgeAxisMode: GabledRidgeAxisMode
   /** ridgeAxisMode='manual'일 때 사용자 지정 축 각도 (°, 0=동서, 90=남북) */
   manualRidgeAxisDeg?: number
+  /** 남향 슬로프 최대 행 수 — undefined: 자동(공간 허용 전부 채움) */
+  rowsSouth?: number
+  /** 북향 슬로프 최대 행 수 — undefined: 자동 */
+  rowsNorth?: number
 }
 
 /** 박공 지붕 기본값 — 한국 시공 표준 */
@@ -40,4 +44,6 @@ export const GABLED_ROOF_LIMITS = {
   ridgeGap:      { min: 0.5,  max: 2.0,  step: 0.1 },
   intraSlopeGap: { min: 0.05, max: 0.30, step: 0.05 },
   eaveSetback:   { min: 0.3,  max: 1.0,  step: 0.1 },
+  rowsSouth:     { min: 1,    max: 20,   step: 1 },
+  rowsNorth:     { min: 1,    max: 20,   step: 1 },
 } as const

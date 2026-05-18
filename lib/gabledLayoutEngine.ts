@@ -162,31 +162,48 @@ export function placeGabledPanels(params: {
     }
   }
 
-  // Slope A: 아래쪽 (minY → ridgeY - ridgeGap/2)
+  // ── 남/북 사면 판정 (회전 후 frame의 -y 방향이 원래 남쪽인가?)
+  // PCA atan2/2 결과는 (-π/2, π/2]이므로 cos(ridgeAxisRad) >= 0 → 보통 Slope A=남
+  // 단, ridge가 거의 N-S로 누우면 cos→0이라 사면 판정 모호 (E/W 사면이 됨)
+  const slopeAIsSouth = Math.cos(ridgeAxisRad) >= 0
+  const rowsSouth = config.rowsSouth ?? Number.MAX_SAFE_INTEGER
+  const rowsNorth = config.rowsNorth ?? Number.MAX_SAFE_INTEGER
+  const rowsA = slopeAIsSouth ? rowsSouth : rowsNorth
+  const rowsB = slopeAIsSouth ? rowsNorth : rowsSouth
+
+  // Slope A: 아래쪽 (남쪽 처마 minY부터 ridge 쪽으로 올라가며 행 배치)
   const slopeATop = ridgeY - config.ridgeGap / 2
-  const slopeASizeBefore = placements.length
-  let rIdx = 0
-  for (let yB = minY; yB + projLen <= slopeATop; yB += rowPitch, rIdx++) {
-    placeRow(yB, rIdx)
+  const slopeACountBefore = placements.length
+  let slopeARows = 0
+  for (let i = 0; i < rowsA; i++) {
+    const yB = minY + i * rowPitch
+    if (yB + projLen > slopeATop) break
+    placeRow(yB, slopeARows)
+    slopeARows++
   }
-  const slopeARows = rIdx
-  const slopeACount = placements.length - slopeASizeBefore
-  // Slope B: 위쪽 (ridgeY + ridgeGap/2 → maxY)
-  const slopeBStart = ridgeY + config.ridgeGap / 2
-  const slopeBSizeBefore = placements.length
-  const rStartB = rIdx
-  for (let yB = slopeBStart; yB + projLen <= maxY; yB += rowPitch, rIdx++) {
-    placeRow(yB, rIdx)
+  const slopeACount = placements.length - slopeACountBefore
+
+  // Slope B: 위쪽 (북쪽 처마 maxY부터 ridge 쪽으로 내려가며 행 배치 — 처마 우선)
+  const slopeBBottom = ridgeY + config.ridgeGap / 2
+  const slopeBCountBefore = placements.length
+  let slopeBRows = 0
+  for (let i = 0; i < rowsB; i++) {
+    const yB = maxY - projLen - i * rowPitch
+    if (yB < slopeBBottom) break
+    placeRow(yB, slopeARows + slopeBRows)
+    slopeBRows++
   }
-  const slopeBRows = rIdx - rStartB
-  const slopeBCount = placements.length - slopeBSizeBefore
+  const slopeBCount = placements.length - slopeBCountBefore
   console.log('[Gabled-Engine] ridge 분할 결과', {
     ridgeAxisDeg: ((ridgeAxisRad * 180) / Math.PI).toFixed(1),
+    slopeAIsSouth,
     aabb: { minX: minX.toFixed(2), maxX: maxX.toFixed(2), minY: minY.toFixed(2), maxY: maxY.toFixed(2) },
     ridgeY: ridgeY.toFixed(2),
     rowPitch: rowPitch.toFixed(3),
-    slopeA: { rows: slopeARows, panels: slopeACount },
-    slopeB: { rows: slopeBRows, panels: slopeBCount },
+    capRowsSouth: config.rowsSouth ?? '자동',
+    capRowsNorth: config.rowsNorth ?? '자동',
+    slopeA: { isSouth: slopeAIsSouth, rows: slopeARows, panels: slopeACount },
+    slopeB: { isSouth: !slopeAIsSouth, rows: slopeBRows, panels: slopeBCount },
     total: placements.length,
   })
 

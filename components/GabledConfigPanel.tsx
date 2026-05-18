@@ -120,6 +120,24 @@ export default function GabledConfigPanel({ config, onChange }: Props) {
             </div>
           )}
         </div>
+
+        {/* 비대칭 행수 (남/북 각각 처마부터 행 수 제한) */}
+        <div>
+          <label className="text-xs text-gray-500 font-medium">슬로프별 행 수 (비대칭)</label>
+          <div className="mt-1 grid grid-cols-2 gap-2">
+            <RowsInput
+              label="남향"
+              value={config.rowsSouth}
+              onChange={v => set('rowsSouth', v)}
+            />
+            <RowsInput
+              label="북향"
+              value={config.rowsNorth}
+              onChange={v => set('rowsNorth', v)}
+            />
+          </div>
+          <div className="mt-1 text-[10px] text-gray-400">비워두면 자동(공간 허용 전부 채움). 각 슬로프는 처마부터 행 수 적용</div>
+        </div>
       </fieldset>
 
       <div className="bg-orange-100/60 border border-orange-200 rounded-md p-1.5 text-[11px] text-orange-700">
@@ -158,6 +176,35 @@ function SliderRow({ label, value, unit, min, max, step, onChange }: SliderRowPr
         onChange={e => onChange(Number(e.target.value))}
         className="mt-0.5 w-full accent-orange-500"
       />
+    </div>
+  )
+}
+
+// ── 슬로프별 행수 입력 (빈 값 = undefined = 자동) ──────────────────
+interface RowsInputProps {
+  label: string
+  value: number | undefined
+  onChange: (v: number | undefined) => void
+}
+
+function RowsInput({ label, value, onChange }: RowsInputProps) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[11px] text-gray-600 w-8">{label}</span>
+      <input
+        type="number"
+        min={1}
+        max={20}
+        step={1}
+        placeholder="자동"
+        value={value ?? ''}
+        onChange={e => {
+          const raw = e.target.value
+          onChange(raw === '' ? undefined : Number(raw))
+        }}
+        className="flex-1 border border-gray-300 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+      />
+      <span className="text-[11px] text-gray-400">행</span>
     </div>
   )
 }
