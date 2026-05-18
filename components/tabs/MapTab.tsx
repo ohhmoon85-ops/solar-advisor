@@ -1902,108 +1902,10 @@ export default function MapTab() {
           )}
         </div>
 
-        {/* STEP 3 */}
-        <div className={stepCard(true)}>
-          <div className="flex items-center gap-2 mb-3">
-            <div className={stepCircle(true, '✓')}>✓</div>
-            <h3 className="font-semibold text-gray-800 text-sm">모듈 · 각도 설정</h3>
-          </div>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-gray-500 font-medium">모듈 선택</label>
-              <select value={moduleIndex} onChange={e => setModuleIndex(Number(e.target.value))}
-                className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {MODULES.map((m, i) => <option key={i} value={i}>{m.name} ({m.watt}W)</option>)}
-              </select>
-              <div className="mt-1 text-xs text-gray-400">{MODULES[moduleIndex].w}m × {MODULES[moduleIndex].h}m</div>
-            </div>
-            <div>
-              <div className="flex justify-between">
-                <label className="text-xs text-gray-500 font-medium">경사각</label>
-                <span className="text-sm font-bold text-blue-600">{tiltAngle}°</span>
-              </div>
-              <input type="range" min={0} max={60} value={tiltAngle}
-                onChange={e => setTiltAngle(Number(e.target.value))} className="mt-1 w-full"/>
-              <div className="flex justify-between text-xs text-gray-400 mt-0.5">
-                <span>0°</span><span>서울최적 33°</span><span>60°</span>
-              </div>
-            </div>
-            {/* 설치 방향 (Item 3) */}
-            <div>
-              <label className="text-xs text-gray-500 font-medium">설치 방향</label>
-              <div className="flex gap-1.5 mt-1">
-                <button onClick={() => setPanelOrientation('portrait')}
-                  className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    panelOrientation === 'portrait' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'}`}>
-                  세로형
-                </button>
-                <button onClick={() => setPanelOrientation('landscape')}
-                  className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    panelOrientation === 'landscape' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'}`}>
-                  가로형
-                </button>
-              </div>
-            </div>
-
-            {/* 배열 방법 (단수) — 간이·정밀 공용. 박공 모드에서는 무시 (사면별 행수는 GabledConfigPanel) */}
-            <div className={installType === '건물지붕형' && roofType === '박공' ? 'opacity-50 pointer-events-none' : ''}>
-              <label className="text-xs text-gray-500 font-medium">배열 방법 (단수)</label>
-              <div className="flex gap-1.5 mt-1">
-                {([1, 2, 3] as const).map(n => (
-                  <button key={n}
-                    disabled={installType === '건물지붕형' && roofType === '박공'}
-                    onClick={() => { setRowStack(n); if (showSvgCanvas) runSVGAnalysis({ rowStack: n }) }}
-                    className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors disabled:cursor-not-allowed ${
-                      rowStack === n ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-300'}`}>
-                    {n}단
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1 text-[10px] text-gray-400">
-                {installType === '건물지붕형' && roofType === '박공'
-                  ? '박공 모드: 사면별 행수는 박공 설정 패널의 남향/북향 행수 사용'
-                  : '간이·정밀 공용 — 단수 변경 시 두 분석 모두 반영'}
-              </p>
-            </div>
-            {/* 이격 거리 — 박공 모드에서는 사면 내 행간(GabledConfigPanel)으로 대체 */}
-            <div className={installType === '건물지붕형' && roofType === '박공' ? 'opacity-50 pointer-events-none' : ''}>
-              <div className="flex justify-between items-center">
-                <label className="text-xs text-gray-500 font-medium">이격 거리 <span className="text-gray-400">(간이 분석)</span></label>
-                <span className="text-xs text-gray-400">이론값: {theoreticalSpacing}m <span className="text-gray-300">ⓘ 참조용</span></span>
-              </div>
-              <input
-                type="number"
-                min={0.5}
-                max={5}
-                step={0.1}
-                value={spacingValue}
-                disabled={installType === '건물지붕형' && roofType === '박공'}
-                onChange={e => setSpacingValue(Number(e.target.value))}
-                className="mt-1 w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-              />
-              <p className="mt-1 text-[10px] text-gray-400">
-                {installType === '건물지붕형' && roofType === '박공'
-                  ? '박공 모드: 사면 내 행간은 박공 설정 패널의 「사면 내 행간」 사용'
-                  : '정밀 분석은 우측 행간거리 자동 계산 패널을 사용하세요'}
-              </p>
-            </div>
-            <div>
-              <div className="flex justify-between items-center">
-                <label className="text-xs text-gray-500 font-medium">경사도 (지형)</label>
-                <div className="flex items-center gap-1.5">
-                  {slopeFetching && <span className="text-xs text-blue-400">측정 중…</span>}
-                  {slopeAuto && !slopeFetching && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded">자동측정</span>}
-                  <span className="text-sm font-bold text-orange-600">{slopePercent}%</span>
-                </div>
-              </div>
-              <input type="range" min={0} max={50} value={slopePercent}
-                onChange={e => { setSlopePercent(Number(e.target.value)); setSlopeAuto(false) }} className="mt-1 w-full"/>
-              {slopePercent > 0
-                ? <div className="mt-1 text-xs text-orange-600">면적 보정: ×{(Math.cos(Math.atan(slopePercent / 100)) * 100).toFixed(1)}%</div>
-                : <div className="mt-1 text-xs text-gray-400">평지 (보정 없음)</div>}
-            </div>
-          </div>
-        </div>
+        {/* STEP 3 제거됨 (옵션 A): 「모듈·각도 설정」 패널 삭제.
+            「배열 방법(단수)」만 정밀 분석 패널로 이동 (line ~2540).
+            tiltAngle/moduleIndex/panelOrientation/spacingValue/slopePercent 상태는 보존 —
+            간이 캔버스·MapResult·KIER 등 25개소에서 참조 중. UI 없이 초기값 유지(33°/0/portrait/1.2/0). */}
 
         {/* KIER 실측 일사량 */}
         {(kierLoading || kierResult) && (
@@ -2538,6 +2440,24 @@ export default function MapTab() {
                   ))}
                 </div>
               </div>
+
+              {/* 배열 방법 (단수) — 박공 모드에서는 미렌더 (사면별 행수는 GabledConfigPanel) */}
+              {!(installType === '건물지붕형' && roofType === '박공') && (
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 font-medium block mb-1">배열 방법 (단수)</label>
+                  <div className="flex gap-1.5">
+                    {([1, 2, 3] as const).map(n => (
+                      <button key={n}
+                        onClick={() => { setRowStack(n); if (showSvgCanvas) runSVGAnalysis({ rowStack: n }) }}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                          rowStack === n ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-300'}`}>
+                        {n}단
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[10px] text-gray-400">단수 변경 시 정밀 분석에 즉시 반영</p>
+                </div>
+              )}
             </div>
 
 
