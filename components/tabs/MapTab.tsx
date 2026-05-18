@@ -28,6 +28,11 @@ const LayoutEditor = dynamic(
   { ssr: false }
 )
 
+const GabledConfigPanel = dynamic(
+  () => import('@/components/GabledConfigPanel'),
+  { ssr: false }
+)
+
 // 경매 파일 드롭존 — pdfjs/tesseract.js 동적 로드 (번들 크기 최적화)
 const AuctionFileDropzone = dynamic(
   () => import('@/components/AuctionFileDropzone'),
@@ -289,7 +294,10 @@ export default function MapTab() {
   const [structureType, setStructureType] = useState<StructureType>('철골구조')
   const [bipvEnabled, setBipvEnabled] = useState(false)
   const [roofType, setRoofType] = useState<'슬라브' | '박공'>('슬라브')
-  const [jjokOlrim, setJjokOlrim] = useState(false)
+  const [gabledConfig, setGabledConfig] = useState<GabledRoofConfig>(GABLED_ROOF_DEFAULTS)
+  // jjokOlrim은 gabledConfig.ridgeIgnore의 alias (기존 코드 호환)
+  const jjokOlrim = gabledConfig.ridgeIgnore
+  const setJjokOlrim = (v: boolean) => setGabledConfig(c => ({ ...c, ridgeIgnore: v }))
 
   // ── 드로잉 ──
   const [isComplete, setIsComplete] = useState(false)
@@ -1430,14 +1438,15 @@ export default function MapTab() {
         }).filter((z): z is ZoneConfig => z !== null)
         if (zones.length === 0) return
         const mzResult = runMultiZoneAnalysis(zones, lat)
-        // ── P0-3: 박공 모드 → placeGabledPanels로 layout 교체 (ridgeIgnore=jjokOlrim)
+        // ── P0-3: 박공 모드 → placeGabledPanels로 layout 교체 (전체 gabledConfig 사용)
         if (isGable) {
-          const gabCfg: GabledRoofConfig = { ...GABLED_ROOF_DEFAULTS, ridgeIgnore: jjokOlrim }
+          // GabledConfigPanel의 라이브 상태(gabledConfig) 그대로 사용 — ridgeIgnore/ridgeGap/...
           mzResult.zones.forEach(z => {
             z.layout = placeGabledPanels({
               safeZonePolygon: z.safeZone.safeZonePolygon,
-              panelSpec, config: gabCfg, tiltAngle,
-              panelOrientation: orientation, azimuthDeg: svgAzimuthDeg,
+              panelSpec, config: gabledConfig, tiltAngle,
+              panelOrientation: orientation,
+              azimuthDeg: gabledConfig.orientationMode === 'true-south' ? 180 : svgAzimuthDeg,
             })
           })
           mzResult.totalCount = mzResult.zones.reduce((s, z) => s + z.layout.totalCount, 0)
@@ -1587,7 +1596,7 @@ export default function MapTab() {
     }
   }, [canvasCenter, parcels, roofPolygons, svgPanelType, svgAzimuthDeg, svgPanelOrientation, rowStack, svgPlotType, svgZoneMode, effectiveLatitude,
       autoSolarAngle, moduleIndex, tiltAngle, autoLandAngle, autoMargin,
-      workPathM, installType, roofType, jjokOlrim, spacingPolicy, constructionStdGap, userFirstStackGap, userBoundaryMargin, userRowSpacing])
+      workPathM, installType, roofType, gabledConfig, spacingPolicy, constructionStdGap, userFirstStackGap, userBoundaryMargin, userRowSpacing])
 
   // 통합 버튼 라벨·간이 연동용 — 현재 설정 기준 최종 1단 행간거리
   const displayFinalSpacing = (() => {
@@ -1831,17 +1840,7 @@ export default function MapTab() {
                   ))}
                 </div>
                 {roofType === '박공' && (
-                  <div className="mt-1.5 space-y-1">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={jjokOlrim}
-                        onChange={e => setJjokOlrim(e.target.checked)}
-                        className="accent-orange-500"/>
-                      <span className="text-xs text-gray-700">쫙 올림 (용마루 무시, 직선 배치)</span>
-                    </label>
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-2 text-xs text-orange-700">
-                      박공 기준: 60평 ≈ 30kW · 이격 0.1m · 마진 50cm
-                    </div>
-                  </div>
+                  <GabledConfigPanel config={gabledConfig} onChange={setGabledConfig} />
                 )}
               </div>
               {/* STEP 5: BIPV 판별 및 특례 안내 */}
