@@ -1450,7 +1450,29 @@ export default function MapTab() {
         })
         // ── P0-3: 박공 모드 → placeGabledPanels로 layout 교체 (전체 gabledConfig 사용)
         if (isGable) {
-          console.log('[Gabled-Diag] isGable=true → placeGabledPanels 호출', { config: gabledConfig, tiltAngle, orientation })
+          // ── 엔진 입력 우선순위 분리 (USED vs IGNORED)
+          console.log('[Gabled-Diag] USED 엔진 입력 (placeGabledPanels에 전달)', {
+            panelSpec: panelSpec.id,
+            tiltAngle,
+            panelOrientation: orientation,
+            azimuthDeg: gabledConfig.orientationMode === 'true-south' ? 180 : svgAzimuthDeg,
+            'gabledConfig.ridgeIgnore': gabledConfig.ridgeIgnore,
+            'gabledConfig.ridgeGap(m)': gabledConfig.ridgeGap,
+            'gabledConfig.intraSlopeGap(m)': gabledConfig.intraSlopeGap,
+            'gabledConfig.eaveSetback(m)': gabledConfig.eaveSetback,
+            'gabledConfig.rowsSouth': gabledConfig.rowsSouth ?? '자동',
+            'gabledConfig.rowsNorth': gabledConfig.rowsNorth ?? '자동',
+            'gabledConfig.ridgeAxisMode': gabledConfig.ridgeAxisMode,
+            'gabledConfig.manualRidgeAxisDeg': gabledConfig.manualRidgeAxisDeg ?? '—',
+          })
+          console.log('[Gabled-Diag] IGNORED in 박공 (모듈·각도 패널 입력은 사용 안 함)', {
+            rowStack: `${rowStack}단 (무시 — 박공은 사면별 rowsSouth/rowsNorth 사용)`,
+            spacingValueSimple: `${spacingValue}m (무시 — 박공은 intraSlopeGap 사용)`,
+            userRowSpacing: userRowSpacing != null ? `${userRowSpacing}m (무시)` : '미설정',
+            userFirstStackGap: userFirstStackGap != null ? `${userFirstStackGap}m (무시)` : '미설정',
+            constructionStdGap: constructionStdGap != null ? `${constructionStdGap}m (무시)` : '미설정',
+            spacingPolicy: `${spacingPolicy} (무시)`,
+          })
           // GabledConfigPanel의 라이브 상태(gabledConfig) 그대로 사용 — ridgeIgnore/ridgeGap/...
           mzResult.zones.forEach((z, idx) => {
             const beforeCount = z.layout.totalCount
@@ -1923,21 +1945,28 @@ export default function MapTab() {
               </div>
             </div>
 
-            {/* 배열 방법 (단수) — 간이·정밀 공용 */}
-            <div>
+            {/* 배열 방법 (단수) — 간이·정밀 공용. 박공 모드에서는 무시 (사면별 행수는 GabledConfigPanel) */}
+            <div className={installType === '건물지붕형' && roofType === '박공' ? 'opacity-50 pointer-events-none' : ''}>
               <label className="text-xs text-gray-500 font-medium">배열 방법 (단수)</label>
               <div className="flex gap-1.5 mt-1">
                 {([1, 2, 3] as const).map(n => (
-                  <button key={n} onClick={() => { setRowStack(n); if (showSvgCanvas) runSVGAnalysis({ rowStack: n }) }}
-                    className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                  <button key={n}
+                    disabled={installType === '건물지붕형' && roofType === '박공'}
+                    onClick={() => { setRowStack(n); if (showSvgCanvas) runSVGAnalysis({ rowStack: n }) }}
+                    className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors disabled:cursor-not-allowed ${
                       rowStack === n ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-300'}`}>
                     {n}단
                   </button>
                 ))}
               </div>
-              <p className="mt-1 text-[10px] text-gray-400">간이·정밀 공용 — 단수 변경 시 두 분석 모두 반영</p>
+              <p className="mt-1 text-[10px] text-gray-400">
+                {installType === '건물지붕형' && roofType === '박공'
+                  ? '박공 모드: 사면별 행수는 박공 설정 패널의 남향/북향 행수 사용'
+                  : '간이·정밀 공용 — 단수 변경 시 두 분석 모두 반영'}
+              </p>
             </div>
-            <div>
+            {/* 이격 거리 — 박공 모드에서는 사면 내 행간(GabledConfigPanel)으로 대체 */}
+            <div className={installType === '건물지붕형' && roofType === '박공' ? 'opacity-50 pointer-events-none' : ''}>
               <div className="flex justify-between items-center">
                 <label className="text-xs text-gray-500 font-medium">이격 거리 <span className="text-gray-400">(간이 분석)</span></label>
                 <span className="text-xs text-gray-400">이론값: {theoreticalSpacing}m <span className="text-gray-300">ⓘ 참조용</span></span>
@@ -1948,10 +1977,15 @@ export default function MapTab() {
                 max={5}
                 step={0.1}
                 value={spacingValue}
+                disabled={installType === '건물지붕형' && roofType === '박공'}
                 onChange={e => setSpacingValue(Number(e.target.value))}
-                className="mt-1 w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="mt-1 w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
               />
-              <p className="mt-1 text-[10px] text-gray-400">정밀 분석은 우측 행간거리 자동 계산 패널을 사용하세요</p>
+              <p className="mt-1 text-[10px] text-gray-400">
+                {installType === '건물지붕형' && roofType === '박공'
+                  ? '박공 모드: 사면 내 행간은 박공 설정 패널의 「사면 내 행간」 사용'
+                  : '정밀 분석은 우측 행간거리 자동 계산 패널을 사용하세요'}
+              </p>
             </div>
             <div>
               <div className="flex justify-between items-center">
