@@ -284,31 +284,20 @@ function placeGridAtAngle(
 ): { placements: PanelPlacement[]; fillCount: number } {
   const effNS = panelOrientation === 'landscape' ? panelSpec.widthM : panelSpec.lengthM
   const effEW = panelOrientation === 'landscape' ? panelSpec.lengthM : panelSpec.widthM
-  const projLen = effNS * Math.cos(tiltAngle * DEG2RAD)
-  const colPitch = effEW + 0.02
+  // ── 2026-05 핵심 수정 — 조사된 시공사 표준 피드백 반영 ─────────────
+  // 단수·행간거리 WYSIWYG: 스프레드시트 표준 설치도 그대로, tilt 투영 없음.
+  //   1단: [패널 1장 panelH][행간 rowSpacing][패널 1장][행간] ...
+  //   2단: [패널 2장 panelH×2][행간 rowSpacing][패널 2장][행간] ...
+  //   3단: [패널 3장 panelH×3][행간 rowSpacing][패널 3장][행간] ...
+  // 단 내부는 빈틈없이 인접(시공 실무 표준), 그룹 사이에만 rowSpacing.
+  // tiltAngle / spacingPolicy / constructionStdGap / firstStackGap 은
+  // 본 단순화로 더 이상 배치 계산에 사용되지 않음(시그니처 호환 유지).
+  void tiltAngle; void spacingPolicy; void constructionStdGap; void firstStackGap
+  const panelH = effNS                          // 패널 종방향 설치치수
+  const colPitch = effEW + 0.02                 // 좌우 모듈 간격 — 시공 표준 2cm 유지
   const stack = Math.max(1, Math.round(rowStack))
-  const intraGap = 0.02  // 단 내 행간 간격 (2cm)
-  // 단 높이: stack개의 패널 + (stack-1)개의 intraGap
-  const groupHeight = stack * projLen + (stack - 1) * intraGap
-  // shadowGap: 그림자 거리에서 모듈 수평투영 제외한 순수 gap
-  // 박공처럼 rowSpacing < projLen인 경우 = 물리적 gap만 적용
-  const shadowGap = Math.max(rowSpacing - projLen, 0)
-  let groupPitch: number
-  if (rowSpacing > projLen) {
-    if (spacingPolicy === 'shadow_avoid') {
-      groupPitch = groupHeight + stack * shadowGap  // 그늘 회피: 단수 비례
-    } else {
-      if (stack === 1) {
-        const firstGap = firstStackGap ?? shadowGap
-        groupPitch = groupHeight + firstGap         // 1단: Phase L 사용자 빈공간 또는 자동
-      } else {
-        const userGap = constructionStdGap ?? shadowGap
-        groupPitch = groupHeight + userGap          // 2단+: 사용자 입력 빈공간
-      }
-    }
-  } else {
-    groupPitch = groupHeight + rowSpacing           // 박공(0.1m): 물리 gap — 정책 무관
-  }
+  const groupHeight = panelH * stack            // 단 높이 = panelH × 단수 (단 내부 인접)
+  const groupPitch = groupHeight + rowSpacing   // 그룹 pitch = 단 높이 + 사용자 행간
 
   const centroid = polygonCentroid(safeZonePolygon)
   const rotatedPoly = safeZonePolygon.map(p => rotatePoint(p, centroid.x, centroid.y, -gridAngle))
@@ -329,17 +318,17 @@ function placeGridAtAngle(
 
   for (let yGroup = minY; yGroup + groupHeight <= maxY; yGroup += groupPitch, groupIdx++) {
     for (let si = 0; si < stack; si++) {
-      const y = yGroup + si * (projLen + intraGap)
+      const y = yGroup + si * panelH       // 단 내부 인접 — intraGap 없음
       const row = groupIdx * stack + si
       let col = 0
       for (let x = minX; x + effEW <= maxX; x += colPitch, col++) {
         const rotatedCorners: [Point, Point, Point, Point] = [
           { x,            y },
           { x: x + effEW, y },
-          { x: x + effEW, y: y + projLen },
-          { x,            y: y + projLen },
+          { x: x + effEW, y: y + panelH },
+          { x,            y: y + panelH },
         ]
-        const centerRotated = { x: x + effEW / 2, y: y + projLen / 2 }
+        const centerRotated = { x: x + effEW / 2, y: y + panelH / 2 }
         const passes = rotatedValidPolys
           ? rotatedValidPolys.some(poly => isPanelInsidePolygon(rotatedCorners, poly))
           : isPanelInsidePolygon(rotatedCorners, rotatedPoly)
@@ -350,7 +339,7 @@ function placeGridAtAngle(
         ) as [Point, Point, Point, Point]
 
         const center = rotatePoint(
-          { x: x + effEW / 2, y: y + projLen / 2 },
+          { x: x + effEW / 2, y: y + panelH / 2 },
           centroid.x, centroid.y, gridAngle
         )
 
@@ -365,21 +354,21 @@ function placeGridAtAngle(
   if (landStandard && stack >= 2) {
     const lastGroupEnd = groupIdx > 0
       ? minY + (groupIdx - 1) * groupPitch + groupHeight
-      : minY - shadowGap  // 2단 그룹 없음 → yFill = minY 로 시작
-    let yFill = lastGroupEnd + shadowGap
+      : minY
+    let yFill = lastGroupEnd + rowSpacing  // 그룹 끝 + 사용자 행간만큼 띄우고 fill 시작
     let fillRowIdx = groupIdx * stack
 
-    while (yFill + projLen <= maxY) {
+    while (yFill + panelH <= maxY) {
       const row = fillRowIdx
       let col = 0
       for (let x = minX; x + effEW <= maxX; x += colPitch, col++) {
         const rotatedFillCorners: [Point, Point, Point, Point] = [
           { x,            y: yFill },
           { x: x + effEW, y: yFill },
-          { x: x + effEW, y: yFill + projLen },
-          { x,            y: yFill + projLen },
+          { x: x + effEW, y: yFill + panelH },
+          { x,            y: yFill + panelH },
         ]
-        const centerRotated = { x: x + effEW / 2, y: yFill + projLen / 2 }
+        const centerRotated = { x: x + effEW / 2, y: yFill + panelH / 2 }
         const passes = rotatedValidPolys
           ? rotatedValidPolys.some(poly => isPanelInsidePolygon(rotatedFillCorners, poly))
           : isPanelInsidePolygon(rotatedFillCorners, rotatedPoly)
@@ -396,7 +385,7 @@ function placeGridAtAngle(
         fillCount++
       }
       fillRowIdx++
-      yFill += rowSpacing  // rowSpacing = D = 1단 front-to-front pitch
+      yFill += panelH + rowSpacing  // 1단 fill 피치: panelH + rowSpacing
     }
   }
 
@@ -405,7 +394,7 @@ function placeGridAtAngle(
     const mainEndIdx = placements.length - fillCount
     const mainPanels = placements.slice(0, mainEndIdx)
     const fillPanels = placements.slice(mainEndIdx)
-    const panelTol = Math.min(effEW, projLen) * 0.05
+    const panelTol = Math.min(effEW, panelH) * 0.05
     const hasOverlap = (a: PanelPlacement, b: PanelPlacement): boolean => {
       const aXs = a.corners.map(c => c.x), aYs = a.corners.map(c => c.y)
       const bXs = b.corners.map(c => c.x), bYs = b.corners.map(c => c.y)

@@ -388,6 +388,19 @@ export default function MapTab() {
     }
   }, [svgPlotType]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── 2026-05 좌측 '모듈·각도 설정' 카드 제거 후 데이터 일관성 ────────
+  // SVG 정밀배치의 svgPanelType ↔ MODULES[moduleIndex] 양방향 동기화
+  // (1단 행간 계산은 MODULES[moduleIndex].h 사용, SVG 정밀은 svgPanelType 사용 → 두 경로 정합)
+  useEffect(() => {
+    const idx = MODULES.findIndex(m => m.name === svgPanelType)
+    if (idx >= 0 && idx !== moduleIndex) setModuleIndex(idx)
+  }, [svgPanelType]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // SVG 정밀배치의 svgPanelOrientation ↔ panelOrientation 동기화
+  useEffect(() => {
+    if (svgPanelOrientation !== panelOrientation) setPanelOrientation(svgPanelOrientation)
+  }, [svgPanelOrientation]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Phase C-1: 지붕 그리기 키보드 핸들러 ──────────────────────────
   useEffect(() => {
     if (!drawingMode || svgPlotType !== 'roof') {
@@ -1851,97 +1864,6 @@ export default function MapTab() {
           )}
         </div>
 
-        {/* STEP 3 */}
-        <div className={stepCard(true)}>
-          <div className="flex items-center gap-2 mb-3">
-            <div className={stepCircle(true, '✓')}>✓</div>
-            <h3 className="font-semibold text-gray-800 text-sm">모듈 · 각도 설정</h3>
-          </div>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-gray-500 font-medium">모듈 선택</label>
-              <select value={moduleIndex} onChange={e => setModuleIndex(Number(e.target.value))}
-                className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {MODULES.map((m, i) => <option key={i} value={i}>{m.name} ({m.watt}W)</option>)}
-              </select>
-              <div className="mt-1 text-xs text-gray-400">{MODULES[moduleIndex].w}m × {MODULES[moduleIndex].h}m</div>
-            </div>
-            <div>
-              <div className="flex justify-between">
-                <label className="text-xs text-gray-500 font-medium">경사각</label>
-                <span className="text-sm font-bold text-blue-600">{tiltAngle}°</span>
-              </div>
-              <input type="range" min={0} max={60} value={tiltAngle}
-                onChange={e => setTiltAngle(Number(e.target.value))} className="mt-1 w-full"/>
-              <div className="flex justify-between text-xs text-gray-400 mt-0.5">
-                <span>0°</span><span>서울최적 33°</span><span>60°</span>
-              </div>
-            </div>
-            {/* 설치 방향 (Item 3) */}
-            <div>
-              <label className="text-xs text-gray-500 font-medium">설치 방향</label>
-              <div className="flex gap-1.5 mt-1">
-                <button onClick={() => setPanelOrientation('portrait')}
-                  className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    panelOrientation === 'portrait' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'}`}>
-                  세로형
-                </button>
-                <button onClick={() => setPanelOrientation('landscape')}
-                  className={`flex-1 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    panelOrientation === 'landscape' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'}`}>
-                  가로형
-                </button>
-              </div>
-            </div>
-
-            {/* 배열 방법 (단수) — 간이·정밀 공용 */}
-            <div>
-              <label className="text-xs text-gray-500 font-medium">배열 방법 (단수)</label>
-              <div className="flex gap-1.5 mt-1">
-                {([1, 2, 3] as const).map(n => (
-                  <button key={n} onClick={() => { setRowStack(n); if (showSvgCanvas) runSVGAnalysis({ rowStack: n }) }}
-                    className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors ${
-                      rowStack === n ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-300'}`}>
-                    {n}단
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1 text-[10px] text-gray-400">간이·정밀 공용 — 단수 변경 시 두 분석 모두 반영</p>
-            </div>
-            <div>
-              <div className="flex justify-between items-center">
-                <label className="text-xs text-gray-500 font-medium">이격 거리 <span className="text-gray-400">(간이 분석)</span></label>
-                <span className="text-xs text-gray-400">이론값: {theoreticalSpacing}m <span className="text-gray-300">ⓘ 참조용</span></span>
-              </div>
-              <input
-                type="number"
-                min={0.5}
-                max={5}
-                step={0.1}
-                value={spacingValue}
-                onChange={e => setSpacingValue(Number(e.target.value))}
-                className="mt-1 w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <p className="mt-1 text-[10px] text-gray-400">정밀 분석은 우측 행간거리 자동 계산 패널을 사용하세요</p>
-            </div>
-            <div>
-              <div className="flex justify-between items-center">
-                <label className="text-xs text-gray-500 font-medium">경사도 (지형)</label>
-                <div className="flex items-center gap-1.5">
-                  {slopeFetching && <span className="text-xs text-blue-400">측정 중…</span>}
-                  {slopeAuto && !slopeFetching && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded">자동측정</span>}
-                  <span className="text-sm font-bold text-orange-600">{slopePercent}%</span>
-                </div>
-              </div>
-              <input type="range" min={0} max={50} value={slopePercent}
-                onChange={e => { setSlopePercent(Number(e.target.value)); setSlopeAuto(false) }} className="mt-1 w-full"/>
-              {slopePercent > 0
-                ? <div className="mt-1 text-xs text-orange-600">면적 보정: ×{(Math.cos(Math.atan(slopePercent / 100)) * 100).toFixed(1)}%</div>
-                : <div className="mt-1 text-xs text-gray-400">평지 (보정 없음)</div>}
-            </div>
-          </div>
-        </div>
-
         {/* KIER 실측 일사량 */}
         {(kierLoading || kierResult) && (
           <div className={`rounded-xl border-2 p-4 ${kierResult ? 'bg-emerald-50 border-emerald-300' : 'bg-gray-50 border-gray-200'}`}>
@@ -2503,6 +2425,36 @@ export default function MapTab() {
                       <div className="text-[10px] text-sky-600 mt-0.5">1단 패널 사이의 거리. 모든 단수의 시작점.</div>
                     </div>
                     <span className="text-[10px] bg-sky-100 text-sky-600 px-1.5 py-0.5 rounded font-medium">정밀 분석</span>
+                  </div>
+
+                  {/* 배열 방법 (단수) — 정밀 분석 기준 자동 입력 */}
+                  <div>
+                    <div className="flex justify-between items-baseline">
+                      <label className="text-xs text-gray-600 font-medium">배열 방법 (단수)</label>
+                      <span className="text-[10px] text-gray-400">선택 시 표준 행간거리 자동 적용</span>
+                    </div>
+                    <div className="flex gap-1.5 mt-1">
+                      {([1, 2, 3] as const).map(n => {
+                        const stdSpacing = n === 1 ? 1.2 : n === 2 ? 2.3 : 3.5
+                        return (
+                          <button key={n}
+                            onClick={() => {
+                              setRowStack(n)
+                              // 단수별 표준 행간거리 자동 입력 (조사된 시공 기준)
+                              setUserRowSpacing(stdSpacing)
+                              setSpacingValue(stdSpacing)
+                              if (showSvgCanvas) runSVGAnalysis({ rowStack: n, rowSpacing: stdSpacing })
+                            }}
+                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                              rowStack === n ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-300'}`}>
+                            {n}단
+                            <span className={`block text-[9px] font-normal mt-0.5 ${rowStack === n ? 'text-violet-100' : 'text-gray-400'}`}>
+                              행간 {stdSpacing}m
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
 
                   {/* 입력 행 */}
