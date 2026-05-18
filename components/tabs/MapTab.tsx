@@ -13,6 +13,8 @@ import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
 import { type MultiZoneResult, type ZoneLayoutResult, type ZoneConfig, runMultiZoneAnalysis, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
+import { placeGabledPanels } from '@/lib/gabledLayoutEngine'
+import { GABLED_ROOF_DEFAULTS, type GabledRoofConfig } from '@/lib/roofGabledConfig'
 import { union as turfUnion, polygon as turfPolygon, featureCollection as turfFeatureCollection, booleanPointInPolygon as turfPIP, point as turfPoint, buffer as turfBuffer } from '@turf/turf'
 
 // SVG 캔버스는 클라이언트 전용
@@ -1428,6 +1430,19 @@ export default function MapTab() {
         }).filter((z): z is ZoneConfig => z !== null)
         if (zones.length === 0) return
         const mzResult = runMultiZoneAnalysis(zones, lat)
+        // ── P0-3: 박공 모드 → placeGabledPanels로 layout 교체 (ridgeIgnore=jjokOlrim)
+        if (isGable) {
+          const gabCfg: GabledRoofConfig = { ...GABLED_ROOF_DEFAULTS, ridgeIgnore: jjokOlrim }
+          mzResult.zones.forEach(z => {
+            z.layout = placeGabledPanels({
+              safeZonePolygon: z.safeZone.safeZonePolygon,
+              panelSpec, config: gabCfg, tiltAngle,
+              panelOrientation: orientation, azimuthDeg: svgAzimuthDeg,
+            })
+          })
+          mzResult.totalCount = mzResult.zones.reduce((s, z) => s + z.layout.totalCount, 0)
+          mzResult.totalKwp = Math.round(mzResult.zones.reduce((s, z) => s + z.layout.totalKwp, 0) * 100) / 100
+        }
         setSvgAnalysisResult(mzResult)
         setLastFullAnalysisJson(JSON.stringify(mzResult))
         setLastAnalysisAddress(addresses.filter(Boolean).join(', '))
