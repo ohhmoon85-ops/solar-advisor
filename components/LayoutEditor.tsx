@@ -1170,18 +1170,24 @@ export default function LayoutEditor({
               <div className="border-t border-slate-700 pt-1 mt-1">
                 <StatRow label="설비 용량" value={`${currentKwp} kWp`} accent="amber" />
                 <StatRow label="통로 수" value={`${summary.corridorCount}개`} />
-                {result.layout.fillPanelCount != null ? (
+                {result.layout.fillPanelCount != null && result.layout.fillPanelCount > 0 ? (
+                  // 토지 실무 표준 — 단수 주배치 + 자투리 1단 채움
                   <StatRow
                     label="단수 분포"
-                    value={`2단 ${summary.autoPanelCount - result.layout.fillPanelCount}장 + 자투리 ${result.layout.fillPanelCount}장`}
+                    value={`${reanalysisOptions?.rowStack ?? 2}단 ${summary.autoPanelCount - result.layout.fillPanelCount}장 + 자투리 ${result.layout.fillPanelCount}장`}
                     accent="violet" />
-                ) : (
+                ) : summary.stackedRowCount > 0 ? (
+                  // 편집 후 행별 단수 혼재
                   <StatRow
                     label="다단 행"
-                    value={summary.stackedRowCount > 0
-                      ? Object.entries(summary.stackBreakdown).map(([n, c]) => `${n}단 ${c}행`).join(' + ')
-                      : '0행'}
-                    accent={summary.stackedRowCount > 0 ? 'violet' : undefined} />
+                    value={Object.entries(summary.stackBreakdown).map(([n, c]) => `${n}단 ${c}행`).join(' + ')}
+                    accent="violet" />
+                ) : (
+                  // 균일 단수 (자투리 없음)
+                  <StatRow
+                    label="단수 분포"
+                    value={`${reanalysisOptions?.rowStack ?? 1}단 ${summary.autoPanelCount}장`}
+                    accent="violet" />
                 )}
               </div>
               <StatRow label="실행취소 가능" value={`${state.editHistory.length}/20`} />
