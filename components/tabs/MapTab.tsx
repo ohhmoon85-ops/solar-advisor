@@ -1391,6 +1391,12 @@ export default function MapTab() {
       const effectiveRowSpacing = customRowSpacing ?? gableRowSpacing ?? autoCalcRowSpacing
       const isGable = installType === '건물지붕형' && roofType === '박공'
       const workPath = isGable ? 0 : workPathM
+      // ── 진단 로그: 박공 분기 진입 여부 추적
+      console.log('[Gabled-Diag] handleRunAnalysis 진입', {
+        installType, roofType, isGable, svgPlotType,
+        roofPolygonsLen: roofPolygons.length,
+        ridgeIgnore: gabledConfig.ridgeIgnore,
+      })
 
       // 경계 마진: 사용자 입력 우선, 미지정 시 모드별 기본값 (토지 2m / 지붕 0.5m)
       const defaultMargin = svgPlotType === 'roof' ? 0.5 : 2.0
@@ -1438,19 +1444,28 @@ export default function MapTab() {
         }).filter((z): z is ZoneConfig => z !== null)
         if (zones.length === 0) return
         const mzResult = runMultiZoneAnalysis(zones, lat)
+        console.log('[Gabled-Diag] roof 브랜치 mzResult', {
+          zones: mzResult.zones.length,
+          totalCountBefore: mzResult.totalCount,
+        })
         // ── P0-3: 박공 모드 → placeGabledPanels로 layout 교체 (전체 gabledConfig 사용)
         if (isGable) {
+          console.log('[Gabled-Diag] isGable=true → placeGabledPanels 호출', { config: gabledConfig, tiltAngle, orientation })
           // GabledConfigPanel의 라이브 상태(gabledConfig) 그대로 사용 — ridgeIgnore/ridgeGap/...
-          mzResult.zones.forEach(z => {
+          mzResult.zones.forEach((z, idx) => {
+            const beforeCount = z.layout.totalCount
             z.layout = placeGabledPanels({
               safeZonePolygon: z.safeZone.safeZonePolygon,
               panelSpec, config: gabledConfig, tiltAngle,
               panelOrientation: orientation,
               azimuthDeg: gabledConfig.orientationMode === 'true-south' ? 180 : svgAzimuthDeg,
             })
+            console.log(`[Gabled-Diag] Zone ${idx} layout 교체: ${beforeCount}장 → ${z.layout.totalCount}장`)
           })
           mzResult.totalCount = mzResult.zones.reduce((s, z) => s + z.layout.totalCount, 0)
           mzResult.totalKwp = Math.round(mzResult.zones.reduce((s, z) => s + z.layout.totalKwp, 0) * 100) / 100
+        } else {
+          console.log('[Gabled-Diag] isGable=false → 박공 분기 스킵 (flat 결과 그대로 사용)')
         }
         setSvgAnalysisResult(mzResult)
         setLastFullAnalysisJson(JSON.stringify(mzResult))

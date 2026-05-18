@@ -79,8 +79,18 @@ export function placeGabledPanels(params: {
     validPolygons,
   } = params
 
+  console.log('[Gabled-Engine] placeGabledPanels 진입', {
+    ridgeIgnore: config.ridgeIgnore,
+    ridgeGap: config.ridgeGap,
+    intraSlopeGap: config.intraSlopeGap,
+    eaveSetback: config.eaveSetback,
+    polyLen: safeZonePolygon.length,
+    tiltAngle,
+  })
+
   // ── ridgeIgnore: 슬라브와 동일 처리 (직선 배치) ─────────────────
   if (config.ridgeIgnore) {
+    console.log('[Gabled-Engine] ridgeIgnore=true → generateLayout 폴백')
     const projLen = panelSpec.lengthM * Math.cos(tiltAngle * DEG2RAD)
     return generateLayout({
       safeZonePolygon,
@@ -154,15 +164,31 @@ export function placeGabledPanels(params: {
 
   // Slope A: 아래쪽 (minY → ridgeY - ridgeGap/2)
   const slopeATop = ridgeY - config.ridgeGap / 2
+  const slopeASizeBefore = placements.length
   let rIdx = 0
   for (let yB = minY; yB + projLen <= slopeATop; yB += rowPitch, rIdx++) {
     placeRow(yB, rIdx)
   }
+  const slopeARows = rIdx
+  const slopeACount = placements.length - slopeASizeBefore
   // Slope B: 위쪽 (ridgeY + ridgeGap/2 → maxY)
   const slopeBStart = ridgeY + config.ridgeGap / 2
+  const slopeBSizeBefore = placements.length
+  const rStartB = rIdx
   for (let yB = slopeBStart; yB + projLen <= maxY; yB += rowPitch, rIdx++) {
     placeRow(yB, rIdx)
   }
+  const slopeBRows = rIdx - rStartB
+  const slopeBCount = placements.length - slopeBSizeBefore
+  console.log('[Gabled-Engine] ridge 분할 결과', {
+    ridgeAxisDeg: ((ridgeAxisRad * 180) / Math.PI).toFixed(1),
+    aabb: { minX: minX.toFixed(2), maxX: maxX.toFixed(2), minY: minY.toFixed(2), maxY: maxY.toFixed(2) },
+    ridgeY: ridgeY.toFixed(2),
+    rowPitch: rowPitch.toFixed(3),
+    slopeA: { rows: slopeARows, panels: slopeACount },
+    slopeB: { rows: slopeBRows, panels: slopeBCount },
+    total: placements.length,
+  })
 
   // ── 6. 결과 집계 ────────────────────────────────────────────
   const safeAreaM2 = polygonAreaM2(safeZonePolygon)
