@@ -2030,7 +2030,8 @@ export default function MapTab() {
                 }}
               />
             ))}
-            {/* z:1 — VWorld WMS 지적도(투명 PNG): 지번·필지 경계 오버레이 (지적도 모드) */}
+            {/* z:1 — VWorld WMS 지적도(투명 PNG): 지번·필지 경계 오버레이 (지적도 모드)
+                CSS 필터로 대비·채도 강화 — 산악·임야 지역에서 등고선 배경에 묻히지 않도록 */}
             {cadImgTiles.map((t, i) => (
               <img key={i} src={t.src} alt=""
                 style={{
@@ -2041,6 +2042,7 @@ export default function MapTab() {
                   height: `${t.pxH / CANVAS_H * 100}%`,
                   zIndex: 1,
                   pointerEvents: 'none',
+                  filter: 'contrast(1.4) saturate(1.5)',
                 }}
               />
             ))}
