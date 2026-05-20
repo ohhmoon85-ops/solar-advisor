@@ -307,6 +307,11 @@ export default function MapTab() {
   // ── 복수 필지 ──
   const [parcels, setParcels] = useState<ParcelInfo[]>([])
 
+  // ── 인접 지번 (검색 부지 주변 시각화용) ──
+  // VWorld GetFeature BOX 조회 결과 — 지번 라벨·외곽선만 표시, 패널·면적 계산엔 미사용
+  interface AdjacentParcel { ring: number[][]; canvasPoints: Point[]; label: string }
+  const [adjacentParcels, setAdjacentParcels] = useState<AdjacentParcel[]>([])
+
   // ── API 상태 ──
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState('')
@@ -651,6 +656,38 @@ export default function MapTab() {
       return
     }
 
+    // ❷-1 인접 지번 — 메인 필지 아래에 먼저 그려서 시각적 배경으로 사용
+    //   회색 점선 외곽 + 작은 지번 라벨. 사용자 클릭·계산 대상이 아님.
+    if (adjacentParcels.length > 0) {
+      ctx.save()
+      ctx.setLineDash([3, 3])
+      ctx.strokeStyle = 'rgba(71,85,105,0.65)'   // slate-600 65%
+      ctx.lineWidth = 1
+      ctx.font = '10px sans-serif'
+      ctx.textAlign = 'center'
+      adjacentParcels.forEach(adj => {
+        const pts = adj.canvasPoints
+        if (pts.length < 2) return
+        ctx.beginPath()
+        ctx.moveTo(pts[0].x, pts[0].y)
+        pts.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
+        ctx.closePath()
+        ctx.stroke()
+        // 라벨 — 폴리곤 중심에 흰 배경 박스 + 지번 텍스트
+        const lcx = pts.reduce((s, p) => s + p.x, 0) / pts.length
+        const lcy = pts.reduce((s, p) => s + p.y, 0) / pts.length
+        if (lcx < 0 || lcx > CANVAS_W || lcy < 0 || lcy > CANVAS_H) return
+        const tw = ctx.measureText(adj.label).width
+        ctx.setLineDash([])
+        ctx.fillStyle = 'rgba(255,255,255,0.75)'
+        ctx.fillRect(lcx - tw / 2 - 2, lcy - 7, tw + 4, 12)
+        ctx.fillStyle = '#475569'    // slate-600
+        ctx.fillText(adj.label, lcx, lcy + 3)
+        ctx.setLineDash([3, 3])
+      })
+      ctx.restore()
+    }
+
     // ❷ 복수 필지 경계 — API에서 가져온 경우
     if (hasParcelData) {
       parcels.forEach((parcel, pi) => {
@@ -764,7 +801,7 @@ export default function MapTab() {
     }
   }, [isComplete, area, panelRects, spacingValue, panelCount,
       pixelScale, apiSource, satTiles, cadImgTiles, baseTiles, satZoom,
-      parcels, mapMode, installType])
+      parcels, adjacentParcels, mapMode, installType])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -993,6 +1030,43 @@ export default function MapTab() {
     pnu?: string
     jimok?: string
   }
+  // ── 인접 지번 일괄 조회 (검색 부지 주변 시각화용) ──
+  // VWorld GetFeature BOX 조회 — 중심 ±radius m 안의 모든 필지를 받아 라벨·외곽선만 표시
+  // 메인 검색 부지(parcels) 와 겹치는 항목은 제외 (centroid 거리 < 2m 기준 dedup)
+  const fetchAdjacentParcels = async (
+    cLon: number, cLat: number, scale: number, mainParcels: ParcelInfo[]
+  ) => {
+    try {
+      const res = await fetch(`/api/vworld?type=parcels-nearby&lon=${cLon}&lat=${cLat}&radius=500&size=150`)
+      if (!res.ok) return
+      const data = await res.json()
+      const features = data?.response?.result?.featureCollection?.features
+      if (!Array.isArray(features)) return
+      // 메인 부지 라벨 set — 같은 지번은 인접 표시에서 제외
+      const mainLabels = new Set(mainParcels.map(p => p.label.replace(/\s+/g, '')))
+      const adjacents: AdjacentParcel[] = []
+      for (const f of features) {
+        const props = f?.properties ?? {}
+        const label: string = props.jibun ?? props.bonbun ?? props.pnu ?? ''
+        if (!label) continue
+        if (mainLabels.has(label.replace(/\s+/g, ''))) continue
+        const geom = f?.geometry
+        if (!geom) continue
+        // MultiPolygon 1번째 폴리곤 외곽 ring만 사용 (인접 시각화는 외곽선이면 충분)
+        let ring: number[][] | null = null
+        if (geom.type === 'Polygon' && Array.isArray(geom.coordinates?.[0])) {
+          ring = geom.coordinates[0] as number[][]
+        } else if (geom.type === 'MultiPolygon' && Array.isArray(geom.coordinates?.[0]?.[0])) {
+          ring = geom.coordinates[0][0] as number[][]
+        }
+        if (!ring || ring.length < 3) continue
+        const canvasPoints = ring.map(c => geoToCanvas(c[0], c[1], cLon, cLat, scale))
+        adjacents.push({ ring, canvasPoints, label })
+      }
+      setAdjacentParcels(adjacents)
+    } catch { /* 인접 지번 조회 실패해도 메인 동작에 영향 없음 */ }
+  }
+
   const geocodeAddress = async (q: string): Promise<GeocodeResult | { error: string }> => {
     try {
       const res = await fetch(`/api/geocode?address=${encodeURIComponent(q)}`)
@@ -1029,6 +1103,7 @@ export default function MapTab() {
     setParcelLabel('')
     setKierResult(null)
     setParcels([])
+    setAdjacentParcels([])
     setArea(0); setPanelRects([]); setPanelCount(0)
     setCapacityKwp(0); setAnnualKwh(0); setIsComplete(false)
     // 부지 변경 시 이전 분석 결과 초기화
@@ -1097,6 +1172,7 @@ export default function MapTab() {
       loadTiles(cLon, cLat, z, scale, mapMode)
       fetchKierData(first.lat, first.lon, tiltAngle)
       fetchSlope(first.lon, first.lat)
+      fetchAdjacentParcels(cLon, cLat, scale, converted)
 
       // land-info: 용도지역·지목 조회
       fetch('/api/land-info?lon=' + first.lon + '&lat=' + first.lat)
@@ -1120,6 +1196,7 @@ export default function MapTab() {
     setKierPvHours(null); setKierGhi(null); setLocationCoords(null)
     // 복수 필지 초기화
     setParcels([])
+    setAdjacentParcels([])
     setLandInfo(null)
     // 사용자 입력 전체 초기화 → R-new 기준점 복원
     setUserBoundaryMargin(undefined)

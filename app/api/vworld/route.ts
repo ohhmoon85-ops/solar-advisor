@@ -257,6 +257,39 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data)
     }
 
+    // 인접 지번 일괄 조회 — 중심 좌표 기준 ±radius(m) 박스 안의 모든 필지
+    // 메인 검색 지번 주변에 어떤 필지들이 있는지 시각화하기 위해 사용
+    if (type === 'parcels-nearby') {
+      const lon = parseFloat(searchParams.get('lon') ?? '0')
+      const lat = parseFloat(searchParams.get('lat') ?? '0')
+      const radius = Math.min(2000, Math.max(50, parseFloat(searchParams.get('radius') ?? '400')))
+      const size = Math.min(200, Math.max(10, parseInt(searchParams.get('size') ?? '120', 10)))
+      // m → 도 단위 환산 (위도 보정)
+      const dLat = radius / 111319.9
+      const dLon = radius / (111319.9 * Math.cos(lat * Math.PI / 180))
+      const minLon = lon - dLon, maxLon = lon + dLon
+      const minLat = lat - dLat, maxLat = lat + dLat
+      // VWorld GetFeature BOX: minX,minY,maxX,maxY (= minLon,minLat,maxLon,maxLat)
+      const bbox = `${minLon},${minLat},${maxLon},${maxLat}`
+      const url =
+        `https://api.vworld.kr/req/data` +
+        `?service=data&request=GetFeature&data=LP_PA_CBND_BUBUN` +
+        `&key=${apiKey}&format=json&geometry=true&attribute=true` +
+        `&crs=epsg:4326&page=1&size=${size}` +
+        `&geomFilter=BOX(${encodeURIComponent(bbox)})`
+      const res = await vwFetch(url)
+      const ct = res.headers.get('content-type') ?? ''
+      if (!ct.includes('json')) {
+        const raw = await res.text()
+        return NextResponse.json({
+          response: { status: 'ERROR', result: null },
+          _debug: { httpStatus: res.status, contentType: ct, body: raw.slice(0, 500) }
+        })
+      }
+      const data = await res.json()
+      return NextResponse.json(data)
+    }
+
     if (type === 'elevation') {
       // 중심 + 상하좌우 20m 지점 5개 고도 조회 → 경사도 계산
       const lon = parseFloat(searchParams.get('lon') ?? '0')
