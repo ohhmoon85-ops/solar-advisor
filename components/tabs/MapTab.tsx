@@ -12,6 +12,7 @@ import { calculateRowSpacing, calculateSlopeFromPercent, getSolarAngleByLocation
 import { runFullAnalysis, createSafeZone, type FullAnalysisResult, type PlotType, type SpacingPolicy } from '@/lib/layoutEngine'
 import { convertGeoRingToLocalPolygon } from '@/lib/cadastre'
 import { PRESET_PANELS } from '@/lib/panelConfig'
+import ManualUploadPanel, { type ManualUploadPayload } from '@/components/manual-upload/ManualUploadPanel'
 import { type MultiZoneResult, type ZoneLayoutResult, type ZoneConfig, runMultiZoneAnalysis, isMultiZoneResult, mergePolygonsToHull } from '@/lib/multiZoneLayout'
 import { union as turfUnion, polygon as turfPolygon, featureCollection as turfFeatureCollection, booleanPointInPolygon as turfPIP, point as turfPoint, buffer as turfBuffer } from '@turf/turf'
 
@@ -347,6 +348,20 @@ export default function MapTab() {
   const [showSvgCanvas, setShowSvgCanvas] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editingCount, setEditingCount] = useState<number | null>(null)
+  // 정밀 분석 모드 — 'auto': 기존 SVG 자동 분석 / 'upload': CAD 도면 직접 업로드 (2026-05)
+  // localStorage로 사용자 마지막 선택 기억. 기본은 자동 분석.
+  const [precisionMode, setPrecisionMode] = useState<'auto' | 'upload'>('auto')
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const saved = localStorage.getItem('solar_precision_mode')
+    if (saved === 'auto' || saved === 'upload') setPrecisionMode(saved)
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem('solar_precision_mode', precisionMode)
+  }, [precisionMode])
+  // Feature flag — NEXT_PUBLIC_MANUAL_UPLOAD_ENABLED='false' 시 탭 자체 숨김
+  const manualUploadEnabled = process.env.NEXT_PUBLIC_MANUAL_UPLOAD_ENABLED !== 'false'
   // v5.2 SVG 배치 입력 (간소화)
   const [svgAzimuthDeg, setSvgAzimuthDeg] = useState(180)
   const [svgZoneMode, setSvgZoneMode] = useState<'single' | 'multi'>('single')
@@ -1231,6 +1246,40 @@ export default function MapTab() {
     }
     setActiveTab('revenue')
   }
+
+  // ── 도면 업로드 모드 — 수익성 탭 연동 (2026-05) ────────────────────
+  // 사용자가 입력한 panelCount·capacityKwp를 기존 setMapResult 시그니처로 전달.
+  // 패널 종류 텍스트에서 W 추출 가능하면 MODULES 중 가장 가까운 항목으로 moduleIndex 매핑.
+  const handleManualUploadSubmit = useCallback((payload: ManualUploadPayload) => {
+    const genHours = kierResult?.pvHours ?? GENERATION_HOURS
+    const annualKwh = Math.round(payload.capacityKwp * genHours * 365)
+    let modIdx = moduleIndex
+    if (payload.panelType) {
+      const wMatch = payload.panelType.match(/(\d{3,4})\s*W/i)
+      if (wMatch) {
+        const targetW = parseInt(wMatch[1], 10)
+        let best = 0, bestDiff = Infinity
+        MODULES.forEach((m, i) => {
+          const d = Math.abs(m.watt - targetW)
+          if (d < bestDiff) { best = i; bestDiff = d }
+        })
+        modIdx = best
+      }
+    }
+    const addressLabel = payload.jibun
+      ?? addresses.filter(Boolean).join(', ')
+      ?? '도면 업로드 (지번 미지정)'
+    setMapResult({
+      panelCount: payload.panelCount,
+      capacityKwp: payload.capacityKwp,
+      annualKwh,
+      area: 0,
+      address: addressLabel,
+      tiltAngle: payload.tiltAngle,
+      moduleIndex: modIdx,
+    })
+    setActiveTab('revenue')
+  }, [kierResult, moduleIndex, addresses, setMapResult, setActiveTab])
 
   // 메인 canvas + SVG 오버레이(지붕 폴리곤)를 단일 dataURL로 합성
   const getCompositeDataUrl = async (): Promise<string> => {
@@ -2346,6 +2395,43 @@ export default function MapTab() {
               </p>
             </div>
 
+            {/* 모드 탭 — 자동 분석 / 도면 업로드 (Feature Flag로 노출 제어) */}
+            {manualUploadEnabled && (
+              <div className="flex gap-0 mb-3 border-b border-gray-200">
+                <button
+                  onClick={() => setPrecisionMode('auto')}
+                  className={`px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors ${
+                    precisionMode === 'auto'
+                      ? 'border-indigo-500 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  🔬 자동 분석
+                </button>
+                <button
+                  onClick={() => setPrecisionMode('upload')}
+                  className={`px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors ${
+                    precisionMode === 'upload'
+                      ? 'border-indigo-500 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  📂 도면 업로드
+                </button>
+              </div>
+            )}
+
+            {/* 도면 업로드 모드 — 신규 (2026-05) */}
+            {manualUploadEnabled && precisionMode === 'upload' && (
+              <ManualUploadPanel
+                onSubmit={handleManualUploadSubmit}
+                defaultJibun={addresses.filter(Boolean).join(', ')}
+              />
+            )}
+
+            {/* 자동 분석 모드 — 기존 코드 그대로 (조건부 마운트만 추가) */}
+            {(!manualUploadEnabled || precisionMode === 'auto') && (<>
+
             {/* ── 설정 그리드 ── */}
             <div className="grid grid-cols-2 gap-2 mb-3">
               {/* 패널 선택 */}
@@ -3124,6 +3210,7 @@ export default function MapTab() {
                 )}
               </div>
             )}
+            </>)}
           </div>
         )}
       </div>
