@@ -289,6 +289,16 @@ export default function MapTab() {
   const [bipvEnabled, setBipvEnabled] = useState(false)
   const [roofType, setRoofType] = useState<'슬라브' | '박공'>('슬라브')
   const [jjokOlrim, setJjokOlrim] = useState(false)
+  // 박공 전용 옵션 (2026-05 추가) — 사용자 정밀 조정용
+  // 일부 값은 layoutEngine에 직접 전달되지 않고 향후 확장용으로 저장만 함
+  const [gableRidgeGap, setGableRidgeGap] = useState(1.0)        // 용마루 갭 (m, 0.0~3.0)
+  const [gableSlopeRowGap, setGableSlopeRowGap] = useState(0.15) // 사면 내 행간 (m, 0.05~0.5)
+  const [gableEaveGap, setGableEaveGap] = useState(0.5)          // 처마 이격 (m, 0.0~2.0)
+  const [gablePanelOrient, setGablePanelOrient] = useState<'roof' | 'south'>('roof') // 패널 방위각 모드
+  const [gableRidgeAxisMode, setGableRidgeAxisMode] = useState<'auto' | 'manual'>('auto')
+  const [gableRidgeAxis, setGableRidgeAxis] = useState(0)        // 용마루 축 (°, 0=동서 / 90=남북)
+  const [gableSouthRows, setGableSouthRows] = useState<string>('')   // 남향 슬로프 행 수 (빈 값=자동)
+  const [gableNorthRows, setGableNorthRows] = useState<string>('')   // 북향 슬로프 행 수 (빈 값=자동)
 
   // ── 드로잉 ──
   const [isComplete, setIsComplete] = useState(false)
@@ -1500,7 +1510,8 @@ export default function MapTab() {
       const orientation = overrides?.panelOrientation ?? svgPanelOrientation
       const stack = overrides?.rowStack ?? rowStack
       const customRowSpacing = overrides?.rowSpacing
-      const gableRowSpacing = installType === '건물지붕형' && roofType === '박공' ? 0.1 : undefined
+      // 박공 사면 내 행간 — 2026-05 사용자 입력 지원, 미설정 시 0.1m 폴백
+      const gableRowSpacing = installType === '건물지붕형' && roofType === '박공' ? gableSlopeRowGap : undefined
 
       // [Option C 해백] 일반토지/슬라브에서 customRowSpacing 미지정 시,
       // 자동 계산 패널의 입력값(경사·마진)으로 행간거리를 계산하여 해백.
@@ -1529,7 +1540,7 @@ export default function MapTab() {
       // ── Phase C-2: 지붕 폴리곤 모드 ────────────────────────────────
       if (svgPlotType === 'roof' && roofPolygons.length > 0) {
         const roofFixedGridAngle = isGable && jjokOlrim
-        const roofRowSpacing = isGable ? 0.1 : effectiveRowSpacing
+        const roofRowSpacing = isGable ? gableSlopeRowGap : effectiveRowSpacing
         const commonRoofOpts = {
           azimuthDeg: svgAzimuthDeg,
           slopeAngleDeg: 0,
@@ -1955,15 +1966,134 @@ export default function MapTab() {
                   ))}
                 </div>
                 {roofType === '박공' && (
-                  <div className="mt-1.5 space-y-1">
+                  <div className="mt-2 space-y-2.5">
+                    {/* 쫙 올림 — 용마루 무시 직선 배치 */}
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={jjokOlrim}
                         onChange={e => setJjokOlrim(e.target.checked)}
                         className="accent-orange-500"/>
                       <span className="text-xs text-gray-700">쫙 올림 (용마루 무시, 직선 배치)</span>
                     </label>
+
+                    {/* 용마루 갭 (slider, 0.0~3.0m) */}
+                    <div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">용마루 갭</span>
+                        <span className="font-bold text-orange-600">{gableRidgeGap.toFixed(1)} m</span>
+                      </div>
+                      <input type="range" min={0} max={3} step={0.1}
+                        value={gableRidgeGap}
+                        onChange={e => setGableRidgeGap(Number(e.target.value))}
+                        className="w-full accent-orange-500"
+                        disabled={jjokOlrim} />
+                    </div>
+
+                    {/* 사면 내 행간 (slider, 0.05~0.5m) — layoutEngine 박공 rowSpacing 으로 전달 */}
+                    <div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">사면 내 행간</span>
+                        <span className="font-bold text-orange-600">{gableSlopeRowGap.toFixed(2)} m</span>
+                      </div>
+                      <input type="range" min={0.05} max={0.5} step={0.01}
+                        value={gableSlopeRowGap}
+                        onChange={e => setGableSlopeRowGap(Number(e.target.value))}
+                        className="w-full accent-orange-500" />
+                    </div>
+
+                    {/* 처마 이격 (slider, 0.0~2.0m) */}
+                    <div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">처마 이격</span>
+                        <span className="font-bold text-orange-600">{gableEaveGap.toFixed(1)} m</span>
+                      </div>
+                      <input type="range" min={0} max={2} step={0.1}
+                        value={gableEaveGap}
+                        onChange={e => setGableEaveGap(Number(e.target.value))}
+                        className="w-full accent-orange-500" />
+                    </div>
+
+                    {/* 패널 방위각 토글 — 지붕방향(시공 ↑) / 정남향(일사량 ↑) */}
+                    <div>
+                      <label className="text-xs text-gray-600 block mb-1">패널 방위각</label>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => setGablePanelOrient('roof')}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            gablePanelOrient === 'roof'
+                              ? 'bg-orange-500 text-white border-orange-500'
+                              : 'bg-white text-gray-600 border-gray-300 hover:border-orange-300'}`}>
+                          지붕방향 (시공 ↑)
+                        </button>
+                        <button onClick={() => setGablePanelOrient('south')}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            gablePanelOrient === 'south'
+                              ? 'bg-orange-500 text-white border-orange-500'
+                              : 'bg-white text-gray-600 border-gray-300 hover:border-orange-300'}`}>
+                          정남향 (일사량 ↑)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 용마루 축 — 자동(장축) / 수동 입력 */}
+                    <div>
+                      <label className="text-xs text-gray-600 block mb-1">용마루 축</label>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => setGableRidgeAxisMode('auto')}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            gableRidgeAxisMode === 'auto'
+                              ? 'bg-orange-500 text-white border-orange-500'
+                              : 'bg-white text-gray-600 border-gray-300 hover:border-orange-300'}`}>
+                          자동 (장축)
+                        </button>
+                        <button onClick={() => setGableRidgeAxisMode('manual')}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            gableRidgeAxisMode === 'manual'
+                              ? 'bg-orange-500 text-white border-orange-500'
+                              : 'bg-white text-gray-600 border-gray-300 hover:border-orange-300'}`}>
+                          수동 입력
+                        </button>
+                      </div>
+                      {gableRidgeAxisMode === 'manual' && (
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <input type="number" min={0} max={180} step={1}
+                            value={gableRidgeAxis}
+                            onChange={e => setGableRidgeAxis(Number(e.target.value))}
+                            className="w-16 text-sm border border-gray-300 rounded px-2 py-1 text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                          <span className="text-[10px] text-gray-500">° (0=동서, 90=남북)</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 슬로프별 행 수 (비대칭) — 빈 값 = 자동 채움 */}
+                    <div>
+                      <label className="text-xs text-gray-600 block mb-1">슬로프별 행 수 (비대칭)</label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-gray-500 w-7">남향</span>
+                          <input type="number" min={0} step={1}
+                            value={gableSouthRows}
+                            onChange={e => setGableSouthRows(e.target.value)}
+                            placeholder=""
+                            className="w-full text-sm border border-gray-300 rounded px-2 py-1 text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                          <span className="text-[10px] text-gray-500">행</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-gray-500 w-7">북향</span>
+                          <input type="number" min={0} step={1}
+                            value={gableNorthRows}
+                            onChange={e => setGableNorthRows(e.target.value)}
+                            placeholder=""
+                            className="w-full text-sm border border-gray-300 rounded px-2 py-1 text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                          <span className="text-[10px] text-gray-500">행</span>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1 leading-tight">
+                        비워두면 자동(공간 허용 전부 채움). 각 슬로프는 처마부터 행 수 적용
+                      </p>
+                    </div>
+
+                    {/* 박공 기준 안내 — 새 기본값 반영 */}
                     <div className="bg-orange-50 border border-orange-200 rounded-lg p-2 text-xs text-orange-700">
-                      박공 기준: 60평 ≈ 30kW · 이격 0.1m · 마진 50cm
+                      박공 기준: 60평 ≈ 30kW · 용마루 갭 {gableRidgeGap.toFixed(1)}m · 처마 {gableEaveGap.toFixed(1)}m
                     </div>
                   </div>
                 )}
@@ -3146,7 +3276,7 @@ export default function MapTab() {
                       panelSpec: PRESET_PANELS[svgPanelType] ?? PRESET_PANELS.GS710wp,
                       rowStack,
                       landStandard: svgPlotType === 'land',
-                      rowSpacing: installType === '건물지붕형' && roofType === '박공' ? 0.1 : undefined,
+                      rowSpacing: installType === '건물지붕형' && roofType === '박공' ? gableSlopeRowGap : undefined,
                       spacingPolicy,
                       constructionStdGap,
                     }}
