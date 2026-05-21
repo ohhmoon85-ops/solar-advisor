@@ -60,6 +60,8 @@ export default function RevenueTab() {
   )
 
   const equity = useMemo(() => totalCost * (1 - loanRatio / 100), [totalCost, loanRatio])
+  // 대출 존재 여부 — 대출 기간 버튼 disable 및 "대출상환" 컬럼 노출 조건
+  const hasLoan = loanRatio > 0
 
   const yearlyData = useMemo(
     () => calcYearlyTable(capacityKw, installationType, totalCost, loanRatio, loanRate, loanYears, effectiveGenHours, priceOverride, policyLoanRatio, policyLoanRate),
@@ -412,12 +414,19 @@ export default function RevenueTab() {
             </div>
 
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">대출 기간</label>
+              <label className="text-sm font-medium text-gray-700 block mb-1">
+                대출 기간
+                {!hasLoan && <span className="ml-1 text-xs text-gray-400 font-normal">(전액 자비 — 비활성)</span>}
+              </label>
               <div className="grid grid-cols-4 gap-1">
                 {LOAN_YEARS_OPTIONS.map(y => (
-                  <button key={y} onClick={() => setLoanYears(y)}
+                  <button key={y} onClick={() => setLoanYears(y)} disabled={!hasLoan}
                     className={`py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                      loanYears === y ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'
+                      !hasLoan
+                        ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                        : loanYears === y
+                          ? 'bg-blue-500 text-white border-blue-500'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'
                     }`}
                   >
                     {y}년
@@ -435,7 +444,7 @@ export default function RevenueTab() {
           {/* KPI cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white">
-              <div className="text-xs opacity-80 mb-1">연간 총수익</div>
+              <div className="text-xs opacity-80 mb-1">연간 총매출</div>
               <div className="text-xl font-bold">{fmt(revenue.total / 10000)}<span className="text-sm font-normal ml-1">만원</span></div>
               <div className="text-xs opacity-70 mt-1">SMP {fmt(revenue.smpRevenue / 10000)} + REC {fmt(revenue.recRevenue / 10000)}</div>
             </div>
@@ -534,8 +543,8 @@ export default function RevenueTab() {
                       <tr className="bg-gray-50">
                         <th className="px-2 py-2 text-left font-semibold text-gray-600">연도</th>
                         <th className="px-2 py-2 text-right font-semibold text-gray-600">발전량(kWh)</th>
-                        <th className="px-2 py-2 text-right font-semibold text-gray-600">총수익(만원)</th>
-                        <th className="px-2 py-2 text-right font-semibold text-gray-600">대출상환(만원)</th>
+                        <th className="px-2 py-2 text-right font-semibold text-gray-600">총매출(만원)</th>
+                        {hasLoan && <th className="px-2 py-2 text-right font-semibold text-gray-600">대출상환(만원)</th>}
                         <th className="px-2 py-2 text-right font-semibold text-gray-600">운영비(만원)</th>
                         <th className="px-2 py-2 text-right font-semibold text-gray-600">순이익(만원)</th>
                         <th className="px-2 py-2 text-right font-semibold text-gray-600">누적(만원)</th>
@@ -556,7 +565,7 @@ export default function RevenueTab() {
                           </td>
                           <td className="px-2 py-1.5 text-right">{row.kwh.toLocaleString()}</td>
                           <td className="px-2 py-1.5 text-right">{row.totalRevenue.toLocaleString()}</td>
-                          <td className="px-2 py-1.5 text-right text-red-600">{row.loanPayment.toLocaleString()}</td>
+                          {hasLoan && <td className="px-2 py-1.5 text-right text-red-600">{row.loanPayment.toLocaleString()}</td>}
                           <td className="px-2 py-1.5 text-right text-orange-600">{row.opCost.toLocaleString()}</td>
                           <td className="px-2 py-1.5 text-right font-medium">{row.netIncome.toLocaleString()}</td>
                           <td className={`px-2 py-1.5 text-right font-bold ${row.cumulative >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -572,14 +581,14 @@ export default function RevenueTab() {
               {activeView === 'compare' && (
                 <div className="space-y-6">
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3">설치 유형별 연간 총수익 비교 ({capacityKw}kW 기준)</h4>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3">설치 유형별 연간 총매출 비교 ({capacityKw}kW 기준)</h4>
                     <ResponsiveContainer width="100%" height={220}>
                       <BarChart data={compareData} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={v => `${v}만`} />
                         <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={60} />
                         <Tooltip formatter={(v) => [`${fmt(Number(v))}만원`]} />
-                        <Bar dataKey="total" name="연간 총수익(만원)" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="total" name="연간 총매출(만원)" fill="#3b82f6" radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>

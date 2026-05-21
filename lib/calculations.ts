@@ -126,7 +126,10 @@ export function calcYearlyTable(
     // 시공사 의도: "1.1억 투자금 만큼이 되는 해 = 5년 차 당시 1.1억 투자 대비 초과 누적이 된다"
     // → equity(자기자본 3,300) 가 아니라 totalCost(총 사업비 11,000)와 비교
     const isBreakeven = cumulative >= totalCost && (rows.length === 0 || rows[rows.length - 1].cumulative < totalCost)
-    const isLoanPaid = year === loanYears + 1
+    // 대출완납 라벨: 실제 대출이 있는 경우(annualPayment > 0)에만 표시.
+    //   policy+commercial 합산 결과로 판정 — 한쪽만 있어도 정상 발화.
+    //   전액 자비(loanRatio=0)이거나 모든 대출 금액이 0인 케이스에서는 비표시.
+    const isLoanPaid = annualPayment > 0 && year === loanYears + 1
 
     rows.push({
       year,
