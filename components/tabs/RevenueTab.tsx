@@ -168,15 +168,38 @@ export default function RevenueTab() {
         : activeView === 'table' ? '20년 상세 테이블' : '유형별 비교'
       const addressLabel = mapResult?.address ?? '주소 미연동'
 
+      // 도면 업로드 모드인 경우 — 업로드 도면 + 워터마크 + 메타 추가 노출
+      const uploadedDrawing = mapResult?.uploadedDrawing
+      const manualMetadata = mapResult?.manualMetadata
+      const isManualUpload = !!uploadedDrawing && !!manualMetadata
+      const drawingSection = isManualUpload && uploadedDrawing && manualMetadata ? `
+        <div style="position:relative;margin-bottom:12px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;background:white">
+          <img src="${uploadedDrawing.dataUrl}"
+            style="display:block;width:100%;height:auto;max-height:380px;object-fit:contain;background:#f8fafc" />
+          <div style="position:absolute;top:8px;right:10px;text-align:right;color:#64748b;opacity:0.6;font-weight:bold;font-size:11px;line-height:1.3">
+            사용자 수동 입력<br/><span style="font-weight:normal;font-size:9px">실측 검증 권장</span>
+          </div>
+          <div style="background:#fafbfc;border-top:1px solid #e2e8f0;padding:6px 10px;font-size:10px;color:#475569;display:flex;gap:14px;flex-wrap:wrap">
+            <span>📐 패널 ${manualMetadata.panelCount.toLocaleString()}장</span>
+            <span>⚡ ${manualMetadata.capacityKw.toFixed(2)} kWp</span>
+            <span>패널 ${manualMetadata.panelType}</span>
+            <span>경사각 ${manualMetadata.tiltAngle}° (사용자 입력)</span>
+            <span>방위각 ${manualMetadata.azimuth}°</span>
+            <span style="margin-left:auto;font-size:9px;color:#94a3b8">${uploadedDrawing.fileName}</span>
+          </div>
+        </div>
+      ` : ''
+
       // 헤더 + 입력 메타 (PDF 단독으로 봐도 맥락 이해 가능하도록)
       offDiv.innerHTML = `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;border-bottom:2px solid #3b82f6;padding-bottom:10px">
           <span style="font-size:22px">📊</span>
           <div style="flex:1">
             <div style="font-size:18px;font-weight:bold;color:#1e293b">수익성 시뮬레이션 결과</div>
-            <div style="font-size:11px;color:#64748b">SolarAdvisor v5.2 — ${today} 생성 · ${viewLabel}</div>
+            <div style="font-size:11px;color:#64748b">SolarAdvisor v5.2 — ${today} 생성 · ${viewLabel}${isManualUpload ? ' · 사용자 도면 업로드' : ''}</div>
           </div>
         </div>
+        ${drawingSection}
         <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:11px">
           <tr style="background:#f8fafc">
             <td style="padding:5px 10px;color:#64748b;width:90px;border:1px solid #e2e8f0">📍 주소</td>
