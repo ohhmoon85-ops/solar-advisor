@@ -15,6 +15,10 @@ const ACCEPT = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png'
 const MAX_SIZE = 10 * 1024 * 1024            // 10MB
 const DEFAULT_PANEL_W = 580                  // 단결정 580W — 검증 비교용 기본 출력
 const MISMATCH_TOLERANCE = 0.10              // ±10% 초과 시 경고
+// 패널 출력(W) 드롭다운 옵션 (2026-05) — 직접 입력 옵션은 'custom'
+const PANEL_W_PRESETS = [580, 600, 620, 650, 680, 700, 710, 720] as const
+const CUSTOM_W_MIN = 200
+const CUSTOM_W_MAX = 800
 
 export interface ManualUploadPayload {
   panelCount: number
@@ -46,7 +50,9 @@ export default function ManualUploadPanel({ onSubmit, defaultJibun }: Props) {
   // ── 폼 상태 ──
   const [panelCount, setPanelCount] = useState<string>('')
   const [capacityKw, setCapacityKw] = useState<string>('')
-  const [panelType, setPanelType] = useState('')
+  // 패널 출력(W) — 드롭다운 선택값(숫자) 또는 'custom' (직접 입력 모드)
+  const [panelWattSelect, setPanelWattSelect] = useState<number | 'custom'>(DEFAULT_PANEL_W)
+  const [panelWattCustom, setPanelWattCustom] = useState<string>('')
   const [tiltAngle, setTiltAngle] = useState<number>(15)
   const [azimuth, setAzimuth] = useState<number>(180)
   const [jibun, setJibun] = useState<string>(defaultJibun ?? '')
@@ -157,7 +163,21 @@ export default function ManualUploadPanel({ onSubmit, defaultJibun }: Props) {
       return
     }
 
+    // 패널 출력 결정 — 드롭다운 또는 직접 입력 (범위 검증)
+    let panelWatt: number = DEFAULT_PANEL_W
+    if (panelWattSelect === 'custom') {
+      const cw = parseFloat(panelWattCustom)
+      if (!cw || cw < CUSTOM_W_MIN || cw > CUSTOM_W_MAX) {
+        setFormError(`패널 출력은 ${CUSTOM_W_MIN}~${CUSTOM_W_MAX}W 범위의 숫자여야 합니다`)
+        return
+      }
+      panelWatt = cw
+    } else {
+      panelWatt = panelWattSelect
+    }
+
     // 패널 수 × 580W vs 발전 용량 ±10% 검증 (사용자 무시 가능)
+    // 검증 기준 출력은 580W 그대로 유지 — 사용자 명시 요청 (이슈 2 미수정)
     const expectedKw = (pc * DEFAULT_PANEL_W) / 1000
     const diffRatio = Math.abs(cap - expectedKw) / expectedKw
     if (diffRatio > MISMATCH_TOLERANCE && !mismatchConfirmed) {
@@ -169,16 +189,17 @@ export default function ManualUploadPanel({ onSubmit, defaultJibun }: Props) {
       return
     }
 
+    // panelType 문자열은 정규화된 W 값으로 생성 (예: "580W") — moduleIndex 매핑에 사용
     onSubmit({
       panelCount: pc,
       capacityKwp: cap,
-      panelType: panelType.trim() || undefined,
+      panelType: `${panelWatt}W`,
       tiltAngle,
       azimuth,
       jibun: jibun.trim() || undefined,
       drawingDataUrl: previewUrl ?? undefined,
     })
-  }, [file, panelCount, capacityKw, panelType, tiltAngle, azimuth, jibun, previewUrl, mismatchConfirmed, onSubmit])
+  }, [file, panelCount, capacityKw, panelWattSelect, panelWattCustom, tiltAngle, azimuth, jibun, previewUrl, mismatchConfirmed, onSubmit])
 
   // 패널 수·용량이 바뀌면 mismatch 확인을 초기화 (다시 경고 받음)
   useEffect(() => { setMismatchConfirmed(false) }, [panelCount, capacityKw])
@@ -274,14 +295,36 @@ export default function ManualUploadPanel({ onSubmit, defaultJibun }: Props) {
           />
         </FormField>
 
-        <FormField label="패널 종류">
-          <input
-            type="text"
-            value={panelType}
-            onChange={e => setPanelType(e.target.value)}
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="예: 단결정 580W (선택)"
-          />
+        <FormField label="패널 출력 (W)">
+          <select
+            value={String(panelWattSelect)}
+            onChange={e => {
+              const v = e.target.value
+              setPanelWattSelect(v === 'custom' ? 'custom' : Number(v))
+            }}
+            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {PANEL_W_PRESETS.map(w => (
+              <option key={w} value={w}>{w}W</option>
+            ))}
+            <option value="custom">직접 입력</option>
+          </select>
+          {panelWattSelect === 'custom' && (
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <input
+                type="number"
+                min={CUSTOM_W_MIN}
+                max={CUSTOM_W_MAX}
+                step={1}
+                inputMode="numeric"
+                value={panelWattCustom}
+                onChange={e => setPanelWattCustom(e.target.value)}
+                placeholder={`${CUSTOM_W_MIN}~${CUSTOM_W_MAX}`}
+                className="w-24 text-sm border border-gray-300 rounded px-2 py-1.5 text-center font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <span className="text-xs text-gray-500">W (범위: {CUSTOM_W_MIN}~{CUSTOM_W_MAX})</span>
+            </div>
+          )}
         </FormField>
 
         <div className="grid grid-cols-2 gap-2">
