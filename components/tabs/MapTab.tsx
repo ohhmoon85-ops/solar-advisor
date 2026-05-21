@@ -1260,6 +1260,7 @@ export default function MapTab() {
   // ── 도면 업로드 모드 — 수익성 탭 연동 (2026-05) ────────────────────
   // 사용자가 입력한 panelCount·capacityKwp를 기존 setMapResult 시그니처로 전달.
   // 패널 종류 텍스트에서 W 추출 가능하면 MODULES 중 가장 가까운 항목으로 moduleIndex 매핑.
+  // 추가: uploadedDrawing + manualMetadata 동시 저장 → 도면 탭·PDF 리포트 연동
   const handleManualUploadSubmit = useCallback((payload: ManualUploadPayload) => {
     const genHours = kierResult?.pvHours ?? GENERATION_HOURS
     const annualKwh = Math.round(payload.capacityKwp * genHours * 365)
@@ -1279,6 +1280,19 @@ export default function MapTab() {
     const addressLabel = payload.jibun
       ?? addresses.filter(Boolean).join(', ')
       ?? '도면 업로드 (지번 미지정)'
+    // 업로드된 도면 → uploadedDrawing 구성 (data URL에서 MIME 추출)
+    let uploadedDrawing: import('@/store/useStore').UploadedDrawing | undefined
+    if (payload.drawingDataUrl) {
+      const mimeMatch = payload.drawingDataUrl.match(/^data:([^;]+);/)
+      const detectedMime = mimeMatch?.[1] as 'image/jpeg' | 'image/png' | 'application/pdf' | undefined
+      uploadedDrawing = {
+        dataUrl: payload.drawingDataUrl,
+        fileName: payload.fileName ?? 'uploaded-drawing',
+        fileType: detectedMime ?? 'image/png',
+        fileSize: payload.fileSize ?? 0,
+        uploadedAt: new Date().toISOString(),
+      }
+    }
     setMapResult({
       panelCount: payload.panelCount,
       capacityKwp: payload.capacityKwp,
@@ -1287,6 +1301,15 @@ export default function MapTab() {
       address: addressLabel,
       tiltAngle: payload.tiltAngle,
       moduleIndex: modIdx,
+      uploadedDrawing,
+      manualMetadata: {
+        panelCount: payload.panelCount,
+        capacityKw: payload.capacityKwp,
+        panelType: payload.panelType ?? `${MODULES[modIdx].watt}W`,
+        tiltAngle: payload.tiltAngle,
+        azimuth: payload.azimuth,
+        address: addressLabel,
+      },
     })
     setActiveTab('revenue')
   }, [kierResult, moduleIndex, addresses, setMapResult, setActiveTab])

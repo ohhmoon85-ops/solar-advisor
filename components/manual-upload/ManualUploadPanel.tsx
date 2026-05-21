@@ -23,7 +23,7 @@ const CUSTOM_W_MAX = 800
 export interface ManualUploadPayload {
   panelCount: number
   capacityKwp: number
-  /** 사용자가 입력한 패널 종류 (예: "단결정 580W") — 선택 */
+  /** 사용자가 입력한 패널 종류 (예: "580W") — 선택 */
   panelType?: string
   tiltAngle: number
   azimuth: number
@@ -31,6 +31,10 @@ export interface ManualUploadPayload {
   jibun?: string
   /** 업로드한 도면의 dataURL — JPG/PNG 원본, PDF는 1페이지를 canvas로 렌더링한 PNG */
   drawingDataUrl?: string
+  /** 원본 파일명 — store/PDF 리포트 표시용 */
+  fileName?: string
+  /** 원본 파일 크기 (bytes) — store/PDF 리포트 표시용 */
+  fileSize?: number
 }
 
 interface Props {
@@ -198,6 +202,8 @@ export default function ManualUploadPanel({ onSubmit, defaultJibun }: Props) {
       azimuth,
       jibun: jibun.trim() || undefined,
       drawingDataUrl: previewUrl ?? undefined,
+      fileName: file.name,
+      fileSize: file.size,
     })
   }, [file, panelCount, capacityKw, panelWattSelect, panelWattCustom, tiltAngle, azimuth, jibun, previewUrl, mismatchConfirmed, onSubmit])
 

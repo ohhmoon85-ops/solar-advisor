@@ -128,8 +128,13 @@ export default function DrawingTab() {
     } catch { /* ignore */ }
   }
 
-  // Empty state
-  if (zones.length === 0) {
+  // 도면 업로드 모드 — uploadedDrawing 있으면 자동 분석 결과 없어도 진입 허용
+  const uploadedDrawing = mapResult?.uploadedDrawing
+  const manualMetadata = mapResult?.manualMetadata
+  const hasManualUpload = !!uploadedDrawing && !!manualMetadata
+
+  // Empty state — 자동 분석 zones도 없고 업로드 도면도 없을 때만
+  if (zones.length === 0 && !hasManualUpload) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
         <div className="text-6xl mb-5">📐</div>
@@ -155,11 +160,14 @@ export default function DrawingTab() {
 
   // ── Coordinate transform helpers (capture drawW/drawH/vb) ─────
   // Collect all points across all zones for unified viewbox
-  const allPts: Pt[] = zones.flatMap(z => [
-    ...z.safeZone.originalPolygon,
-    ...(z.safeZone.safeZonePolygon ?? []),
-    ...z.layout.placements.flatMap(p => [...p.corners]),
-  ])
+  // 도면 업로드 모드: zones 없어도 buildVBox NaN/Infinity 회피용 단위 점 사용
+  const allPts: Pt[] = zones.length > 0
+    ? zones.flatMap(z => [
+        ...z.safeZone.originalPolygon,
+        ...(z.safeZone.safeZonePolygon ?? []),
+        ...z.layout.placements.flatMap(p => [...p.corners]),
+      ])
+    : [{ x: 0, y: 0 }, { x: 10, y: 10 }]
   const vb = buildVBox(allPts, drawW, drawH)
 
   const toPts = (poly: Pt[]): string =>
@@ -260,32 +268,51 @@ export default function DrawingTab() {
   // ── Aggregated data ───────────────────────────────────────────
   const totalPanelCount = zones.reduce((s, z) => s + z.layout.totalCount, 0)
   const totalKwp = zones.reduce((s, z) => s + z.layout.totalKwp, 0)
-  const refZone = zones[0]
+  const refZone: FullAnalysisResult | undefined = zones[0]
   const isMulti = zones.length > 1
 
   // ── Address ───────────────────────────────────────────────────
-  const rawAddress = lastAnalysisAddress ?? mapResult?.address ?? ''
+  const rawAddress = lastAnalysisAddress ?? manualMetadata?.address ?? mapResult?.address ?? ''
   const addrs = rawAddress ? rawAddress.split(',').map(s => s.trim()).filter(Boolean) : []
   const addrPrimary = addrs[0] ?? '주소 정보 없음'
   const addrExtra = addrs.length > 1 ? `외 ${addrs.length - 1}건` : null
 
-  // ── Title block rows (12) ─────────────────────────────────────
+  // ── Title block rows (12) — 자동 분석 / 도면 업로드 분기 ────────
+  // hasManualUpload 인 경우 manualMetadata 우선 사용. 도면번호·축척·작성일·
+  // 작성자·회사명은 양쪽 모드 공통.
   const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
-  const tbRows: { label: string; val: string; sub?: string }[] = [
-    { label: '도면명', val: '태양광 패널 배치도' },
-    { label: '도면번호', val: drawingNumber },
-    { label: '사업명', val: projectName || '—' },
-    { label: '주 소', val: addrPrimary.length > 16 ? addrPrimary.slice(0, 15) + '…' : addrPrimary, sub: addrExtra ?? undefined },
-    { label: '패널 수', val: isMulti ? `${totalPanelCount.toLocaleString()}장 (${zones.length}구역)` : `${totalPanelCount.toLocaleString()}장` },
-    { label: '설비 용량', val: `${totalKwp.toFixed(2)} kWp` },
-    { label: '경사각 (최적)', val: `${refZone.optimalTilt}°` },
-    { label: '방 위 각', val: `${refZone.azimuthDeg}° (정남 기준)` },
-    { label: '배열 간격', val: `${refZone.rowSpacing.toFixed(2)} m` },
-    { label: '축 척', val: `1 : ${scale.toLocaleString()}` },
-    { label: '작 성 자', val: authorName || '—' },
-    { label: '회 사 명', val: companyName || '—' },
-    { label: '작 성 일', val: today },
-  ]
+  const tbRows: { label: string; val: string; sub?: string }[] = hasManualUpload && manualMetadata
+    ? [
+        { label: '도면명', val: '태양광 패널 배치도' },
+        { label: '도면번호', val: drawingNumber },
+        { label: '사업명', val: projectName || '—' },
+        { label: '주 소', val: addrPrimary.length > 16 ? addrPrimary.slice(0, 15) + '…' : addrPrimary, sub: addrExtra ?? undefined },
+        { label: '패널 수', val: `${manualMetadata.panelCount.toLocaleString()}장` },
+        { label: '설비 용량', val: `${manualMetadata.capacityKw.toFixed(2)} kWp` },
+        // 자동 분석은 '경사각 (최적)' — 사용자 직접 입력 시 '(사용자 입력)'으로 변경
+        { label: '경사각 (사용자 입력)', val: `${manualMetadata.tiltAngle}°` },
+        { label: '방 위 각', val: `${manualMetadata.azimuth}° (정남 기준)` },
+        { label: '배열 간격', val: '— (사용자 도면)' },
+        { label: '축 척', val: `1 : ${scale.toLocaleString()}` },
+        { label: '작 성 자', val: authorName || '—' },
+        { label: '회 사 명', val: companyName || '—' },
+        { label: '작 성 일', val: today },
+      ]
+    : [
+        { label: '도면명', val: '태양광 패널 배치도' },
+        { label: '도면번호', val: drawingNumber },
+        { label: '사업명', val: projectName || '—' },
+        { label: '주 소', val: addrPrimary.length > 16 ? addrPrimary.slice(0, 15) + '…' : addrPrimary, sub: addrExtra ?? undefined },
+        { label: '패널 수', val: isMulti ? `${totalPanelCount.toLocaleString()}장 (${zones.length}구역)` : `${totalPanelCount.toLocaleString()}장` },
+        { label: '설비 용량', val: `${totalKwp.toFixed(2)} kWp` },
+        { label: '경사각 (최적)', val: refZone ? `${refZone.optimalTilt}°` : '—' },
+        { label: '방 위 각', val: refZone ? `${refZone.azimuthDeg}° (정남 기준)` : '—' },
+        { label: '배열 간격', val: refZone ? `${refZone.rowSpacing.toFixed(2)} m` : '—' },
+        { label: '축 척', val: `1 : ${scale.toLocaleString()}` },
+        { label: '작 성 자', val: authorName || '—' },
+        { label: '회 사 명', val: companyName || '—' },
+        { label: '작 성 일', val: today },
+      ]
 
   // ── Font sizes (proportional to tbRowH) ──────────────────────
   const fsLabel = Math.max(7, Math.round(tbRowH * 0.19))
@@ -440,14 +467,36 @@ export default function DrawingTab() {
 
             {/* Drawing content */}
             <g clipPath="url(#dc)">
-              {/* 위성지도 배경 — lastGeoOrigin 있을 때만 렌더링 */}
-              {satTilesDT.map((t, i) => (
+              {/* 도면 업로드 모드 — 사용자 업로드 이미지를 도면 영역에 그대로 표시 */}
+              {hasManualUpload && uploadedDrawing && (
+                <>
+                  <image href={uploadedDrawing.dataUrl}
+                    x={0} y={0} width={drawW} height={drawH}
+                    preserveAspectRatio="xMidYMid meet" />
+                  {/* 워터마크 — 우상단, 회색, 투명도 60% */}
+                  <g transform={`translate(${drawW - 12}, 18)`} opacity="0.6">
+                    <text x="0" y="0" textAnchor="end"
+                      fontSize={Math.max(10, Math.round(drawW / 90))}
+                      fontWeight="bold" fill="#64748b" fontFamily={FONT}>
+                      사용자 수동 입력
+                    </text>
+                    <text x="0" y={Math.max(10, Math.round(drawW / 90)) + 4} textAnchor="end"
+                      fontSize={Math.max(8, Math.round(drawW / 120))}
+                      fill="#64748b" fontFamily={FONT}>
+                      실측 검증 권장
+                    </text>
+                  </g>
+                </>
+              )}
+
+              {/* 위성지도 배경 — lastGeoOrigin 있을 때만 렌더링 (자동 분석 전용) */}
+              {!hasManualUpload && satTilesDT.map((t, i) => (
                 <image key={i} href={t.src}
                   x={t.x} y={t.y} width={t.w} height={t.h}
                   preserveAspectRatio="none" opacity="0.85" />
               ))}
 
-              {zones.map((zone, zi) => (
+              {!hasManualUpload && zones.map((zone, zi) => (
                 <g key={zi}>
                   {/* Safe zone — 위성지도 위에서도 경계 식별 가능하도록 반투명 채움 */}
                   {zone.safeZone.safeZonePolygon && zone.safeZone.safeZonePolygon.length >= 3 && (
@@ -485,22 +534,24 @@ export default function DrawingTab() {
                 </g>
               ))}
 
-              {/* N-arrow (top-left) */}
-              <g transform={`translate(${Math.round(drawW * 0.042)}, ${Math.round(drawH * 0.068)})`}>
-                <circle cx="0" cy="0" r="16" fill="white" stroke="#1e293b" strokeWidth="1.5" />
-                <line x1="0" y1="11" x2="0" y2="-7" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
-                <polygon points="0,-13 -4,-4 4,-4" fill="#1e293b" />
-                <text x="0" y="26" textAnchor="middle" fontSize="11" fontWeight="bold" fill="#1e293b" fontFamily={FONT}>N</text>
-              </g>
-
-              {/* Scale bar (bottom-left) */}
-              <g transform={`translate(20, ${drawH - 28})`}>
-                <rect x={0} y={0} width={barPx} height={8} fill="none" stroke="#374151" strokeWidth="1.2" />
-                <rect x={0} y={0} width={barPx / 2} height={8} fill="#374151" />
-                <text x={0} y={20} fontSize="9" fill="#374151" fontFamily={FONT}>0</text>
-                <text x={barPx / 2} y={20} textAnchor="middle" fontSize="9" fill="#374151" fontFamily={FONT}>{barM / 2}m</text>
-                <text x={barPx} y={20} textAnchor="end" fontSize="9" fill="#374151" fontFamily={FONT}>{barM}m</text>
-              </g>
+              {/* N-arrow + Scale bar — 자동 분석 모드 전용 (업로드 도면은 자체 축척 보유) */}
+              {!hasManualUpload && (
+                <>
+                  <g transform={`translate(${Math.round(drawW * 0.042)}, ${Math.round(drawH * 0.068)})`}>
+                    <circle cx="0" cy="0" r="16" fill="white" stroke="#1e293b" strokeWidth="1.5" />
+                    <line x1="0" y1="11" x2="0" y2="-7" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
+                    <polygon points="0,-13 -4,-4 4,-4" fill="#1e293b" />
+                    <text x="0" y="26" textAnchor="middle" fontSize="11" fontWeight="bold" fill="#1e293b" fontFamily={FONT}>N</text>
+                  </g>
+                  <g transform={`translate(20, ${drawH - 28})`}>
+                    <rect x={0} y={0} width={barPx} height={8} fill="none" stroke="#374151" strokeWidth="1.2" />
+                    <rect x={0} y={0} width={barPx / 2} height={8} fill="#374151" />
+                    <text x={0} y={20} fontSize="9" fill="#374151" fontFamily={FONT}>0</text>
+                    <text x={barPx / 2} y={20} textAnchor="middle" fontSize="9" fill="#374151" fontFamily={FONT}>{barM / 2}m</text>
+                    <text x={barPx} y={20} textAnchor="end" fontSize="9" fill="#374151" fontFamily={FONT}>{barM}m</text>
+                  </g>
+                </>
+              )}
             </g>
 
             {/* Drawing area border */}

@@ -34,6 +34,29 @@ function calcGeoPolygonAreaM2(points: GeoPoint[]): number {
   return Math.abs(area / 2)
 }
 
+// 도면 업로드 모드 — 사용자가 업로드한 CAD 도면 데이터 (2026-05 추가)
+export interface UploadedDrawing {
+  /** base64 data URL 또는 blob URL — JPG/PNG는 원본, PDF는 1페이지 canvas 캡처 PNG */
+  dataUrl: string
+  fileName: string
+  fileType: 'image/jpeg' | 'image/png' | 'application/pdf'
+  fileSize: number
+  /** ISO 8601 업로드 시각 */
+  uploadedAt: string
+}
+
+// 도면 업로드 모드 — 사용자 수동 입력 메타정보 (2026-05 추가)
+export interface ManualMetadata {
+  panelCount: number
+  capacityKw: number
+  /** 패널 종류 — 정규화된 W 표기 (예: "580W") */
+  panelType: string
+  tiltAngle: number
+  azimuth: number
+  /** 사용자 입력 지번 또는 좌측 검색 주소 */
+  address: string
+}
+
 interface MapResult {
   panelCount: number
   capacityKwp: number
@@ -42,6 +65,10 @@ interface MapResult {
   address: string
   tiltAngle: number
   moduleIndex: number
+  /** 도면 업로드 모드에서 사용 — 자동 분석 모드일 때는 undefined */
+  uploadedDrawing?: UploadedDrawing
+  /** 도면 업로드 모드에서 사용 — 자동 분석 모드일 때는 undefined */
+  manualMetadata?: ManualMetadata
 }
 
 export interface PriceOverride {
