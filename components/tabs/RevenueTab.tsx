@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer, ReferenceLine,
+  Tooltip, Legend, ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import { useSolarStore } from '@/store/useStore'
 import { INSTALLATION_TYPES, GENERATION_HOURS } from '@/lib/constants'
@@ -71,6 +71,34 @@ export default function RevenueTab() {
   const breakevenYear = useMemo(() => findBreakevenYear(yearlyData, totalCost), [yearlyData, totalCost])
   const roi = useMemo(() => calcROI(yearlyData, equity), [yearlyData, equity])
   const netIncome1st = useMemo(() => yearlyData[0]?.netIncome ?? 0, [yearlyData])
+
+  // Phase 2 작업 D: 정확한 회수 개월 계산 — 차트 말풍선/headline 용
+  //   precise = (BE-1)년 풀 + (totalCost - prevCum) / netThisYear * 12 개월
+  const breakevenPrecise = useMemo(() => {
+    if (breakevenYear <= 0 || yearlyData.length === 0) return null
+    const beIdx = breakevenYear - 1
+    const prevCum = beIdx > 0 ? yearlyData[beIdx - 1].cumulative : 0
+    const netThisYear = yearlyData[beIdx].netIncome
+    if (netThisYear <= 0) return { years: breakevenYear, months: 0 }
+    const fractionOfYear = Math.max(0, Math.min(1, (totalCost - prevCum) / netThisYear))
+    const totalMonthsRaw = (breakevenYear - 1) * 12 + Math.round(fractionOfYear * 12)
+    return { years: Math.floor(totalMonthsRaw / 12), months: totalMonthsRaw % 12 }
+  }, [yearlyData, breakevenYear, totalCost])
+
+  // 회수 후 남은 운영 기간 (20년 기준)
+  const remainingAfterBE = useMemo(() => {
+    if (!breakevenPrecise) return null
+    const beTotalMonths = breakevenPrecise.years * 12 + breakevenPrecise.months
+    const remainMonths = Math.max(0, 20 * 12 - beTotalMonths)
+    return { years: Math.floor(remainMonths / 12), months: remainMonths % 12 }
+  }, [breakevenPrecise])
+
+  // 20년차 누적 - 총사업비 = 순수익 잉여 (억 단위 표시)
+  const surplus20yrEok = useMemo(() => {
+    if (yearlyData.length === 0) return 0
+    const cum20 = yearlyData[yearlyData.length - 1].cumulative
+    return Math.max(0, (cum20 - totalCost) / 10000)
+  }, [yearlyData, totalCost])
 
   // Compare bar chart data
   const compareData = useMemo(() => INSTALLATION_TYPES.map(type => {
@@ -492,6 +520,25 @@ export default function RevenueTab() {
             <div className="p-4">
               {activeView === 'chart' && (
                 <div>
+                  {/* Phase 2 작업 D: 차트 상단 핵심 문구 — 회수 기간/순수익 잉여 동적 표시 */}
+                  {breakevenPrecise && remainingAfterBE ? (
+                    <div className="mb-3 rounded-lg border border-emerald-200 bg-gradient-to-r from-blue-50 via-emerald-50 to-emerald-100 px-3 py-2.5 text-sm leading-relaxed">
+                      <span className="text-gray-700">총 사업비 </span>
+                      <span className="font-bold text-blue-700">{totalCost.toLocaleString()}만원</span>
+                      <span className="text-gray-400 mx-1">→</span>
+                      <span className="font-bold text-emerald-700">{breakevenPrecise.years}년 {breakevenPrecise.months}개월</span>
+                      <span className="text-gray-700"> 후 회수</span>
+                      <span className="text-gray-400 mx-1">→</span>
+                      <span className="text-gray-700">이후 </span>
+                      <span className="font-bold text-emerald-700">{remainingAfterBE.years}년 {remainingAfterBE.months}개월</span>
+                      <span className="text-gray-700"> 순수익만 </span>
+                      <span className="font-bold text-emerald-800">{surplus20yrEok.toFixed(1)}억</span>
+                    </div>
+                  ) : (
+                    <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      ⚠ 20년 내 손익분기 미회수 — 사업비/금리/대출 비율 재검토 필요
+                    </div>
+                  )}
                   <ResponsiveContainer width="100%" height={300}>
                     <LineChart data={yearlyData.map(r => ({ ...r, year: `${r.year}년` }))}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -499,9 +546,38 @@ export default function RevenueTab() {
                       <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${fmt(v)}`} />
                       <Tooltip formatter={(v) => [`${fmt(Number(v))}만원`, '']} />
                       <Legend />
+                      {/* 영역 색상 분기 — 회수 전(회색) / 회수 후(연한 초록) */}
+                      {breakevenYear > 0 && (
+                        <>
+                          <ReferenceArea x1="1년" x2={`${breakevenYear}년`} fill="#9CA3AF" fillOpacity={0.08} />
+                          <ReferenceArea x1={`${breakevenYear}년`} x2="20년" fill="#E8F5E9" fillOpacity={0.5} />
+                        </>
+                      )}
                       {/* Phase U 보완: 손익분기 기준선 = 총 사업비 (이 선을 넘는 해가 투자금 회수 시점) */}
-                      <ReferenceLine y={totalCost} stroke="#ef4444" strokeDasharray="4 4" label={{ value: `총 사업비 회수선 (${fmt(totalCost)}만원)`, position: 'right', fontSize: 10 }} />
-                      <Line type="monotone" dataKey="cumulative" name="누적 손익(만원)" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                      <ReferenceLine y={totalCost} stroke="#ef4444" strokeDasharray="4 4" label={{ value: `총 사업비 회수선 (${fmt(totalCost)}만원)`, position: 'right', fontSize: 10, fill: '#dc2626' }} />
+                      <Line type="monotone" dataKey="cumulative" name="누적 손익(만원)" stroke="#3b82f6" strokeWidth={2}
+                        dot={(props: { cx?: number; cy?: number; payload?: { isBreakeven?: boolean; year?: string } }) => {
+                          const { cx, cy, payload } = props
+                          if (cx == null || cy == null || !payload?.isBreakeven) {
+                            return <g key={`empty-${payload?.year ?? Math.random()}`} />
+                          }
+                          const labelTxt = breakevenPrecise
+                            ? `${breakevenPrecise.years}년 ${breakevenPrecise.months}개월 회수`
+                            : '회수'
+                          return (
+                            <g key={`be-${payload.year}`}>
+                              {/* 말풍선 배경 */}
+                              <rect x={cx - 50} y={cy - 32} width={100} height={18} rx={3}
+                                fill="white" stroke="#2E7D32" strokeWidth={1} opacity={0.95} />
+                              <text x={cx} y={cy - 19} textAnchor="middle" fontSize={11} fill="#2E7D32" fontWeight="bold">
+                                {labelTxt}
+                              </text>
+                              {/* 큰 ★ 마커 (1.5배 강조) */}
+                              <circle cx={cx} cy={cy} r={9} fill="#2E7D32" stroke="white" strokeWidth={2} />
+                              <text x={cx} y={cy + 4} textAnchor="middle" fontSize={12} fill="white" fontWeight="bold">★</text>
+                            </g>
+                          )
+                        }} />
                       <Line type="monotone" dataKey="netIncome" name="연간 순이익(만원)" stroke="#10b981" strokeWidth={1.5} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
@@ -587,6 +663,14 @@ export default function RevenueTab() {
                         ))}
                       </tbody>
                     </table>
+                    <div className="mt-2 text-[11px] text-gray-500 leading-relaxed space-y-0.5">
+                      <div>* 손익분기점 = 누적 순이익이 총 사업비({totalCost.toLocaleString()}만원)를 회수하는 첫 해. 대출 이자는 매년 순이익에서 차감되므로 금리가 높을수록 회수가 늦어집니다.</div>
+                      {policyLoanRatio >= loanRatio && loanRatio > 0 && (
+                        <div className="text-amber-600">
+                          ⚠ 현재 정책금융 비율({policyLoanRatio}%) ≥ 총 대출 비율({loanRatio}%) — 시중은행 대출이 0원이므로 위 시나리오의 금리(2%/4.5%/6%/8%)는 모두 동일 결과를 냅니다.
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* 설치장소별 정책자금 및 특례 (Chapter 8) */}
